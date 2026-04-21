@@ -37,7 +37,7 @@ function AdpRow({ label, adp, posRank, position }) {
   );
 }
 
-export default function PlayerModal({ player, onClose, onUpdate }) {
+export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = {} }) {
   const [draft, setDraft] = useState(null);
   const [saved, setSaved] = useState(false);
   const panelRef = useRef(null);
@@ -50,9 +50,7 @@ export default function PlayerModal({ player, onClose, onUpdate }) {
   }, [player]);
 
   useEffect(() => {
-    const handler = (e) => {
-      if (e.key === 'Escape') onClose();
-    };
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
@@ -75,15 +73,16 @@ export default function PlayerModal({ player, onClose, onUpdate }) {
     onUpdate(player.id, { [key]: newVal });
   };
 
+  const udLabel = sourceStatus?.underdog?.notes === 'FFC'
+    ? 'Underdog (FFC fallback)'
+    : sourceStatus?.underdog?.notes === 'DraftSharks'
+    ? 'Underdog (DraftSharks)'
+    : 'Underdog';
+
   return (
     <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-black/50 z-40 backdrop-blur-sm"
-        onClick={onClose}
-      />
+      <div className="fixed inset-0 bg-black/50 z-40 backdrop-blur-sm" onClick={onClose} />
 
-      {/* Slide-over panel */}
       <div
         ref={panelRef}
         className="fixed right-0 top-0 h-full w-full max-w-md bg-[#1a1d27] border-l border-[#2e3148] z-50 overflow-y-auto flex flex-col shadow-2xl"
@@ -112,20 +111,30 @@ export default function PlayerModal({ player, onClose, onUpdate }) {
         <div className="flex-1 p-5 space-y-5">
           {/* ADP Comparison */}
           <div>
-            <h3 className="text-xs font-semibold text-[#555875] uppercase tracking-wider mb-2">ADP Comparison</h3>
+            <h3 className="text-xs font-semibold text-[#555875] uppercase tracking-wider mb-2">ADP / Value Comparison</h3>
             <table className="w-full">
               <thead>
                 <tr>
                   <th className="text-left text-xs text-[#555875] py-1 pr-4">Source</th>
-                  <th className="text-left text-xs text-[#555875] py-1 pr-4">ADP</th>
+                  <th className="text-left text-xs text-[#555875] py-1 pr-4">ADP / Value</th>
                   <th className="text-left text-xs text-[#555875] py-1">Pos Rank</th>
                 </tr>
               </thead>
               <tbody>
                 <AdpRow label="FantasyPros" adp={player.adp_fantasypros} posRank={player.pos_rank_fantasypros} position={player.position} />
-                <AdpRow label="Underdog" adp={player.adp_underdog} posRank={player.pos_rank_underdog} position={player.position} />
+                <AdpRow label={udLabel} adp={player.adp_underdog} posRank={player.pos_rank_underdog} position={player.position} />
+                <AdpRow label="FFC (½PPR)" adp={player.adp_ffc} posRank={null} position={player.position} />
                 <AdpRow label="Sleeper" adp={player.adp_sleeper} posRank={player.pos_rank_sleeper} position={player.position} />
-                <tr>
+                {(player.ktc_value != null || player.fc_value != null) && (
+                  <tr className="border-b border-[#1e2132]">
+                    <td className="py-1.5 pr-4 text-xs text-[#8b90a8]">Dynasty (KTC / FC)</td>
+                    <td className="py-1.5 pr-4 text-xs font-mono text-[#e8eaf0]">
+                      {player.ktc_value != null ? player.ktc_value.toLocaleString() : '–'} / {player.fc_value != null ? player.fc_value.toFixed(0) : '–'}
+                    </td>
+                    <td className="py-1.5 text-xs text-[#555875]">trade values</td>
+                  </tr>
+                )}
+                <tr className="border-b border-[#1e2132]">
                   <td className="py-1.5 pr-4 text-xs font-semibold text-[#e8eaf0]">Consensus</td>
                   <td className="py-1.5 pr-4 text-xs font-mono font-bold text-[#e8eaf0]">
                     {player.adp_consensus != null ? player.adp_consensus.toFixed(1) : '–'}
@@ -134,6 +143,26 @@ export default function PlayerModal({ player, onClose, onUpdate }) {
                     {player.adp_source_count > 0 ? `${player.adp_source_count} source${player.adp_source_count !== 1 ? 's' : ''}` : ''}
                   </td>
                 </tr>
+                {player.projected_pts != null && (
+                  <tr className="border-b border-[#1e2132]">
+                    <td className="py-1.5 pr-4 text-xs text-[#8b90a8]">Proj Pts (0.5 PPR)</td>
+                    <td className={`py-1.5 pr-4 text-xs font-mono font-bold ${POS_COLORS[player.position] || 'text-[#e8eaf0]'}`}>
+                      {player.projected_pts.toFixed(1)}
+                    </td>
+                    <td className="py-1.5 text-xs text-[#555875]">
+                      {player.proj_pos_rank != null ? `${player.position}${player.proj_pos_rank}` : ''}
+                    </td>
+                  </tr>
+                )}
+                {player.adp_trend != null && Math.abs(player.adp_trend) >= 1.5 && (
+                  <tr>
+                    <td className="py-1.5 pr-4 text-xs text-[#8b90a8]">ADP Trend</td>
+                    <td className={`py-1.5 pr-4 text-xs font-mono font-bold ${player.adp_trend > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {player.adp_trend > 0 ? `▲ Rising ${player.adp_trend.toFixed(1)}` : `▼ Falling ${Math.abs(player.adp_trend).toFixed(1)}`}
+                    </td>
+                    <td className="py-1.5 text-xs text-[#555875]">picks</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -222,9 +251,7 @@ export default function PlayerModal({ player, onClose, onUpdate }) {
           <span className={`text-xs transition-opacity ${saved ? 'text-green-400 opacity-100' : 'opacity-0'}`}>
             Saved ✓
           </span>
-          <button onClick={onClose} className="btn-ghost text-sm">
-            Close
-          </button>
+          <button onClick={onClose} className="btn-ghost text-sm">Close</button>
         </div>
       </div>
     </>

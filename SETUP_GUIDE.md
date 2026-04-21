@@ -35,6 +35,8 @@ Everything you need to go from zero to a live draft board, done entirely from yo
 
 ## Part 3 — Add a Persistent Volume (Critical!)
 
+> ⚠️ **Without this step, all your personal rankings, tiers, notes, and star/flag markings will be permanently deleted every time you deploy a code update.** The app currently writes the database to the container's ephemeral storage, which is wiped on every new deploy. This has not caused data loss yet because no redeployment has occurred — but your first code change will erase everything. Set up the volume now, before entering any personal data.
+
 This is what keeps your personal rankings and notes alive across deploys and sleep cycles. **Do this before your first visit to the app.**
 
 1. In your Railway project, tap on the service tile (it'll be called something like `Nfl_cheatsheet`)
@@ -44,6 +46,8 @@ This is what keeps your personal rankings and notes alive across deploys and sle
 5. Tap **"Create"**
 
 Railway will re-deploy automatically after adding the volume. Wait for the green "Active" status (~1 minute).
+
+Once the volume is attached, the database lives at `/data/draft.db` and survives all future deploys.
 
 ---
 

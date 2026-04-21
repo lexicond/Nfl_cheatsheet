@@ -6,7 +6,6 @@ const DB_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH
   ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'draft.db')
   : path.join(__dirname, '..', 'draft.db');
 
-// Ensure the directory exists
 const dbDir = path.dirname(DB_PATH);
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
@@ -14,7 +13,6 @@ if (!fs.existsSync(dbDir)) {
 
 const db = new Database(DB_PATH);
 
-// Performance tuning
 db.pragma('journal_mode = WAL');
 db.pragma('synchronous = NORMAL');
 
@@ -58,14 +56,33 @@ db.exec(`
   );
 `);
 
-// Ensure all three sources exist in metadata
+// Safe migration: add column only if it doesn't exist
+function addColumnIfMissing(table, column, type) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!cols.find(c => c.name === column)) {
+    db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`).run();
+    console.log(`[db] Migration: added ${table}.${column}`);
+  }
+}
+
+addColumnIfMissing('players', 'projected_pts', 'REAL');
+addColumnIfMissing('players', 'adp_consensus_prev', 'REAL');
+addColumnIfMissing('players', 'adp_ffc', 'REAL');
+addColumnIfMissing('players', 'adp_espn', 'REAL');
+addColumnIfMissing('players', 'ktc_value', 'INTEGER');
+addColumnIfMissing('players', 'fc_value', 'REAL');
+addColumnIfMissing('players', 'sleeper_player_id', 'TEXT');
+addColumnIfMissing('source_metadata', 'notes', 'TEXT');
+
+// Ensure all sources exist in metadata
 const initSource = db.prepare(`
   INSERT OR IGNORE INTO source_metadata (source, status) VALUES (?, 'never')
 `);
-['fantasypros', 'underdog', 'sleeper'].forEach(s => initSource.run(s));
+['fantasypros', 'underdog', 'sleeper', 'ffc', 'ktc', 'fantasycalc'].forEach(s => initSource.run(s));
 
-function computeConsensus(fp, ud, sl) {
-  const vals = [fp, ud, sl].filter(v => v != null && !isNaN(v));
+// Average non-null ADP values from best-ball sources (FP, UD, SL, FFC)
+function computeConsensus(fp, ud, sl, ffc = null) {
+  const vals = [fp, ud, sl, ffc].filter(v => v != null && !isNaN(v));
   if (vals.length === 0) return null;
   return vals.reduce((a, b) => a + b, 0) / vals.length;
 }

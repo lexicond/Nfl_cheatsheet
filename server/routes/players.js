@@ -32,7 +32,6 @@ router.get('/', (req, res) => {
       conditions.push('o.starred = 1');
     }
 
-    // Default: hide drafted (drafted=0 means hide drafted rows)
     if (drafted !== '1') {
       conditions.push('(o.drafted IS NULL OR o.drafted = 0)');
     }
@@ -44,13 +43,16 @@ router.get('/', (req, res) => {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    // Sort logic
     const SORT_COLS = {
-      personal_rank: 'CASE WHEN o.personal_rank IS NULL THEN 1 ELSE 0 END, o.personal_rank',
-      adp_consensus: 'CASE WHEN p.adp_consensus IS NULL THEN 1 ELSE 0 END, p.adp_consensus',
-      adp_underdog: 'CASE WHEN p.adp_underdog IS NULL THEN 1 ELSE 0 END, p.adp_underdog',
+      personal_rank:   'CASE WHEN o.personal_rank IS NULL THEN 1 ELSE 0 END, o.personal_rank',
+      adp_consensus:   'CASE WHEN p.adp_consensus IS NULL THEN 1 ELSE 0 END, p.adp_consensus',
+      adp_underdog:    'CASE WHEN p.adp_underdog IS NULL THEN 1 ELSE 0 END, p.adp_underdog',
       adp_fantasypros: 'CASE WHEN p.adp_fantasypros IS NULL THEN 1 ELSE 0 END, p.adp_fantasypros',
-      adp_sleeper: 'CASE WHEN p.adp_sleeper IS NULL THEN 1 ELSE 0 END, p.adp_sleeper',
+      adp_sleeper:     'CASE WHEN p.adp_sleeper IS NULL THEN 1 ELSE 0 END, p.adp_sleeper',
+      adp_ffc:         'CASE WHEN p.adp_ffc IS NULL THEN 1 ELSE 0 END, p.adp_ffc',
+      projected_pts:   'CASE WHEN p.projected_pts IS NULL THEN 1 ELSE 0 END, p.projected_pts DESC',
+      ktc_value:       'CASE WHEN p.ktc_value IS NULL THEN 1 ELSE 0 END, p.ktc_value DESC',
+      fc_value:        'CASE WHEN p.fc_value IS NULL THEN 1 ELSE 0 END, p.fc_value DESC',
     };
     const orderBy = SORT_COLS[sort] || SORT_COLS.adp_consensus;
 
@@ -64,10 +66,15 @@ router.get('/', (req, res) => {
         p.adp_fantasypros,
         p.adp_underdog,
         p.adp_sleeper,
+        p.adp_ffc,
         p.adp_consensus,
+        p.adp_consensus_prev,
         p.pos_rank_fantasypros,
         p.pos_rank_underdog,
         p.pos_rank_sleeper,
+        p.projected_pts,
+        p.ktc_value,
+        p.fc_value,
         p.last_updated,
         o.personal_rank,
         o.tier,
@@ -77,7 +84,15 @@ router.get('/', (req, res) => {
         o.note_upside,
         o.note_downside,
         o.note_sources,
-        o.note_personal
+        o.note_personal,
+        -- Positional projected rank (global, not filtered subset)
+        CASE WHEN p.projected_pts IS NOT NULL THEN (
+          SELECT COUNT(*) + 1
+          FROM players p2
+          WHERE p2.position = p.position
+            AND p2.projected_pts > p.projected_pts
+            AND p2.projected_pts IS NOT NULL
+        ) ELSE NULL END AS proj_pos_rank
       FROM players p
       LEFT JOIN player_overrides o ON o.player_id = p.id
       ${whereClause}
@@ -86,17 +101,35 @@ router.get('/', (req, res) => {
         ${orderBy}
     `;
 
-    const stmt = db.prepare(query);
-    const rows = stmt.all(params);
+    const rows = db.prepare(query).all(params);
 
-    // Count contributing ADP sources for tooltip
-    const result = rows.map(r => ({
-      ...r,
-      starred: r.starred === 1,
-      flagged: r.flagged === 1,
-      drafted: r.drafted === 1,
-      adp_source_count: [r.adp_fantasypros, r.adp_underdog, r.adp_sleeper].filter(v => v != null).length,
-    }));
+    // Compute adp_trend and value_score (vs positional projected rank) in JS
+    // adp_trend: positive = ADP went down (player rising in draft boards)
+    const result = rows.map((r, idx) => {
+      const adpTrend = (r.adp_consensus_prev != null && r.adp_consensus != null)
+        ? Math.round((r.adp_consensus_prev - r.adp_consensus) * 10) / 10
+        : null;
+
+      // value_score: how many picks later vs projection says (positive = VALUE, draft later than projected)
+      // adp_rank = position in sorted result (idx+1), proj_pos_rank = positional rank by proj_pts
+      // overall_adp_rank is the list position here (within filtered set, imperfect but useful for display)
+      let valueScore = null;
+      if (r.proj_pos_rank != null && r.adp_consensus != null) {
+        // Use overall consensus rank position from the full (unfiltered) list
+        const overallAdpRank = Math.round(r.adp_consensus);
+        valueScore = overallAdpRank - r.proj_pos_rank;
+      }
+
+      return {
+        ...r,
+        starred: r.starred === 1,
+        flagged: r.flagged === 1,
+        drafted: r.drafted === 1,
+        adp_source_count: [r.adp_fantasypros, r.adp_underdog, r.adp_sleeper, r.adp_ffc].filter(v => v != null).length,
+        adp_trend: adpTrend,
+        value_score: valueScore,
+      };
+    });
 
     res.json(result);
   } catch (err) {
@@ -116,7 +149,6 @@ router.patch('/:id/override', (req, res) => {
     for (const key of allowed) {
       if (key in req.body) {
         let val = req.body[key];
-        // Coerce booleans to 0/1 for SQLite
         if (key === 'starred' || key === 'flagged' || key === 'drafted') {
           val = val ? 1 : 0;
         }
@@ -128,7 +160,6 @@ router.patch('/:id/override', (req, res) => {
       return res.status(400).json({ error: 'No valid fields to update' });
     }
 
-    // Check player exists
     const player = db.prepare('SELECT id FROM players WHERE id = ?').get(playerId);
     if (!player) return res.status(404).json({ error: 'Player not found' });
 
@@ -166,14 +197,12 @@ router.post('/:id/reorder', (req, res) => {
     if (!player) return res.status(404).json({ error: 'Player not found' });
 
     const reorder = db.transaction(() => {
-      // Shift all players at >= newRank up by 1
       db.prepare(`
         UPDATE player_overrides
         SET personal_rank = personal_rank + 1
         WHERE personal_rank >= @newRank AND player_id != @playerId
       `).run({ newRank, playerId });
 
-      // Upsert the target player's rank
       const existing = db.prepare('SELECT player_id FROM player_overrides WHERE player_id = ?').get(playerId);
       if (existing) {
         db.prepare(`UPDATE player_overrides SET personal_rank = ?, updated_at = datetime('now') WHERE player_id = ?`)

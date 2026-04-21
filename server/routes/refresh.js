@@ -4,11 +4,23 @@ const { db } = require('../db');
 const { fetchSleeper } = require('../scrapers/sleeper');
 const { fetchFantasyPros } = require('../scrapers/fantasypros');
 const { fetchUnderdog } = require('../scrapers/underdog');
+const { fetchFFC } = require('../scrapers/ffc');
+const { fetchKTC } = require('../scrapers/ktc');
+const { fetchFantasyCalc } = require('../scrapers/fantasycalc');
+
+const SCRAPERS = {
+  fantasypros: fetchFantasyPros,
+  underdog: fetchUnderdog,
+  sleeper: fetchSleeper,
+  ffc: fetchFFC,
+  ktc: fetchKTC,
+  fantasycalc: fetchFantasyCalc,
+};
 
 // POST /api/refresh/:source
 router.post('/:source', async (req, res) => {
   const { source } = req.params;
-  const valid = ['fantasypros', 'underdog', 'sleeper', 'all'];
+  const valid = [...Object.keys(SCRAPERS), 'all'];
 
   if (!valid.includes(source)) {
     return res.status(400).json({ error: `Unknown source. Use: ${valid.join(', ')}` });
@@ -16,30 +28,31 @@ router.post('/:source', async (req, res) => {
 
   try {
     if (source === 'all') {
-      const [fp, ud, sl] = await Promise.allSettled([
-        fetchFantasyPros(),
-        fetchUnderdog(),
-        fetchSleeper(),
-      ]);
+      // Save previous consensus before recompute
+      saveConsensusSnapshot();
 
-      const results = {
-        fantasypros: fp.status === 'fulfilled' ? fp.value : { success: false, error: fp.reason?.message },
-        underdog: ud.status === 'fulfilled' ? ud.value : { success: false, error: ud.reason?.message },
-        sleeper: sl.status === 'fulfilled' ? sl.value : { success: false, error: sl.reason?.message },
-      };
+      const settled = await Promise.allSettled(
+        Object.entries(SCRAPERS).map(([key, fn]) =>
+          fn().then(r => [key, r]).catch(e => [key, { success: false, error: e.message }])
+        )
+      );
 
-      // Recompute all consensus values after all sources updated
+      const results = {};
+      for (const s of settled) {
+        if (s.status === 'fulfilled') {
+          const [key, result] = s.value;
+          results[key] = result;
+        }
+      }
+
       recomputeAllConsensus();
-
       return res.json({ success: true, source: 'all', results, timestamp: new Date().toISOString() });
     }
 
-    let result;
-    if (source === 'fantasypros') result = await fetchFantasyPros();
-    else if (source === 'underdog') result = await fetchUnderdog();
-    else if (source === 'sleeper') result = await fetchSleeper();
-
-    // Recompute consensus after single source update
+    // Single source refresh
+    saveConsensusSnapshot();
+    const fn = SCRAPERS[source];
+    const result = await fn();
     recomputeAllConsensus();
 
     res.json(result);
@@ -61,6 +74,18 @@ router.get('/status', (req, res) => {
   }
 });
 
+// Snapshot current consensus so trend arrows can show movement on next refresh
+function saveConsensusSnapshot() {
+  try {
+    db.prepare(`
+      UPDATE players SET adp_consensus_prev = adp_consensus WHERE adp_consensus IS NOT NULL
+    `).run();
+  } catch (err) {
+    console.error('[saveConsensusSnapshot]', err.message);
+  }
+}
+
+// Recompute consensus from all best-ball ADP sources (FP, UD, SL, FFC)
 function recomputeAllConsensus() {
   try {
     db.prepare(`
@@ -73,6 +98,8 @@ function recomputeAllConsensus() {
           SELECT adp_underdog WHERE adp_underdog IS NOT NULL
           UNION ALL
           SELECT adp_sleeper WHERE adp_sleeper IS NOT NULL
+          UNION ALL
+          SELECT adp_ffc WHERE adp_ffc IS NOT NULL
         )
       )
     `).run();
