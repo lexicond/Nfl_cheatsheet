@@ -192,7 +192,7 @@ export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = 
           {/* Tier selector */}
           <div>
             <h3 className="text-xs font-semibold text-[#555875] uppercase tracking-wider mb-2">Tier</h3>
-            <div className="flex gap-1.5">
+            <div className="flex gap-1.5 items-center">
               {[1, 2, 3, 4, 5].map(t => (
                 <button
                   key={t}
@@ -215,6 +215,11 @@ export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = 
                 </button>
               )}
             </div>
+            {!draft.tier && player.tier_auto && (
+              <div className="text-xs text-[#555875] mt-1.5 italic">
+                Auto-tier: T{player.tier_auto} (ADP-based · click above to override)
+              </div>
+            )}
           </div>
 
           {/* Notes */}

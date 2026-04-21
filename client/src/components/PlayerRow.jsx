@@ -234,13 +234,31 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
 
     tier: (
       <td key="tier" className={`${cellClass} w-14 text-center`}>
-        <button
-          onClick={cycleTier}
-          className={`tier-badge w-7 h-7 text-xs ${player.tier ? `tier-${player.tier}` : 'border-[#2e3148] text-[#555875] hover:text-[#8b90a8]'}`}
-          title="Click to cycle tier"
-        >
-          {player.tier ? `T${player.tier}` : '–'}
-        </button>
+        {player.tier ? (
+          <button
+            onClick={cycleTier}
+            className={`tier-badge w-7 h-7 text-xs tier-${player.tier}`}
+            title="Click to cycle tier"
+          >
+            T{player.tier}
+          </button>
+        ) : player.tier_auto ? (
+          <button
+            onClick={cycleTier}
+            className="tier-badge w-7 h-7 text-xs border-dashed border-[#2e3148] text-[#555875] hover:text-[#8b90a8] opacity-50"
+            title={`Auto-tier T${player.tier_auto} (ADP-based) · click to set`}
+          >
+            T{player.tier_auto}
+          </button>
+        ) : (
+          <button
+            onClick={cycleTier}
+            className="tier-badge w-7 h-7 text-xs border-[#2e3148] text-[#555875] hover:text-[#8b90a8]"
+            title="Click to set tier"
+          >
+            –
+          </button>
+        )}
       </td>
     ),
 

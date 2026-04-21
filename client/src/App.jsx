@@ -40,6 +40,7 @@ export default function App() {
   } = usePlayers();
 
   const [modalPlayer, setModalPlayer] = useState(null);
+  const [filterBarHeight, setFilterBarHeight] = useState(53);
   const filterBarRef = useRef(null);
 
   const openModal = useCallback((player) => setModalPlayer(player), []);
@@ -50,13 +51,12 @@ export default function App() {
     setModalPlayer(prev => prev && prev.id === id ? { ...prev, ...changes } : prev);
   }, [updateOverride]);
 
-  // Measure FilterBar height and write to CSS custom property so the
-  // table sticky header can sit precisely below it at any viewport width.
+  // Measure FilterBar height so the table sticky header sits precisely below it.
   useEffect(() => {
     if (!filterBarRef.current) return;
     const update = () => {
       const h = filterBarRef.current?.getBoundingClientRect().height ?? 53;
-      document.body.style.setProperty('--filter-bar-height', `${Math.ceil(h)}px`);
+      setFilterBarHeight(Math.ceil(h));
     };
     update();
     const ro = new ResizeObserver(update);
@@ -119,6 +119,7 @@ export default function App() {
             leagueType={leagueType}
             enabledSources={enabledSources}
             sourceStatus={sourceStatus}
+            filterBarHeight={filterBarHeight}
           />
         </main>
       )}

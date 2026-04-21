@@ -85,7 +85,8 @@ function saveConsensusSnapshot() {
   }
 }
 
-// Recompute consensus from all best-ball ADP sources (FP, UD, SL, FFC)
+// Recompute consensus from best-ball ADP sources (FP, UD, FFC)
+// Sleeper ADP excluded: search_rank is Superflex-weighted, not 1QB
 function recomputeAllConsensus() {
   try {
     db.prepare(`
@@ -96,8 +97,6 @@ function recomputeAllConsensus() {
           SELECT adp_fantasypros AS v WHERE adp_fantasypros IS NOT NULL
           UNION ALL
           SELECT adp_underdog WHERE adp_underdog IS NOT NULL
-          UNION ALL
-          SELECT adp_sleeper WHERE adp_sleeper IS NOT NULL
           UNION ALL
           SELECT adp_ffc WHERE adp_ffc IS NOT NULL
         )

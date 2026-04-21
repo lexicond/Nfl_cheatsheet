@@ -12,6 +12,7 @@ router.get('/', (req, res) => {
       drafted,
       search,
       sort = 'adp_consensus',
+      leagueType = '1QB',
     } = req.query;
 
     let conditions = [];
@@ -74,6 +75,7 @@ router.get('/', (req, res) => {
         p.pos_rank_sleeper,
         p.projected_pts,
         p.ktc_value,
+        p.ktc_value_sf,
         p.fc_value,
         p.last_updated,
         o.personal_rank,
@@ -103,31 +105,43 @@ router.get('/', (req, res) => {
 
     const rows = db.prepare(query).all(params);
 
-    // Compute adp_trend and value_score (vs positional projected rank) in JS
-    // adp_trend: positive = ADP went down (player rising in draft boards)
-    const result = rows.map((r, idx) => {
+    const useSF = leagueType === '2QB';
+
+    // Compute adp_trend, value_score, tier_auto in JS post-processing
+    const result = rows.map((r) => {
       const adpTrend = (r.adp_consensus_prev != null && r.adp_consensus != null)
         ? Math.round((r.adp_consensus_prev - r.adp_consensus) * 10) / 10
         : null;
 
-      // value_score: how many picks later vs projection says (positive = VALUE, draft later than projected)
-      // adp_rank = position in sorted result (idx+1), proj_pos_rank = positional rank by proj_pts
-      // overall_adp_rank is the list position here (within filtered set, imperfect but useful for display)
       let valueScore = null;
       if (r.proj_pos_rank != null && r.adp_consensus != null) {
-        // Use overall consensus rank position from the full (unfiltered) list
-        const overallAdpRank = Math.round(r.adp_consensus);
-        valueScore = overallAdpRank - r.proj_pos_rank;
+        valueScore = Math.round(r.adp_consensus) - r.proj_pos_rank;
       }
+
+      // Auto-tier from consensus ADP ranges (shown muted when user hasn't set explicit tier)
+      let tier_auto = null;
+      if (r.adp_consensus != null) {
+        const adp = r.adp_consensus;
+        if (adp <= 5) tier_auto = 1;
+        else if (adp <= 18) tier_auto = 2;
+        else if (adp <= 36) tier_auto = 3;
+        else if (adp <= 72) tier_auto = 4;
+        else tier_auto = 5;
+      }
+
+      // For Superflex leagues, use the SF-specific KTC value if available
+      const ktcValue = useSF ? (r.ktc_value_sf || r.ktc_value) : r.ktc_value;
 
       return {
         ...r,
         starred: r.starred === 1,
         flagged: r.flagged === 1,
         drafted: r.drafted === 1,
-        adp_source_count: [r.adp_fantasypros, r.adp_underdog, r.adp_sleeper, r.adp_ffc].filter(v => v != null).length,
+        ktc_value: ktcValue,
+        adp_source_count: [r.adp_fantasypros, r.adp_underdog, r.adp_ffc].filter(v => v != null).length,
         adp_trend: adpTrend,
         value_score: valueScore,
+        tier_auto,
       };
     });
 

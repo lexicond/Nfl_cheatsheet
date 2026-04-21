@@ -1,5 +1,6 @@
 const axios = require('axios');
 const { db } = require('../db');
+const { normalizeName } = require('../utils/normalize');
 
 const POS_ALLOW = new Set(['QB', 'RB', 'WR', 'TE']);
 function parsePosition(raw) {
@@ -16,6 +17,7 @@ const ENDPOINTS = [
 
 async function fetchFantasyCalc() {
   const getPlayer = db.prepare(`SELECT id FROM players WHERE name = ? AND position = ?`);
+  const getByNorm = db.prepare(`SELECT id FROM players WHERE name_normalized = ? AND position = ?`);
   const updateFC = db.prepare(`
     UPDATE players SET fc_value = @fc_value, last_updated = @last_updated WHERE id = @id
   `);
@@ -70,7 +72,8 @@ async function fetchFantasyCalc() {
   const run = db.transaction(() => {
     let count = 0;
     for (const p of players) {
-      const existing = getPlayer.get(p.name, p.position);
+      let existing = getPlayer.get(p.name, p.position);
+      if (!existing) existing = getByNorm.get(normalizeName(p.name), p.position);
       if (existing) {
         updateFC.run({ id: existing.id, fc_value: p.value, last_updated: now });
         count++;

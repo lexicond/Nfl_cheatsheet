@@ -7,9 +7,10 @@ function parsePosition(raw) {
 }
 
 // Fantasy Football Calculator — free public JSON API, no auth required
+// Try current year (2026) first, then fall back to prior years
 const ENDPOINTS = [
+  'https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=2026&position=all',
   'https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=2025&position=all',
-  'https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=2025&position=all&teams=12',
   'https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=2024&position=all',
 ];
 
@@ -83,7 +84,6 @@ async function fetchFFC() {
       const consensus = computeConsensus(
         existing?.adp_fantasypros ?? null,
         existing?.adp_underdog ?? null,
-        existing?.adp_sleeper ?? null,
         p.adp,
       );
       const row = {

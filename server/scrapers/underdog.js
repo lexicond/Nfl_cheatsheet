@@ -1,7 +1,7 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { db, computeConsensus } = require('../db');
-const { normalizeName } = require('./sleeper');
+const { normalizeName } = require('../utils/normalize');
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -24,8 +24,20 @@ function parsePosition(raw) {
   return POS_MAP[(raw || '').toUpperCase().trim()] || (raw || '').toUpperCase().trim() || null;
 }
 
+// DraftSharks ADP is "round.pick" e.g. "1.10" = round 1 pick 10 = overall pick 10 in 12-team
+function parseRoundPick(str, teamSize = 12) {
+  const parts = String(str).split('.');
+  if (parts.length !== 2) return null;
+  const round = parseInt(parts[0], 10);
+  const pick = parseInt(parts[1], 10);
+  if (isNaN(round) || isNaN(pick) || round < 1 || pick < 1) return null;
+  return (round - 1) * teamSize + pick;
+}
+
 async function fetchUnderdog() {
   const getPlayer = db.prepare(`SELECT * FROM players WHERE name = ? AND position = ?`);
+  const getByNorm = db.prepare(`SELECT * FROM players WHERE name_normalized = ? AND position = ?`);
+  const getByLastName = db.prepare(`SELECT * FROM players WHERE name LIKE ? AND position = ?`);
   const upsertPlayer = db.prepare(`
     INSERT INTO players (name, position, nfl_team, adp_underdog, pos_rank_underdog, adp_consensus, last_updated)
     VALUES (@name, @position, @nfl_team, @adp_underdog, @pos_rank_underdog, @adp_consensus, @last_updated)
@@ -82,23 +94,39 @@ async function fetchUnderdog() {
         timeout: 20000,
       });
       const $ = cheerio.load(res.data);
-      // DraftSharks renders a table with columns: Rank, Player, Team, Position, ADP, ...
-      $('table tbody tr').each((i, row) => {
+      // DraftSharks table: Rank | Player (link, may be abbreviated) | ADP (round.pick) | Position | Team
+      $('table tbody tr').each((_, row) => {
         const cells = $(row).find('td');
-        if (cells.length < 4) return;
-        const nameEl = $(cells[1]).find('a').first();
-        const name = (nameEl.text() || $(cells[1]).text()).trim();
-        const team = $(cells[2]).text().trim();
-        const pos = $(cells[3]).text().trim();
-        // ADP may be in column 4 or 5 depending on table layout
-        const adpText = $(cells[4]).text().trim() || $(cells[3]).text().trim();
-        const adp = parseFloat(adpText);
-        if (name && !isNaN(adp) && adp > 0) {
+        if (cells.length < 3) return;
+
+        // Player name: first anchor in the row
+        const nameEl = $(row).find('a').first();
+        const rawName = (nameEl.text() || $(cells[1]).text()).trim();
+
+        // Find ADP (round.pick pattern), position, team by scanning all cells
+        let adpOverall = null;
+        let pos = null;
+        let team = null;
+        cells.each((_, cell) => {
+          const txt = $(cell).text().trim();
+          const adpMatch = txt.match(/^(\d{1,2})\.(\d{1,2})$/);
+          if (adpMatch && adpOverall == null) {
+            adpOverall = parseRoundPick(txt);
+          }
+          if (/^(QB|RB|WR|TE|K|DEF|DST)$/i.test(txt) && pos == null) {
+            pos = txt.toUpperCase();
+          }
+          if (/^[A-Z]{2,3}$/.test(txt) && txt !== pos && !['NFL', 'ADP', 'RK'].includes(txt) && team == null) {
+            team = txt;
+          }
+        });
+
+        if (rawName && adpOverall != null && pos) {
           players.push({
-            name,
+            name: rawName,
             position: parsePosition(pos),
-            nfl_team: team.toUpperCase() || null,
-            adp,
+            nfl_team: team || null,
+            adp: adpOverall,
           });
         }
       });
@@ -143,6 +171,7 @@ async function fetchUnderdog() {
   // 4. Final fallback: FFC half-PPR ADP
   if (players.length === 0) {
     const ffcUrls = [
+      'https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=2026&position=all',
       'https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=2025&position=all',
       'https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=2024&position=all',
     ];
@@ -184,6 +213,21 @@ async function fetchUnderdog() {
   const posRankCounters = {};
   const now = new Date().toISOString();
 
+  function findExisting(name, pos) {
+    let row = getPlayer.get(name, pos);
+    if (row) return row;
+    const norm = normalizeName(name);
+    row = getByNorm.get(norm, pos);
+    if (row) return row;
+    // Abbreviated name: extract last name for LIKE query
+    const parts = norm.split(' ');
+    if (parts.length >= 2) {
+      const last = parts[parts.length - 1];
+      row = getByLastName.get(`% ${last[0].toUpperCase()}${last.slice(1)}%`, pos);
+    }
+    return row || null;
+  }
+
   const runUpserts = db.transaction(() => {
     let count = 0;
     players.forEach(p => {
@@ -191,16 +235,15 @@ async function fetchUnderdog() {
       posRankCounters[p.position] = (posRankCounters[p.position] || 0) + 1;
       const posRank = posRankCounters[p.position];
 
-      const existing = getPlayer.get(p.name, p.position);
+      const existing = findExisting(p.name, p.position);
       const adpConsensus = computeConsensus(
         existing ? existing.adp_fantasypros : null,
         p.adp,
-        existing ? existing.adp_sleeper : null,
         existing ? existing.adp_ffc : null,
       );
 
       const row = {
-        name: p.name,
+        name: existing ? existing.name : p.name,
         position: p.position,
         nfl_team: p.nfl_team || null,
         adp_underdog: p.adp,

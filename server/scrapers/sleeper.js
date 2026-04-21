@@ -1,16 +1,8 @@
 const axios = require('axios');
 const { db, computeConsensus } = require('../db');
+const { normalizeName } = require('../utils/normalize');
 
 const POSITIONS = new Set(['QB', 'RB', 'WR', 'TE']);
-
-function normalizeName(name) {
-  return name
-    .toLowerCase()
-    .replace(/\s+(jr\.?|sr\.?|ii|iii|iv|v)$/i, '')
-    .replace(/[^a-z\s]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 // Compute 0.5 PPR points from projection stats
 function calcHalfPprPts(proj) {
@@ -134,7 +126,6 @@ async function fetchSleeper() {
         const adpConsensus = computeConsensus(
           existing ? existing.adp_fantasypros : null,
           existing ? existing.adp_underdog : null,
-          adpSleeper,
           existing ? existing.adp_ffc : null,
         );
 
@@ -207,4 +198,4 @@ async function fetchSleeper() {
   }
 }
 
-module.exports = { fetchSleeper, normalizeName };
+module.exports = { fetchSleeper, normalizeName }; // normalizeName re-exported for backward compat

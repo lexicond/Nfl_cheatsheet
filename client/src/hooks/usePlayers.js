@@ -50,7 +50,8 @@ export function usePlayers() {
   const setLeagueType = useCallback((lt) => {
     setLeagueTypeRaw(lt);
     localStorage.setItem('draft_league_type', JSON.stringify(lt));
-  }, []);
+    fetchPlayers(filters, lt);
+  }, [fetchPlayers, filters]);
   const setEnabledSources = useCallback((es) => {
     setEnabledSourcesRaw(es);
     localStorage.setItem('draft_enabled_sources', JSON.stringify(es));
@@ -68,7 +69,7 @@ export function usePlayers() {
     } catch {}
   }, []);
 
-  const fetchPlayers = useCallback(async (currentFilters = filters) => {
+  const fetchPlayers = useCallback(async (currentFilters = filters, currentLeagueType = leagueType) => {
     setLoading(true);
     setError(null);
     try {
@@ -79,6 +80,7 @@ export function usePlayers() {
       if (!currentFilters.hideDrafted) params.set('drafted', '1');
       if (currentFilters.search) params.set('search', currentFilters.search);
       if (currentFilters.sort) params.set('sort', currentFilters.sort);
+      params.set('leagueType', currentLeagueType);
 
       const res = await fetch(`/api/players?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -102,13 +104,13 @@ export function usePlayers() {
       const next = { ...prev, [key]: value };
       if (key === 'search') {
         clearTimeout(searchDebounceRef.current);
-        searchDebounceRef.current = setTimeout(() => fetchPlayers(next), 300);
+        searchDebounceRef.current = setTimeout(() => fetchPlayers(next, leagueType), 300);
       } else {
-        fetchPlayers(next);
+        fetchPlayers(next, leagueType);
       }
       return next;
     });
-  }, [fetchPlayers]);
+  }, [fetchPlayers, leagueType]);
 
   const updateOverride = useCallback(async (id, changes) => {
     setPlayers(prev => prev.map(p => p.id === id ? { ...p, ...changes } : p));

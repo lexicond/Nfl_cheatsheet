@@ -1,6 +1,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const { normalizeName } = require('./utils/normalize');
 
 const DB_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH
   ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'draft.db')
@@ -70,9 +71,23 @@ addColumnIfMissing('players', 'adp_consensus_prev', 'REAL');
 addColumnIfMissing('players', 'adp_ffc', 'REAL');
 addColumnIfMissing('players', 'adp_espn', 'REAL');
 addColumnIfMissing('players', 'ktc_value', 'INTEGER');
+addColumnIfMissing('players', 'ktc_value_sf', 'INTEGER');
 addColumnIfMissing('players', 'fc_value', 'REAL');
 addColumnIfMissing('players', 'sleeper_player_id', 'TEXT');
+addColumnIfMissing('players', 'name_normalized', 'TEXT');
 addColumnIfMissing('source_metadata', 'notes', 'TEXT');
+
+// Populate name_normalized for any rows missing it
+(function populateNameNormalized() {
+  const missing = db.prepare('SELECT id, name FROM players WHERE name_normalized IS NULL').all();
+  if (missing.length === 0) return;
+  const upd = db.prepare('UPDATE players SET name_normalized = ? WHERE id = ?');
+  const run = db.transaction(() => {
+    for (const p of missing) upd.run(normalizeName(p.name), p.id);
+  });
+  run();
+  console.log(`[db] Populated name_normalized for ${missing.length} players`);
+})();
 
 // Ensure all sources exist in metadata
 const initSource = db.prepare(`
@@ -80,9 +95,10 @@ const initSource = db.prepare(`
 `);
 ['fantasypros', 'underdog', 'sleeper', 'ffc', 'ktc', 'fantasycalc'].forEach(s => initSource.run(s));
 
-// Average non-null ADP values from best-ball sources (FP, UD, SL, FFC)
-function computeConsensus(fp, ud, sl, ffc = null) {
-  const vals = [fp, ud, sl, ffc].filter(v => v != null && !isNaN(v));
+// Average non-null ADP values from best-ball sources (FP, UD, FFC)
+// Sleeper ADP is excluded because search_rank is Superflex-weighted
+function computeConsensus(fp, ud, ffc = null) {
+  const vals = [fp, ud, ffc].filter(v => v != null && !isNaN(v));
   if (vals.length === 0) return null;
   return vals.reduce((a, b) => a + b, 0) / vals.length;
 }
