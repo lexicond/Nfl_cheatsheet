@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #0f1117;
+    color: #e8eaf0;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #1a1d27;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #2e3148;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3e4460;
+  }
+}
+
+@layer components {
+  .pos-badge {
+    @apply inline-flex items-center justify-center rounded px-1.5 py-0.5 text-xs font-bold font-mono;
+  }
+  .pos-QB { @apply bg-amber-500/20 text-amber-400 border border-amber-500/30; }
+  .pos-RB { @apply bg-green-500/20 text-green-400 border border-green-500/30; }
+  .pos-WR { @apply bg-blue-500/20 text-blue-400 border border-blue-500/30; }
+  .pos-TE { @apply bg-orange-500/20 text-orange-400 border border-orange-500/30; }
+  .pos-K, .pos-DEF { @apply bg-gray-500/20 text-gray-400 border border-gray-500/30; }
+
+  .tier-badge {
+    @apply inline-flex items-center justify-center rounded px-1.5 py-0.5 text-xs font-bold font-mono cursor-pointer;
+  }
+  .tier-1 { @apply bg-amber-500/20 text-amber-400 border border-amber-500/40; }
+  .tier-2 { @apply bg-blue-500/20 text-blue-400 border border-blue-500/40; }
+  .tier-3 { @apply bg-green-500/20 text-green-400 border border-green-500/40; }
+  .tier-4 { @apply bg-purple-500/20 text-purple-400 border border-purple-500/40; }
+  .tier-5 { @apply bg-gray-500/20 text-gray-400 border border-gray-500/40; }
+
+  .btn {
+    @apply px-3 py-1.5 rounded text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-[#0f1117];
+  }
+  .btn-primary {
+    @apply btn bg-blue-600 hover:bg-blue-500 text-white focus:ring-blue-500;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent hover:bg-white/5 text-[#8b90a8] hover:text-[#e8eaf0] border border-[#2e3148];
+  }
+  .btn-danger {
+    @apply btn bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30;
+  }
+
+  .input {
+    @apply bg-[#1a1d27] border border-[#2e3148] rounded px-3 py-1.5 text-sm text-[#e8eaf0] placeholder-[#555875] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 transition-colors;
+  }
+
+  .table-row-base {
+    @apply border-b border-[#1e2132] transition-colors duration-100;
+  }
+  .table-row-base:hover {
+    @apply bg-white/[0.03];
+  }
+}
