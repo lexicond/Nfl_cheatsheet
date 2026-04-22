@@ -43,20 +43,6 @@ export function usePlayers() {
 
   const searchDebounceRef = useRef(null);
 
-  const setFormat = useCallback((f) => {
-    setFormatRaw(f);
-    localStorage.setItem('draft_format', JSON.stringify(f));
-  }, []);
-  const setLeagueType = useCallback((lt) => {
-    setLeagueTypeRaw(lt);
-    localStorage.setItem('draft_league_type', JSON.stringify(lt));
-    fetchPlayers(filters, lt);
-  }, [fetchPlayers, filters]);
-  const setEnabledSources = useCallback((es) => {
-    setEnabledSourcesRaw(es);
-    localStorage.setItem('draft_enabled_sources', JSON.stringify(es));
-  }, []);
-
   const showToast = useCallback((message, type = 'info') => {
     setToast({ message, type, id: Date.now() });
     setTimeout(() => setToast(null), 3500);
@@ -69,6 +55,7 @@ export function usePlayers() {
     } catch {}
   }, []);
 
+  // fetchPlayers must be defined before any hook that lists it as a dependency
   const fetchPlayers = useCallback(async (currentFilters = filters, currentLeagueType = leagueType) => {
     setLoading(true);
     setError(null);
@@ -92,7 +79,23 @@ export function usePlayers() {
     } finally {
       setLoading(false);
     }
-  }, [filters, showToast]);
+  }, [filters, leagueType, showToast]);
+
+  const setFormat = useCallback((f) => {
+    setFormatRaw(f);
+    localStorage.setItem('draft_format', JSON.stringify(f));
+  }, []);
+
+  const setLeagueType = useCallback((lt) => {
+    setLeagueTypeRaw(lt);
+    localStorage.setItem('draft_league_type', JSON.stringify(lt));
+    fetchPlayers(filters, lt);
+  }, [fetchPlayers, filters]);
+
+  const setEnabledSources = useCallback((es) => {
+    setEnabledSourcesRaw(es);
+    localStorage.setItem('draft_enabled_sources', JSON.stringify(es));
+  }, []);
 
   useEffect(() => {
     fetchPlayers();
