@@ -85,8 +85,9 @@ function saveConsensusSnapshot() {
   }
 }
 
-// Recompute consensus from best-ball ADP sources (FP, UD, FFC)
-// Sleeper ADP excluded: search_rank is Superflex-weighted, not 1QB
+// Recompute the stored adp_consensus as BB 1QB baseline (FP BB + UD BB + SL BB)
+// This is used only for trend arrows (adp_consensus_prev comparison).
+// Per-request consensus for all formats is computed in JS in routes/players.js.
 function recomputeAllConsensus() {
   try {
     db.prepare(`
@@ -98,7 +99,7 @@ function recomputeAllConsensus() {
           UNION ALL
           SELECT adp_underdog WHERE adp_underdog IS NOT NULL
           UNION ALL
-          SELECT adp_ffc WHERE adp_ffc IS NOT NULL
+          SELECT adp_sl_bb WHERE adp_sl_bb IS NOT NULL
         )
       )
     `).run();

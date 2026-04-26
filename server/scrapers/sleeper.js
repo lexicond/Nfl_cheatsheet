@@ -1,11 +1,18 @@
 const axios = require('axios');
-const { db, computeConsensus } = require('../db');
+const { db } = require('../db');
 const { normalizeName } = require('../utils/normalize');
+const { scrapeDraftSharks } = require('../utils/draftsharks');
 
 const POSITIONS = new Set(['QB', 'RB', 'WR', 'TE']);
 const SEASON_YEAR = new Date().getFullYear();
 
-// Compute 0.5 PPR points from projection stats
+// DraftSharks Sleeper ADP by format
+const SLEEPER_ADP_SOURCES = [
+  { url: 'https://www.draftsharks.com/adp/best-ball/half-ppr/sleeper/12', column: 'adp_sl_bb', label: 'BB' },
+  { url: 'https://www.draftsharks.com/adp/half-ppr/sleeper/12', column: 'adp_sl_rd', label: 'RD' },
+  { url: 'https://www.draftsharks.com/adp/dynasty/superflex/ppr/sleeper/12', column: 'adp_sl_sf', label: 'SF/DYN' },
+];
+
 function calcHalfPprPts(proj) {
   if (!proj) return null;
   const pts =
@@ -55,35 +62,24 @@ function buildNoteString(proj, position) {
 
 async function fetchSleeper() {
   const upsertPlayer = db.prepare(`
-    INSERT INTO players (name, position, nfl_team, adp_sleeper, pos_rank_sleeper, adp_consensus, sleeper_player_id, last_updated)
-    VALUES (@name, @position, @nfl_team, @adp_sleeper, @pos_rank_sleeper, @adp_consensus, @sleeper_player_id, @last_updated)
+    INSERT INTO players (name, position, nfl_team, sleeper_player_id, last_updated)
+    VALUES (@name, @position, @nfl_team, @sleeper_player_id, @last_updated)
     ON CONFLICT DO NOTHING
   `);
-
   const updatePlayer = db.prepare(`
     UPDATE players
     SET nfl_team = COALESCE(@nfl_team, nfl_team),
-        adp_sleeper = @adp_sleeper,
-        pos_rank_sleeper = @pos_rank_sleeper,
-        adp_consensus = @adp_consensus,
         sleeper_player_id = @sleeper_player_id,
         last_updated = @last_updated
     WHERE id = @id
   `);
-
   const getPlayer = db.prepare(`SELECT * FROM players WHERE name = ? AND position = ?`);
   const getByNorm = db.prepare(`SELECT * FROM players WHERE name_normalized = ? AND position = ?`);
   const getPlayerById = db.prepare(`SELECT id, position FROM players WHERE sleeper_player_id = ?`);
-
   const updateMeta = db.prepare(`
     UPDATE source_metadata SET last_fetched = ?, player_count = ?, status = ? WHERE source = 'sleeper'
   `);
-
-  const updateProjectedPts = db.prepare(`
-    UPDATE players SET projected_pts = ? WHERE id = ?
-  `);
-
-  // Auto-populate note_sources for players with no notes yet
+  const updateProjectedPts = db.prepare(`UPDATE players SET projected_pts = ? WHERE id = ?`);
   const upsertNote = db.prepare(`
     INSERT INTO player_overrides (player_id, note_sources, updated_at)
     VALUES (@player_id, @note_sources, datetime('now'))
@@ -104,8 +100,11 @@ async function fetchSleeper() {
     return getPlayer.get(name, pos) || getByNorm.get(normalizeName(name), pos) || null;
   }
 
+  // --- Part 1: Sleeper API for player metadata + projections ---
+  let playerCount = 0;
+  const now = new Date().toISOString();
+
   try {
-    // 1. Fetch all NFL players
     const playersRes = await axios.get('https://api.sleeper.app/v1/players/nfl', { timeout: 30000 });
     const allPlayers = playersRes.data;
 
@@ -113,32 +112,15 @@ async function fetchSleeper() {
       .filter(p => p.active && POSITIONS.has(p.position) && p.search_rank && p.search_rank < 9999)
       .sort((a, b) => (a.search_rank || 9999) - (b.search_rank || 9999));
 
-    const posRankCounters = {};
-    const now = new Date().toISOString();
-
     const runUpserts = db.transaction(() => {
       let count = 0;
       for (const p of skillPlayers) {
         const name = [p.first_name, p.last_name].filter(Boolean).join(' ');
         if (!name.trim()) continue;
 
-        const position = p.position;
-        posRankCounters[position] = (posRankCounters[position] || 0) + 1;
-        const posRank = posRankCounters[position];
-        const adpSleeper = p.search_rank < 9999 ? p.search_rank : null;
-
-        const existing = findExisting(name, position);
-        const adpConsensus = computeConsensus(
-          existing ? existing.adp_fantasypros : null,
-          existing ? existing.adp_underdog : null,
-          existing ? existing.adp_ffc : null,
-        );
-
+        const existing = findExisting(name, p.position);
         const row = {
           nfl_team: p.team || null,
-          adp_sleeper: adpSleeper,
-          pos_rank_sleeper: posRank,
-          adp_consensus: adpConsensus,
           sleeper_player_id: p.player_id || null,
           last_updated: now,
         };
@@ -146,18 +128,18 @@ async function fetchSleeper() {
         if (existing) {
           updatePlayer.run({ ...row, id: existing.id });
         } else {
-          upsertPlayer.run({ ...row, name, position });
+          upsertPlayer.run({ ...row, name, position: p.position });
         }
         count++;
       }
       return count;
     });
 
-    const count = runUpserts();
-    updateMeta.run(now, count, 'ok');
-    console.log(`[Sleeper] Updated ${count} players`);
+    playerCount = runUpserts();
+    updateMeta.run(now, playerCount, 'ok');
+    console.log(`[Sleeper] Updated ${playerCount} players (metadata)`);
 
-    // 2. Fetch season projections (best-effort, don't fail main result)
+    // Projections (best-effort)
     try {
       const projRes = await axios.get(`https://api.sleeper.app/v1/projections/nfl/${SEASON_YEAR}/0`, { timeout: 30000 });
       const projData = projRes.data;
@@ -169,36 +151,70 @@ async function fetchSleeper() {
             if (!proj) continue;
             const playerRow = getPlayerById.get(playerId);
             if (!playerRow) continue;
-
             const pts = proj.pts_half_ppr != null
               ? Math.round(proj.pts_half_ppr * 10) / 10
               : calcHalfPprPts(proj);
-
             if (pts != null && pts > 0) {
               updateProjectedPts.run(pts, playerRow.id);
-              // Auto-populate note_sources with projection summary if empty
-              const noteStr = buildNoteString(proj, playerRow.position);
-              upsertNote.run({ player_id: playerRow.id, note_sources: noteStr });
+              upsertNote.run({ player_id: playerRow.id, note_sources: buildNoteString(proj, playerRow.position) });
               projCount++;
             }
           }
           return projCount;
         });
-
-        const projCount = updateProj();
-        console.log(`[Sleeper] Updated ${projCount} players with projections`);
+        console.log(`[Sleeper] Updated ${updateProj()} players with projections`);
       }
     } catch (projErr) {
       console.warn('[Sleeper] Projections fetch failed (non-fatal):', projErr.message);
     }
-
-    return { success: true, players_updated: count, source: 'sleeper', timestamp: now };
   } catch (err) {
-    const now = new Date().toISOString();
     updateMeta.run(now, 0, 'error');
-    console.error('[Sleeper] Fetch failed:', err.message);
+    console.error('[Sleeper] API fetch failed:', err.message);
     return { success: false, error: err.message, source: 'sleeper', timestamp: now };
   }
+
+  // --- Part 2: DraftSharks ADP by format (parallel) ---
+  const adpResults = await Promise.allSettled(
+    SLEEPER_ADP_SOURCES.map(src => scrapeDraftSharks(src.url).then(players => ({ ...src, players })))
+  );
+
+  const adpCounts = {};
+  for (const result of adpResults) {
+    if (result.status === 'rejected') {
+      console.warn(`[Sleeper] ADP scrape failed: ${result.reason?.message}`);
+      continue;
+    }
+    const { column, label, players } = result.value;
+    if (players.length === 0) {
+      console.warn(`[Sleeper] ADP: no players from DraftSharks ${label}`);
+      continue;
+    }
+
+    const updateAdp = db.prepare(`UPDATE players SET ${column} = @adp, last_updated = @ts WHERE id = @id`);
+    const run = db.transaction(() => {
+      let count = 0;
+      players.forEach(p => {
+        if (!p.name || !p.position) return;
+        const existing = findExisting(p.name, p.position);
+        if (!existing) return;
+        updateAdp.run({ adp: p.adp, ts: now, id: existing.id });
+        count++;
+      });
+      return count;
+    });
+
+    const count = run();
+    adpCounts[label] = count;
+    console.log(`[Sleeper] ADP ${label}: ${count} players → ${column}`);
+  }
+
+  return {
+    success: true,
+    players_updated: playerCount,
+    adp_counts: adpCounts,
+    source: 'sleeper',
+    timestamp: now,
+  };
 }
 
-module.exports = { fetchSleeper, normalizeName }; // normalizeName re-exported for backward compat
+module.exports = { fetchSleeper, normalizeName };

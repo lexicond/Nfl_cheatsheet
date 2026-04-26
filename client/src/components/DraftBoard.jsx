@@ -18,15 +18,16 @@ import PlayerRow from './PlayerRow';
 // Pixel widths for each column key — used in colgroup for both header and body tables
 const COL_PX = {
   drag: 24, my_rank: 56, rank: 40, name: 200, pos: 56, bye: 40,
-  adp_fp: 64, adp_ud: 64, adp_ffc: 64, adp_sl: 64,
+  adp_fp: 64, adp_ud: 64, adp_ffc: 64,
+  adp_fp_rd: 64, adp_fp_sf: 64,
+  adp_sl_bb: 64, adp_sl_rd: 64, adp_sl_sf: 64,
   consensus: 80, projected_pts: 64, pos_rank: 64,
   ktc_value: 80, fc_value: 80,
   tier: 56, flags: 64, status: 96, notes: 48,
 };
 
-function buildColumns(format, leagueType, enabledSources, sourceStatus) {
-  const udNote = sourceStatus?.underdog?.notes;
-  const udLabel = udNote === 'FFC' ? 'FFC*' : udNote === 'DraftSharks' ? 'DS' : 'UD';
+function buildColumns(format, leagueType, enabledSources) {
+  const isSF = leagueType === '2QB';
 
   const base = [
     { label: '', key: 'drag' },
@@ -49,18 +50,43 @@ function buildColumns(format, leagueType, enabledSources, sourceStatus) {
       ...base,
       ...(enabledSources.ktc !== false ? [{ label: 'KTC', key: 'ktc_value' }] : []),
       ...(enabledSources.fantasycalc !== false ? [{ label: 'FC', key: 'fc_value' }] : []),
-      ...(enabledSources.sleeper !== false ? [{ label: 'Proj', key: 'projected_pts' }] : []),
+      { label: 'Proj', key: 'projected_pts' },
       { label: 'Pos Rk', key: 'pos_rank' },
       ...tail,
     ];
   }
 
+  // ADP source columns vary by format + leagueType
+  let sourceCols = [];
+  if (format === 'BB' && !isSF) {
+    sourceCols = [
+      ...(enabledSources.fantasypros !== false ? [{ label: 'FP', key: 'adp_fp' }] : []),
+      ...(enabledSources.underdog !== false ? [{ label: 'UD', key: 'adp_ud' }] : []),
+      ...(enabledSources.sleeper !== false ? [{ label: 'SL', key: 'adp_sl_bb' }] : []),
+    ];
+  } else if (format === 'BB' && isSF) {
+    sourceCols = [
+      ...(enabledSources.fantasypros !== false ? [{ label: 'FP SF', key: 'adp_fp_sf' }] : []),
+      ...(enabledSources.underdog !== false ? [{ label: 'UD', key: 'adp_ud' }] : []),
+      ...(enabledSources.sleeper !== false ? [{ label: 'SL SF', key: 'adp_sl_sf' }] : []),
+    ];
+  } else if (format === 'RD' && !isSF) {
+    sourceCols = [
+      ...(enabledSources.fantasypros !== false ? [{ label: 'FP', key: 'adp_fp_rd' }] : []),
+      ...(enabledSources.ffc !== false ? [{ label: 'FFC', key: 'adp_ffc' }] : []),
+      ...(enabledSources.sleeper !== false ? [{ label: 'SL', key: 'adp_sl_rd' }] : []),
+    ];
+  } else {
+    // RD SF
+    sourceCols = [
+      ...(enabledSources.fantasypros !== false ? [{ label: 'FP SF', key: 'adp_fp_sf' }] : []),
+      ...(enabledSources.sleeper !== false ? [{ label: 'SL SF', key: 'adp_sl_sf' }] : []),
+    ];
+  }
+
   return [
     ...base,
-    ...(enabledSources.fantasypros !== false ? [{ label: 'FP', key: 'adp_fp' }] : []),
-    ...(enabledSources.underdog !== false ? [{ label: udLabel, key: 'adp_ud' }] : []),
-    ...(enabledSources.ffc !== false ? [{ label: 'FFC', key: 'adp_ffc' }] : []),
-    ...(enabledSources.sleeper !== false ? [{ label: 'SL', key: 'adp_sl' }] : []),
+    ...sourceCols,
     { label: 'Consensus', key: 'consensus' },
     { label: 'Proj', key: 'projected_pts' },
     { label: 'Pos Rk', key: 'pos_rank' },
@@ -114,7 +140,7 @@ export default function DraftBoard({
   const headerScrollRef = useRef(null);
   const bodyScrollRef = useRef(null);
 
-  const columns = buildColumns(format, leagueType, enabledSources, sourceStatus);
+  const columns = buildColumns(format, leagueType, enabledSources);
   const totalWidth = columns.reduce((sum, col) => sum + (COL_PX[col.key] || 64), 0);
 
   const sensors = useSensors(

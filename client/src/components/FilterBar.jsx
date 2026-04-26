@@ -4,17 +4,45 @@ import SourceRefreshPanel from './SourceRefreshPanel';
 const POSITIONS = ['QB', 'RB', 'WR', 'TE'];
 const TIERS = [1, 2, 3, 4, 5];
 
-const SORT_OPTIONS = [
-  { value: 'adp_consensus', label: 'Consensus ADP' },
+const SORT_COMMON = [
   { value: 'personal_rank', label: 'My Rank' },
   { value: 'projected_pts', label: 'Proj Pts' },
-  { value: 'adp_underdog', label: 'Underdog ADP' },
-  { value: 'adp_fantasypros', label: 'FantasyPros ADP' },
-  { value: 'adp_ffc', label: 'FFC ADP' },
-  { value: 'adp_sleeper', label: 'Sleeper ADP' },
-  { value: 'ktc_value', label: 'KTC Value' },
-  { value: 'fc_value', label: 'FC Value' },
 ];
+
+function getSortOptions(format, leagueType) {
+  if (format === 'DYN') return [
+    { value: 'ktc_value', label: 'KTC Value' },
+    { value: 'fc_value', label: 'FC Value' },
+    ...SORT_COMMON,
+  ];
+  if (format === 'BB' && leagueType === '1QB') return [
+    { value: 'adp_sl_bb', label: 'Sleeper ADP' },
+    { value: 'adp_consensus', label: 'Consensus' },
+    { value: 'adp_fantasypros', label: 'FantasyPros' },
+    { value: 'adp_underdog', label: 'Underdog' },
+    ...SORT_COMMON,
+  ];
+  if (format === 'BB') return [ // SF/2QB
+    { value: 'adp_sl_sf', label: 'Sleeper SF' },
+    { value: 'adp_consensus', label: 'Consensus' },
+    { value: 'adp_fp_sf', label: 'FantasyPros SF' },
+    { value: 'adp_underdog', label: 'Underdog' },
+    ...SORT_COMMON,
+  ];
+  if (format === 'RD' && leagueType === '1QB') return [
+    { value: 'adp_sl_rd', label: 'Sleeper ADP' },
+    { value: 'adp_consensus', label: 'Consensus' },
+    { value: 'adp_fp_rd', label: 'FantasyPros' },
+    { value: 'adp_ffc', label: 'FFC ADP' },
+    ...SORT_COMMON,
+  ];
+  return [ // RD SF/2QB
+    { value: 'adp_sl_sf', label: 'Sleeper SF' },
+    { value: 'adp_consensus', label: 'Consensus' },
+    { value: 'adp_fp_sf', label: 'FantasyPros SF' },
+    ...SORT_COMMON,
+  ];
+}
 
 const POS_COLORS = {
   QB: 'border-amber-500/50 text-amber-400 bg-amber-500/10',
@@ -170,7 +198,8 @@ const FilterBar = forwardRef(function FilterBar(
           onChange={e => setFilter('sort', e.target.value)}
           className="input text-xs py-1 pr-6"
         >
-          {SORT_OPTIONS.map(o => (
+          <option value="">Default</option>
+          {getSortOptions(format, leagueType).map(o => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>

@@ -169,6 +169,18 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
       </td>
     ),
 
+    adp_fp_rd: (
+      <td key="adp_fp_rd" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
+        <AdpCell value={player.adp_fp_rd} />
+      </td>
+    ),
+
+    adp_fp_sf: (
+      <td key="adp_fp_sf" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
+        <AdpCell value={player.adp_fp_sf} />
+      </td>
+    ),
+
     adp_ud: (
       <td key="adp_ud" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
         <AdpCell value={player.adp_underdog} />
@@ -181,9 +193,21 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
       </td>
     ),
 
-    adp_sl: (
-      <td key="adp_sl" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-        <AdpCell value={player.adp_sleeper} />
+    adp_sl_bb: (
+      <td key="adp_sl_bb" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
+        <AdpCell value={player.adp_sl_bb} />
+      </td>
+    ),
+
+    adp_sl_rd: (
+      <td key="adp_sl_rd" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
+        <AdpCell value={player.adp_sl_rd} />
+      </td>
+    ),
+
+    adp_sl_sf: (
+      <td key="adp_sl_sf" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
+        <AdpCell value={player.adp_sl_sf} />
       </td>
     ),
 

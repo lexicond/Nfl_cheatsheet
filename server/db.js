@@ -77,6 +77,11 @@ addColumnIfMissing('players', 'fc_value_sf', 'REAL');
 addColumnIfMissing('players', 'sleeper_player_id', 'TEXT');
 addColumnIfMissing('players', 'name_normalized', 'TEXT');
 addColumnIfMissing('source_metadata', 'notes', 'TEXT');
+addColumnIfMissing('players', 'adp_fp_rd', 'REAL');
+addColumnIfMissing('players', 'adp_fp_sf', 'REAL');
+addColumnIfMissing('players', 'adp_sl_bb', 'REAL');
+addColumnIfMissing('players', 'adp_sl_rd', 'REAL');
+addColumnIfMissing('players', 'adp_sl_sf', 'REAL');
 
 // Populate name_normalized for any rows missing it
 (function populateNameNormalized() {

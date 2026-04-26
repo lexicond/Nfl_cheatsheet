@@ -2,6 +2,25 @@ const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
 
+// Compute consensus ADP for the given format+leagueType from format-specific source columns
+function computeFormatConsensus(r, format, leagueType) {
+  const vals = [];
+  if (format === 'DYN') return null;
+  const isSF = leagueType === '2QB';
+  if (format === 'BB' && !isSF) {
+    [r.adp_fantasypros, r.adp_underdog, r.adp_sl_bb].forEach(v => v != null && vals.push(v));
+  } else if (format === 'BB' && isSF) {
+    [r.adp_fp_sf, r.adp_underdog, r.adp_sl_sf].forEach(v => v != null && vals.push(v));
+  } else if (format === 'RD' && !isSF) {
+    [r.adp_fp_rd, r.adp_ffc, r.adp_sl_rd].forEach(v => v != null && vals.push(v));
+  } else {
+    // RD SF
+    [r.adp_fp_sf, r.adp_sl_sf].forEach(v => v != null && vals.push(v));
+  }
+  if (!vals.length) return null;
+  return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length * 10) / 10;
+}
+
 // GET /api/players
 router.get('/', (req, res) => {
   try {
@@ -11,8 +30,9 @@ router.get('/', (req, res) => {
       starred,
       drafted,
       search,
-      sort = 'adp_consensus',
+      sort,
       leagueType = '1QB',
+      format = 'BB',
     } = req.query;
 
     let conditions = [];
@@ -45,17 +65,25 @@ router.get('/', (req, res) => {
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const SORT_COLS = {
-      personal_rank:   'CASE WHEN o.personal_rank IS NULL THEN 1 ELSE 0 END, o.personal_rank',
-      adp_consensus:   'CASE WHEN p.adp_consensus IS NULL THEN 1 ELSE 0 END, p.adp_consensus',
-      adp_underdog:    'CASE WHEN p.adp_underdog IS NULL THEN 1 ELSE 0 END, p.adp_underdog',
-      adp_fantasypros: 'CASE WHEN p.adp_fantasypros IS NULL THEN 1 ELSE 0 END, p.adp_fantasypros',
-      adp_sleeper:     'CASE WHEN p.adp_sleeper IS NULL THEN 1 ELSE 0 END, p.adp_sleeper',
-      adp_ffc:         'CASE WHEN p.adp_ffc IS NULL THEN 1 ELSE 0 END, p.adp_ffc',
-      projected_pts:   'CASE WHEN p.projected_pts IS NULL THEN 1 ELSE 0 END, p.projected_pts DESC',
-      ktc_value:       'CASE WHEN p.ktc_value IS NULL THEN 1 ELSE 0 END, p.ktc_value DESC',
-      fc_value:        'CASE WHEN p.fc_value IS NULL THEN 1 ELSE 0 END, p.fc_value DESC',
+      personal_rank:    'CASE WHEN o.personal_rank IS NULL THEN 1 ELSE 0 END, o.personal_rank',
+      adp_consensus:    'CASE WHEN p.adp_consensus IS NULL THEN 1 ELSE 0 END, p.adp_consensus',
+      adp_fantasypros:  'CASE WHEN p.adp_fantasypros IS NULL THEN 1 ELSE 0 END, p.adp_fantasypros',
+      adp_underdog:     'CASE WHEN p.adp_underdog IS NULL THEN 1 ELSE 0 END, p.adp_underdog',
+      adp_ffc:          'CASE WHEN p.adp_ffc IS NULL THEN 1 ELSE 0 END, p.adp_ffc',
+      adp_fp_rd:        'CASE WHEN p.adp_fp_rd IS NULL THEN 1 ELSE 0 END, p.adp_fp_rd',
+      adp_fp_sf:        'CASE WHEN p.adp_fp_sf IS NULL THEN 1 ELSE 0 END, p.adp_fp_sf',
+      adp_sl_bb:        'CASE WHEN p.adp_sl_bb IS NULL THEN 1 ELSE 0 END, p.adp_sl_bb',
+      adp_sl_rd:        'CASE WHEN p.adp_sl_rd IS NULL THEN 1 ELSE 0 END, p.adp_sl_rd',
+      adp_sl_sf:        'CASE WHEN p.adp_sl_sf IS NULL THEN 1 ELSE 0 END, p.adp_sl_sf',
+      projected_pts:    'CASE WHEN p.projected_pts IS NULL THEN 1 ELSE 0 END, p.projected_pts DESC',
+      ktc_value:        'CASE WHEN p.ktc_value IS NULL THEN 1 ELSE 0 END, p.ktc_value DESC',
+      fc_value:         'CASE WHEN p.fc_value IS NULL THEN 1 ELSE 0 END, p.fc_value DESC',
     };
-    const orderBy = SORT_COLS[sort] || SORT_COLS.adp_consensus;
+
+    // Format-aware default sort (Sleeper for each ADP format, KTC for dynasty)
+    const FORMAT_DEFAULT_SORT = { BB: 'adp_sl_bb', RD: 'adp_sl_rd', DYN: 'ktc_value' };
+    const effectiveSort = sort || FORMAT_DEFAULT_SORT[format] || 'adp_sl_bb';
+    const orderBy = SORT_COLS[effectiveSort] || SORT_COLS.adp_sl_bb;
 
     const query = `
       SELECT
@@ -66,13 +94,16 @@ router.get('/', (req, res) => {
         p.bye_week,
         p.adp_fantasypros,
         p.adp_underdog,
-        p.adp_sleeper,
         p.adp_ffc,
+        p.adp_fp_rd,
+        p.adp_fp_sf,
+        p.adp_sl_bb,
+        p.adp_sl_rd,
+        p.adp_sl_sf,
         p.adp_consensus,
         p.adp_consensus_prev,
         p.pos_rank_fantasypros,
         p.pos_rank_underdog,
-        p.pos_rank_sleeper,
         p.projected_pts,
         p.ktc_value,
         p.ktc_value_sf,
@@ -88,7 +119,6 @@ router.get('/', (req, res) => {
         o.note_downside,
         o.note_sources,
         o.note_personal,
-        -- Positional projected rank (global, not filtered subset)
         CASE WHEN p.projected_pts IS NOT NULL THEN (
           SELECT COUNT(*) + 1
           FROM players p2
@@ -105,24 +135,24 @@ router.get('/', (req, res) => {
     `;
 
     const rows = db.prepare(query).all(params);
-
     const useSF = leagueType === '2QB';
 
-    // Compute adp_trend, value_score, tier_auto in JS post-processing
     const result = rows.map((r) => {
+      const formatConsensus = computeFormatConsensus(r, format, leagueType);
+
+      // Trend uses stored adp_consensus (BB 1QB baseline) for movement indication
       const adpTrend = (r.adp_consensus_prev != null && r.adp_consensus != null)
         ? Math.round((r.adp_consensus_prev - r.adp_consensus) * 10) / 10
         : null;
 
       let valueScore = null;
-      if (r.proj_pos_rank != null && r.adp_consensus != null) {
-        valueScore = Math.round(r.adp_consensus) - r.proj_pos_rank;
+      if (r.proj_pos_rank != null && formatConsensus != null) {
+        valueScore = Math.round(formatConsensus) - r.proj_pos_rank;
       }
 
-      // Auto-tier from consensus ADP ranges (shown muted when user hasn't set explicit tier)
       let tier_auto = null;
-      if (r.adp_consensus != null) {
-        const adp = r.adp_consensus;
+      if (formatConsensus != null) {
+        const adp = formatConsensus;
         if (adp <= 5) tier_auto = 1;
         else if (adp <= 18) tier_auto = 2;
         else if (adp <= 36) tier_auto = 3;
@@ -130,9 +160,20 @@ router.get('/', (req, res) => {
         else tier_auto = 5;
       }
 
-      // For Superflex leagues, use the SF-specific values if available
       const ktcValue = useSF ? (r.ktc_value_sf || r.ktc_value) : r.ktc_value;
       const fcValue  = useSF ? (r.fc_value_sf  || r.fc_value)  : r.fc_value;
+
+      // Count sources that contributed to this format's consensus
+      const sourcesUsed = [];
+      if (format === 'BB' && !useSF) {
+        [r.adp_fantasypros, r.adp_underdog, r.adp_sl_bb].forEach(v => v != null && sourcesUsed.push(v));
+      } else if (format === 'BB' && useSF) {
+        [r.adp_fp_sf, r.adp_underdog, r.adp_sl_sf].forEach(v => v != null && sourcesUsed.push(v));
+      } else if (format === 'RD' && !useSF) {
+        [r.adp_fp_rd, r.adp_ffc, r.adp_sl_rd].forEach(v => v != null && sourcesUsed.push(v));
+      } else if (format === 'RD' && useSF) {
+        [r.adp_fp_sf, r.adp_sl_sf].forEach(v => v != null && sourcesUsed.push(v));
+      }
 
       return {
         ...r,
@@ -141,7 +182,8 @@ router.get('/', (req, res) => {
         drafted: r.drafted === 1,
         ktc_value: ktcValue,
         fc_value: fcValue,
-        adp_source_count: [r.adp_fantasypros, r.adp_underdog, r.adp_ffc].filter(v => v != null).length,
+        adp_consensus: formatConsensus,
+        adp_source_count: sourcesUsed.length,
         adp_trend: adpTrend,
         value_score: valueScore,
         tier_auto,

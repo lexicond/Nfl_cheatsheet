@@ -6,7 +6,7 @@ const DEFAULT_FILTERS = {
   starred: false,
   hideDrafted: true,
   search: '',
-  sort: 'adp_consensus',
+  sort: '',  // empty = server picks format-aware default (Sleeper for BB/RD, KTC for DYN)
 };
 
 const DEFAULT_ENABLED_SOURCES = {
@@ -56,7 +56,7 @@ export function usePlayers() {
   }, []);
 
   // fetchPlayers must be defined before any hook that lists it as a dependency
-  const fetchPlayers = useCallback(async (currentFilters = filters, currentLeagueType = leagueType) => {
+  const fetchPlayers = useCallback(async (currentFilters = filters, currentLeagueType = leagueType, currentFormat = format) => {
     setLoading(true);
     setError(null);
     try {
@@ -68,6 +68,7 @@ export function usePlayers() {
       if (currentFilters.search) params.set('search', currentFilters.search);
       if (currentFilters.sort) params.set('sort', currentFilters.sort);
       params.set('leagueType', currentLeagueType);
+      params.set('format', currentFormat);
 
       const res = await fetch(`/api/players?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -79,18 +80,24 @@ export function usePlayers() {
     } finally {
       setLoading(false);
     }
-  }, [filters, leagueType, showToast]);
+  }, [filters, leagueType, format, showToast]);
 
   const setFormat = useCallback((f) => {
     setFormatRaw(f);
     localStorage.setItem('draft_format', JSON.stringify(f));
-  }, []);
+    // Reset sort so server picks the format-appropriate default (Sleeper/KTC)
+    setFiltersState(prev => {
+      const next = { ...prev, sort: '' };
+      fetchPlayers(next, leagueType, f);
+      return next;
+    });
+  }, [fetchPlayers, leagueType]);
 
   const setLeagueType = useCallback((lt) => {
     setLeagueTypeRaw(lt);
     localStorage.setItem('draft_league_type', JSON.stringify(lt));
-    fetchPlayers(filters, lt);
-  }, [fetchPlayers, filters]);
+    fetchPlayers(filters, lt, format);
+  }, [fetchPlayers, filters, format]);
 
   const setEnabledSources = useCallback((es) => {
     setEnabledSourcesRaw(es);
