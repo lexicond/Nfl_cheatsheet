@@ -37,7 +37,8 @@ function parseRoundPick(str, teamSize = 12) {
 async function fetchUnderdog() {
   const getPlayer = db.prepare(`SELECT * FROM players WHERE name = ? AND position = ?`);
   const getByNorm = db.prepare(`SELECT * FROM players WHERE name_normalized = ? AND position = ?`);
-  const getByLastName = db.prepare(`SELECT * FROM players WHERE name LIKE ? AND position = ?`);
+  // Query name_normalized with a lowercase last-name pattern for abbreviated names (e.g. "B. Robinson")
+  const getByLastName = db.prepare(`SELECT * FROM players WHERE name_normalized LIKE ? AND position = ?`);
   const upsertPlayer = db.prepare(`
     INSERT INTO players (name, position, nfl_team, adp_underdog, pos_rank_underdog, adp_consensus, last_updated)
     VALUES (@name, @position, @nfl_team, @adp_underdog, @pos_rank_underdog, @adp_consensus, @last_updated)
@@ -50,7 +51,7 @@ async function fetchUnderdog() {
         pos_rank_underdog = @pos_rank_underdog,
         adp_consensus = @adp_consensus,
         last_updated = @last_updated
-    WHERE name = @name AND position = @position
+    WHERE id = @id
   `);
   const updateMeta = db.prepare(`
     UPDATE source_metadata SET last_fetched = ?, player_count = ?, status = ?, notes = ? WHERE source = 'underdog'
@@ -170,10 +171,11 @@ async function fetchUnderdog() {
 
   // 4. Final fallback: FFC half-PPR ADP
   if (players.length === 0) {
+    const SEASON_YEAR = new Date().getFullYear();
     const ffcUrls = [
-      'https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=2026&position=all',
-      'https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=2025&position=all',
-      'https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=2024&position=all',
+      `https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=${SEASON_YEAR}&position=all`,
+      `https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=${SEASON_YEAR - 1}&position=all`,
+      `https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=${SEASON_YEAR - 2}&position=all`,
     ];
     for (const url of ffcUrls) {
       try {
@@ -219,11 +221,12 @@ async function fetchUnderdog() {
     const norm = normalizeName(name);
     row = getByNorm.get(norm, pos);
     if (row) return row;
-    // Abbreviated name: extract last name for LIKE query
+    // Abbreviated name: extract last name for LIKE query against name_normalized (lowercase)
     const parts = norm.split(' ');
     if (parts.length >= 2) {
-      const last = parts[parts.length - 1];
-      row = getByLastName.get(`% ${last[0].toUpperCase()}${last.slice(1)}%`, pos);
+      const lastName = parts[parts.length - 1]; // already lowercase
+      row = getByLastName.get(`% ${lastName}`, pos);
+      if (!row) row = getByLastName.get(`${lastName} %`, pos);
     }
     return row || null;
   }
@@ -243,8 +246,6 @@ async function fetchUnderdog() {
       );
 
       const row = {
-        name: existing ? existing.name : p.name,
-        position: p.position,
         nfl_team: p.nfl_team || null,
         adp_underdog: p.adp,
         pos_rank_underdog: posRank,
@@ -253,9 +254,9 @@ async function fetchUnderdog() {
       };
 
       if (existing) {
-        updatePlayer.run(row);
+        updatePlayer.run({ ...row, id: existing.id });
       } else {
-        upsertPlayer.run(row);
+        upsertPlayer.run({ ...row, name: p.name, position: p.position });
       }
       count++;
     });

@@ -73,6 +73,7 @@ addColumnIfMissing('players', 'adp_espn', 'REAL');
 addColumnIfMissing('players', 'ktc_value', 'INTEGER');
 addColumnIfMissing('players', 'ktc_value_sf', 'INTEGER');
 addColumnIfMissing('players', 'fc_value', 'REAL');
+addColumnIfMissing('players', 'fc_value_sf', 'REAL');
 addColumnIfMissing('players', 'sleeper_player_id', 'TEXT');
 addColumnIfMissing('players', 'name_normalized', 'TEXT');
 addColumnIfMissing('source_metadata', 'notes', 'TEXT');

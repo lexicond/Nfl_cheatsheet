@@ -3,6 +3,7 @@ const { db, computeConsensus } = require('../db');
 const { normalizeName } = require('../utils/normalize');
 
 const POSITIONS = new Set(['QB', 'RB', 'WR', 'TE']);
+const SEASON_YEAR = new Date().getFullYear();
 
 // Compute 0.5 PPR points from projection stats
 function calcHalfPprPts(proj) {
@@ -23,7 +24,6 @@ function buildNoteString(proj, position) {
   const pts = proj.pts_half_ppr != null
     ? proj.pts_half_ppr.toFixed(1)
     : (calcHalfPprPts(proj) || '?');
-  const year = 2025;
 
   if (position === 'QB') {
     const passYd = Math.round(proj.pass_yd || 0).toLocaleString();
@@ -31,7 +31,7 @@ function buildNoteString(proj, position) {
     const passInt = Math.round(proj.pass_int || 0);
     const rushYd = Math.round(proj.rush_yd || 0);
     const rushTd = Math.round(proj.rush_td || 0);
-    return `Sleeper ${year}: ${pts}pts | Pass: ${passYd}yds/${passTd}td/${passInt}int | Rush: ${rushYd}yds/${rushTd}td`;
+    return `Sleeper ${SEASON_YEAR}: ${pts}pts | Pass: ${passYd}yds/${passTd}td/${passInt}int | Rush: ${rushYd}yds/${rushTd}td`;
   }
   if (position === 'RB') {
     const rushAtt = Math.round(proj.rush_att || 0);
@@ -40,7 +40,7 @@ function buildNoteString(proj, position) {
     const rec = Math.round(proj.rec || 0);
     const recYd = Math.round(proj.rec_yd || 0).toLocaleString();
     const recTd = Math.round(proj.rec_td || 0);
-    return `Sleeper ${year}: ${pts}pts | Rush: ${rushAtt}att/${rushYd}yds/${rushTd}td | Rec: ${rec}/${recYd}yds/${recTd}td`;
+    return `Sleeper ${SEASON_YEAR}: ${pts}pts | Rush: ${rushAtt}att/${rushYd}yds/${rushTd}td | Rec: ${rec}/${recYd}yds/${recTd}td`;
   }
   if (position === 'WR' || position === 'TE') {
     const rec = Math.round(proj.rec || 0);
@@ -48,9 +48,9 @@ function buildNoteString(proj, position) {
     const recTd = Math.round(proj.rec_td || 0);
     const rushYd = Math.round(proj.rush_yd || 0);
     const rushSuffix = rushYd > 15 ? ` | Rush: ${rushYd}yds` : '';
-    return `Sleeper ${year}: ${pts}pts | Rec: ${rec}/${recYd}yds/${recTd}td${rushSuffix}`;
+    return `Sleeper ${SEASON_YEAR}: ${pts}pts | Rec: ${rec}/${recYd}yds/${recTd}td${rushSuffix}`;
   }
-  return `Sleeper ${year}: ${pts}pts`;
+  return `Sleeper ${SEASON_YEAR}: ${pts}pts`;
 }
 
 async function fetchSleeper() {
@@ -68,10 +68,11 @@ async function fetchSleeper() {
         adp_consensus = @adp_consensus,
         sleeper_player_id = @sleeper_player_id,
         last_updated = @last_updated
-    WHERE name = @name AND position = @position
+    WHERE id = @id
   `);
 
   const getPlayer = db.prepare(`SELECT * FROM players WHERE name = ? AND position = ?`);
+  const getByNorm = db.prepare(`SELECT * FROM players WHERE name_normalized = ? AND position = ?`);
   const getPlayerById = db.prepare(`SELECT id, position FROM players WHERE sleeper_player_id = ?`);
 
   const updateMeta = db.prepare(`
@@ -99,6 +100,10 @@ async function fetchSleeper() {
       END
   `);
 
+  function findExisting(name, pos) {
+    return getPlayer.get(name, pos) || getByNorm.get(normalizeName(name), pos) || null;
+  }
+
   try {
     // 1. Fetch all NFL players
     const playersRes = await axios.get('https://api.sleeper.app/v1/players/nfl', { timeout: 30000 });
@@ -122,7 +127,7 @@ async function fetchSleeper() {
         const posRank = posRankCounters[position];
         const adpSleeper = p.search_rank < 9999 ? p.search_rank : null;
 
-        const existing = getPlayer.get(name, position);
+        const existing = findExisting(name, position);
         const adpConsensus = computeConsensus(
           existing ? existing.adp_fantasypros : null,
           existing ? existing.adp_underdog : null,
@@ -130,8 +135,6 @@ async function fetchSleeper() {
         );
 
         const row = {
-          name,
-          position,
           nfl_team: p.team || null,
           adp_sleeper: adpSleeper,
           pos_rank_sleeper: posRank,
@@ -141,9 +144,9 @@ async function fetchSleeper() {
         };
 
         if (existing) {
-          updatePlayer.run(row);
+          updatePlayer.run({ ...row, id: existing.id });
         } else {
-          upsertPlayer.run(row);
+          upsertPlayer.run({ ...row, name, position });
         }
         count++;
       }
@@ -156,7 +159,7 @@ async function fetchSleeper() {
 
     // 2. Fetch season projections (best-effort, don't fail main result)
     try {
-      const projRes = await axios.get('https://api.sleeper.app/v1/projections/nfl/2025/0', { timeout: 30000 });
+      const projRes = await axios.get(`https://api.sleeper.app/v1/projections/nfl/${SEASON_YEAR}/0`, { timeout: 30000 });
       const projData = projRes.data;
 
       if (projData && typeof projData === 'object') {

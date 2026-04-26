@@ -1,5 +1,6 @@
 const axios = require('axios');
 const { db, computeConsensus } = require('../db');
+const { normalizeName } = require('../utils/normalize');
 
 const POS_MAP = { 'QB': 'QB', 'RB': 'RB', 'WR': 'WR', 'TE': 'TE', 'K': 'K', 'DST': 'DEF', 'D/ST': 'DEF' };
 function parsePosition(raw) {
@@ -7,22 +8,24 @@ function parsePosition(raw) {
 }
 
 // Fantasy Football Calculator — free public JSON API, no auth required
-// Try current year (2026) first, then fall back to prior years
+// Try current year first, then fall back to prior years
+const SEASON_YEAR = new Date().getFullYear();
 const ENDPOINTS = [
-  'https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=2026&position=all',
-  'https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=2025&position=all',
-  'https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=2024&position=all',
+  `https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=${SEASON_YEAR}&position=all`,
+  `https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=${SEASON_YEAR - 1}&position=all`,
+  `https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=${SEASON_YEAR - 2}&position=all`,
 ];
 
 async function fetchFFC() {
   const getPlayer = db.prepare(`SELECT * FROM players WHERE name = ? AND position = ?`);
+  const getByNorm = db.prepare(`SELECT * FROM players WHERE name_normalized = ? AND position = ?`);
   const updateFFC = db.prepare(`
     UPDATE players
     SET adp_ffc = @adp_ffc,
         nfl_team = COALESCE(@nfl_team, nfl_team),
         adp_consensus = @adp_consensus,
         last_updated = @last_updated
-    WHERE name = @name AND position = @position
+    WHERE id = @id
   `);
   const upsertPlayer = db.prepare(`
     INSERT INTO players (name, position, nfl_team, adp_ffc, adp_consensus, last_updated)
@@ -32,6 +35,10 @@ async function fetchFFC() {
   const updateMeta = db.prepare(`
     UPDATE source_metadata SET last_fetched = ?, player_count = ?, status = ? WHERE source = 'ffc'
   `);
+
+  function findExisting(name, pos) {
+    return getPlayer.get(name, pos) || getByNorm.get(normalizeName(name), pos) || null;
+  }
 
   let players = [];
   let lastError = null;
@@ -80,24 +87,22 @@ async function fetchFFC() {
   const run = db.transaction(() => {
     let count = 0;
     for (const p of players) {
-      const existing = getPlayer.get(p.name, p.position);
+      const existing = findExisting(p.name, p.position);
       const consensus = computeConsensus(
         existing?.adp_fantasypros ?? null,
         existing?.adp_underdog ?? null,
         p.adp,
       );
       const row = {
-        name: p.name,
-        position: p.position,
         nfl_team: p.nfl_team,
         adp_ffc: p.adp,
         adp_consensus: consensus,
         last_updated: now,
       };
       if (existing) {
-        updateFFC.run(row);
+        updateFFC.run({ ...row, id: existing.id });
       } else {
-        upsertPlayer.run(row);
+        upsertPlayer.run({ ...row, name: p.name, position: p.position });
       }
       count++;
     }

@@ -1,7 +1,7 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { db, computeConsensus } = require('../db');
-const { normalizeName } = require('./sleeper');
+const { normalizeName } = require('../utils/normalize');
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -23,6 +23,7 @@ function parsePosition(raw) {
 
 async function fetchFantasyPros() {
   const getPlayer = db.prepare(`SELECT * FROM players WHERE name = ? AND position = ?`);
+  const getByNorm = db.prepare(`SELECT * FROM players WHERE name_normalized = ? AND position = ?`);
   const upsertPlayer = db.prepare(`
     INSERT INTO players (name, position, nfl_team, adp_fantasypros, pos_rank_fantasypros, adp_consensus, last_updated)
     VALUES (@name, @position, @nfl_team, @adp_fantasypros, @pos_rank_fantasypros, @adp_consensus, @last_updated)
@@ -37,9 +38,22 @@ async function fetchFantasyPros() {
         last_updated = @last_updated
     WHERE name = @name AND position = @position
   `);
+  const updatePlayerById = db.prepare(`
+    UPDATE players
+    SET nfl_team = COALESCE(@nfl_team, nfl_team),
+        adp_fantasypros = @adp_fantasypros,
+        pos_rank_fantasypros = @pos_rank_fantasypros,
+        adp_consensus = @adp_consensus,
+        last_updated = @last_updated
+    WHERE id = @id
+  `);
   const updateMeta = db.prepare(`
     UPDATE source_metadata SET last_fetched = ?, player_count = ?, status = ? WHERE source = 'fantasypros'
   `);
+
+  function findExisting(name, pos) {
+    return getPlayer.get(name, pos) || getByNorm.get(normalizeName(name), pos) || null;
+  }
 
   let html = null;
   let lastError = null;
@@ -149,16 +163,14 @@ async function fetchFantasyPros() {
       posRankCounters[p.position] = (posRankCounters[p.position] || 0) + 1;
       const posRank = posRankCounters[p.position];
 
-      const existing = getPlayer.get(p.name, p.position);
+      const existing = findExisting(p.name, p.position);
       const adpConsensus = computeConsensus(
         p.rank,
         existing ? existing.adp_underdog : null,
-        existing ? existing.adp_sleeper : null
+        existing ? existing.adp_ffc : null,
       );
 
       const row = {
-        name: p.name,
-        position: p.position,
         nfl_team: p.nfl_team || null,
         adp_fantasypros: p.rank,
         pos_rank_fantasypros: posRank,
@@ -167,9 +179,9 @@ async function fetchFantasyPros() {
       };
 
       if (existing) {
-        updatePlayer.run(row);
+        updatePlayerById.run({ ...row, id: existing.id });
       } else {
-        upsertPlayer.run(row);
+        upsertPlayer.run({ ...row, name: p.name, position: p.position });
       }
       count++;
     });

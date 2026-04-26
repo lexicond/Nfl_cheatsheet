@@ -77,6 +77,7 @@ router.get('/', (req, res) => {
         p.ktc_value,
         p.ktc_value_sf,
         p.fc_value,
+        p.fc_value_sf,
         p.last_updated,
         o.personal_rank,
         o.tier,
@@ -129,8 +130,9 @@ router.get('/', (req, res) => {
         else tier_auto = 5;
       }
 
-      // For Superflex leagues, use the SF-specific KTC value if available
+      // For Superflex leagues, use the SF-specific values if available
       const ktcValue = useSF ? (r.ktc_value_sf || r.ktc_value) : r.ktc_value;
+      const fcValue  = useSF ? (r.fc_value_sf  || r.fc_value)  : r.fc_value;
 
       return {
         ...r,
@@ -138,6 +140,7 @@ router.get('/', (req, res) => {
         flagged: r.flagged === 1,
         drafted: r.drafted === 1,
         ktc_value: ktcValue,
+        fc_value: fcValue,
         adp_source_count: [r.adp_fantasypros, r.adp_underdog, r.adp_ffc].filter(v => v != null).length,
         adp_trend: adpTrend,
         value_score: valueScore,
