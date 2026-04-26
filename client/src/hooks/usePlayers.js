@@ -1,13 +1,31 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 const DEFAULT_FILTERS = {
-  positions: [],     // [] = all
+  positions: [],
   tier: null,
   starred: false,
   hideDrafted: true,
   search: '',
-  sort: 'adp_consensus',
+  sort: '',  // empty = server picks format-aware default (Sleeper for BB/RD, KTC for DYN)
 };
+
+const DEFAULT_ENABLED_SOURCES = {
+  fantasypros: true,
+  underdog: true,
+  ffc: true,
+  sleeper: true,
+  ktc: true,
+  fantasycalc: true,
+};
+
+function loadLS(key, fallback) {
+  try {
+    const v = localStorage.getItem(key);
+    return v != null ? JSON.parse(v) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 export function usePlayers() {
   const [players, setPlayers] = useState([]);
@@ -17,6 +35,12 @@ export function usePlayers() {
   const [sourceStatus, setSourceStatus] = useState({});
   const [refreshing, setRefreshing] = useState({});
   const [toast, setToast] = useState(null);
+
+  // Format settings — persisted in localStorage
+  const [format, setFormatRaw] = useState(() => loadLS('draft_format', 'BB'));
+  const [leagueType, setLeagueTypeRaw] = useState(() => loadLS('draft_league_type', '1QB'));
+  const [enabledSources, setEnabledSourcesRaw] = useState(() => loadLS('draft_enabled_sources', DEFAULT_ENABLED_SOURCES));
+
   const searchDebounceRef = useRef(null);
 
   const showToast = useCallback((message, type = 'info') => {
@@ -31,7 +55,8 @@ export function usePlayers() {
     } catch {}
   }, []);
 
-  const fetchPlayers = useCallback(async (currentFilters = filters) => {
+  // fetchPlayers must be defined before any hook that lists it as a dependency
+  const fetchPlayers = useCallback(async (currentFilters = filters, currentLeagueType = leagueType, currentFormat = format) => {
     setLoading(true);
     setError(null);
     try {
@@ -42,6 +67,8 @@ export function usePlayers() {
       if (!currentFilters.hideDrafted) params.set('drafted', '1');
       if (currentFilters.search) params.set('search', currentFilters.search);
       if (currentFilters.sort) params.set('sort', currentFilters.sort);
+      params.set('leagueType', currentLeagueType);
+      params.set('format', currentFormat);
 
       const res = await fetch(`/api/players?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -53,7 +80,29 @@ export function usePlayers() {
     } finally {
       setLoading(false);
     }
-  }, [filters, showToast]);
+  }, [filters, leagueType, format, showToast]);
+
+  const setFormat = useCallback((f) => {
+    setFormatRaw(f);
+    localStorage.setItem('draft_format', JSON.stringify(f));
+    // Reset sort so server picks the format-appropriate default (Sleeper/KTC)
+    setFiltersState(prev => {
+      const next = { ...prev, sort: '' };
+      fetchPlayers(next, leagueType, f);
+      return next;
+    });
+  }, [fetchPlayers, leagueType]);
+
+  const setLeagueType = useCallback((lt) => {
+    setLeagueTypeRaw(lt);
+    localStorage.setItem('draft_league_type', JSON.stringify(lt));
+    fetchPlayers(filters, lt, format);
+  }, [fetchPlayers, filters, format]);
+
+  const setEnabledSources = useCallback((es) => {
+    setEnabledSourcesRaw(es);
+    localStorage.setItem('draft_enabled_sources', JSON.stringify(es));
+  }, []);
 
   useEffect(() => {
     fetchPlayers();
@@ -64,22 +113,17 @@ export function usePlayers() {
     setFiltersState(prev => {
       const next = { ...prev, [key]: value };
       if (key === 'search') {
-        // Debounce search
         clearTimeout(searchDebounceRef.current);
-        searchDebounceRef.current = setTimeout(() => fetchPlayers(next), 300);
+        searchDebounceRef.current = setTimeout(() => fetchPlayers(next, leagueType), 300);
       } else {
-        fetchPlayers(next);
+        fetchPlayers(next, leagueType);
       }
       return next;
     });
-  }, [fetchPlayers]);
+  }, [fetchPlayers, leagueType]);
 
   const updateOverride = useCallback(async (id, changes) => {
-    // Optimistic update
-    setPlayers(prev => prev.map(p =>
-      p.id === id ? { ...p, ...changes } : p
-    ));
-
+    setPlayers(prev => prev.map(p => p.id === id ? { ...p, ...changes } : p));
     try {
       const res = await fetch(`/api/players/${id}/override`, {
         method: 'PATCH',
@@ -89,7 +133,6 @@ export function usePlayers() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch (err) {
       showToast(`Save failed: ${err.message}`, 'error');
-      // Revert optimistic update on failure
       fetchPlayers();
     }
   }, [fetchPlayers, showToast]);
@@ -110,7 +153,10 @@ export function usePlayers() {
         }
       } else {
         if (data.success) {
-          showToast(`${source} refreshed — ${data.players_updated} players`, 'success');
+          const extra = data.actual_source && data.actual_source !== source
+            ? ` (via ${data.actual_source})`
+            : '';
+          showToast(`${source}${extra} refreshed — ${data.players_updated} players`, 'success');
         } else {
           showToast(`${source} refresh failed: ${data.error}`, 'error');
         }
@@ -153,5 +199,11 @@ export function usePlayers() {
     refreshing,
     toast,
     showToast,
+    format,
+    setFormat,
+    leagueType,
+    setLeagueType,
+    enabledSources,
+    setEnabledSources,
   };
 }

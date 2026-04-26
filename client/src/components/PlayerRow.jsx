@@ -15,6 +15,25 @@ function AdpCell({ value }) {
   return <span>{value.toFixed(1)}</span>;
 }
 
+function TrendIndicator({ trend }) {
+  if (trend == null || Math.abs(trend) < 1.5) return null;
+  if (trend > 0) {
+    return <span className="text-green-400 text-xs ml-1" title={`Rising +${trend.toFixed(1)} picks`}>▲{trend.toFixed(1)}</span>;
+  }
+  return <span className="text-red-400 text-xs ml-1" title={`Falling ${trend.toFixed(1)} picks`}>▼{Math.abs(trend).toFixed(1)}</span>;
+}
+
+function ValueBadge({ score }) {
+  if (score == null) return null;
+  if (score >= 15) {
+    return <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-green-500/20 text-green-400 border border-green-500/30 font-bold">VALUE</span>;
+  }
+  if (score <= -15) {
+    return <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold">REACH</span>;
+  }
+  return null;
+}
+
 function bestPosRank(player) {
   const ranks = [
     player.pos_rank_fantasypros,
@@ -25,7 +44,7 @@ function bestPosRank(player) {
   return Math.min(...ranks);
 }
 
-export default function PlayerRow({ player, index, onUpdate, onOpenModal }) {
+export default function PlayerRow({ player, index, onUpdate, onOpenModal, columns = [], format = 'BB', leagueType = '1QB' }) {
   const [editingRank, setEditingRank] = useState(false);
   const [rankInput, setRankInput] = useState('');
   const rankRef = useRef(null);
@@ -39,18 +58,13 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal }) {
     isDragging,
   } = useSortable({ id: player.id });
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  };
+  const style = { transform: CSS.Transform.toString(transform), transition };
 
   const cycleTier = (e) => {
     e.stopPropagation();
     const tiers = [null, 1, 2, 3, 4, 5];
-    const current = player.tier ?? null;
-    const idx = tiers.indexOf(current);
-    const next = tiers[(idx + 1) % tiers.length];
-    onUpdate(player.id, { tier: next });
+    const idx = tiers.indexOf(player.tier ?? null);
+    onUpdate(player.id, { tier: tiers[(idx + 1) % tiers.length] });
   };
 
   const startEditRank = () => {
@@ -62,9 +76,7 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal }) {
   const commitRank = () => {
     setEditingRank(false);
     const val = parseInt(rankInput, 10);
-    if (!isNaN(val) && val > 0) {
-      onUpdate(player.id, { personal_rank: val });
-    }
+    if (!isNaN(val) && val > 0) onUpdate(player.id, { personal_rank: val });
   };
 
   const posRank = bestPosRank(player);
@@ -80,10 +92,10 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal }) {
 
   const cellClass = 'px-2 py-2 text-sm';
 
-  return (
-    <tr ref={setNodeRef} style={style} className={rowClass}>
-      {/* Drag handle */}
-      <td className="px-1 py-2 w-6">
+  // Build cell renderers keyed by column key
+  const cellRenderers = {
+    drag: (
+      <td key="drag" className="px-1 py-2 w-6">
         <div
           {...attributes}
           {...listeners}
@@ -93,9 +105,10 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal }) {
           ⠿
         </div>
       </td>
+    ),
 
-      {/* My Rank */}
-      <td className={`${cellClass} w-14`}>
+    my_rank: (
+      <td key="my_rank" className={`${cellClass} w-14`}>
         {editingRank ? (
           <input
             ref={rankRef}
@@ -116,79 +129,165 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal }) {
           </span>
         )}
       </td>
+    ),
 
-      {/* Consensus rank (index) */}
-      <td className={`${cellClass} w-10 font-mono text-[#555875] text-right`}>
+    rank: (
+      <td key="rank" className={`${cellClass} w-10 font-mono text-[#555875] text-right`}>
         {index + 1}
       </td>
+    ),
 
-      {/* Name + team */}
-      <td className={`${cellClass} min-w-[160px]`}>
-        <div className={`font-medium ${player.drafted ? 'line-through text-[#555875]' : 'text-[#e8eaf0]'}`}>
-          {player.name}
-          {player.starred && <span className="ml-1 text-amber-400 text-xs">⭐</span>}
-          {player.flagged && <span className="ml-1 text-red-400 text-xs">🚩</span>}
+    name: (
+      <td key="name" className={`${cellClass} min-w-[160px]`}>
+        <div className={`font-medium flex items-center flex-wrap gap-x-1 ${player.drafted ? 'line-through text-[#555875]' : 'text-[#e8eaf0]'}`}>
+          <span>{player.name}</span>
+          {player.starred && <span className="text-amber-400 text-xs">⭐</span>}
+          {player.flagged && <span className="text-red-400 text-xs">🚩</span>}
+          <ValueBadge score={player.value_score} />
         </div>
         {player.nfl_team && (
           <div className="text-xs text-[#555875] font-mono">{player.nfl_team}</div>
         )}
       </td>
+    ),
 
-      {/* Position badge */}
-      <td className={`${cellClass} w-14`}>
+    pos: (
+      <td key="pos" className={`${cellClass} w-14`}>
         <span className={`pos-badge pos-${player.position}`}>{player.position}</span>
       </td>
+    ),
 
-      {/* Bye */}
-      <td className={`${cellClass} w-10 font-mono text-[#8b90a8] text-center`}>
+    bye: (
+      <td key="bye" className={`${cellClass} w-10 font-mono text-[#8b90a8] text-center`}>
         {player.bye_week ?? '–'}
       </td>
+    ),
 
-      {/* FP ADP */}
-      <td className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
+    adp_fp: (
+      <td key="adp_fp" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
         <AdpCell value={player.adp_fantasypros} />
       </td>
+    ),
 
-      {/* UD ADP */}
-      <td className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
+    adp_fp_rd: (
+      <td key="adp_fp_rd" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
+        <AdpCell value={player.adp_fp_rd} />
+      </td>
+    ),
+
+    adp_fp_sf: (
+      <td key="adp_fp_sf" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
+        <AdpCell value={player.adp_fp_sf} />
+      </td>
+    ),
+
+    adp_ud: (
+      <td key="adp_ud" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
         <AdpCell value={player.adp_underdog} />
       </td>
+    ),
 
-      {/* SL ADP */}
-      <td className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-        <AdpCell value={player.adp_sleeper} />
+    adp_ffc: (
+      <td key="adp_ffc" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
+        <AdpCell value={player.adp_ffc} />
       </td>
+    ),
 
-      {/* Consensus */}
-      <td className={`${cellClass} w-20 font-mono text-[#e8eaf0] text-right`}>
+    adp_sl_bb: (
+      <td key="adp_sl_bb" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
+        <AdpCell value={player.adp_sl_bb} />
+      </td>
+    ),
+
+    adp_sl_rd: (
+      <td key="adp_sl_rd" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
+        <AdpCell value={player.adp_sl_rd} />
+      </td>
+    ),
+
+    adp_sl_sf: (
+      <td key="adp_sl_sf" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
+        <AdpCell value={player.adp_sl_sf} />
+      </td>
+    ),
+
+    consensus: (
+      <td key="consensus" className={`${cellClass} w-20 font-mono text-[#e8eaf0] text-right`}>
         {player.adp_consensus != null ? (
           <span
             title={`Based on ${player.adp_source_count || 1} source${(player.adp_source_count || 1) !== 1 ? 's' : ''}`}
             className="cursor-default"
           >
             {player.adp_consensus.toFixed(1)}
+            <TrendIndicator trend={player.adp_trend} />
           </span>
         ) : <span className="text-[#555875]">–</span>}
       </td>
+    ),
 
-      {/* Pos Rank */}
-      <td className={`${cellClass} w-16 font-mono text-[#8b90a8] text-center`}>
+    projected_pts: (
+      <td key="projected_pts" className={`${cellClass} w-16 font-mono text-right`}>
+        {player.projected_pts != null ? (
+          <span
+            className={`pos-text-${player.position}`}
+            title={`Projected 0.5 PPR points (Sleeper 2025)`}
+          >
+            {player.projected_pts.toFixed(1)}
+          </span>
+        ) : <span className="text-[#555875]">–</span>}
+      </td>
+    ),
+
+    ktc_value: (
+      <td key="ktc_value" className={`${cellClass} w-20 font-mono text-[#8b90a8] text-right`}>
+        {player.ktc_value != null ? player.ktc_value.toLocaleString() : <span className="text-[#555875]">–</span>}
+      </td>
+    ),
+
+    fc_value: (
+      <td key="fc_value" className={`${cellClass} w-20 font-mono text-[#8b90a8] text-right`}>
+        {player.fc_value != null ? player.fc_value.toFixed(0) : <span className="text-[#555875]">–</span>}
+      </td>
+    ),
+
+    pos_rank: (
+      <td key="pos_rank" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-center`}>
         {posRankStr}
       </td>
+    ),
 
-      {/* Tier */}
-      <td className={`${cellClass} w-14 text-center`}>
-        <button
-          onClick={cycleTier}
-          className={`tier-badge w-7 h-7 text-xs ${player.tier ? `tier-${player.tier}` : 'border-[#2e3148] text-[#555875] hover:text-[#8b90a8]'}`}
-          title="Click to cycle tier"
-        >
-          {player.tier ? `T${player.tier}` : '–'}
-        </button>
+    tier: (
+      <td key="tier" className={`${cellClass} w-14 text-center`}>
+        {player.tier ? (
+          <button
+            onClick={cycleTier}
+            className={`tier-badge w-7 h-7 text-xs tier-${player.tier}`}
+            title="Click to cycle tier"
+          >
+            T{player.tier}
+          </button>
+        ) : player.tier_auto ? (
+          <button
+            onClick={cycleTier}
+            className="tier-badge w-7 h-7 text-xs border-dashed border-[#2e3148] text-[#555875] hover:text-[#8b90a8] opacity-50"
+            title={`Auto-tier T${player.tier_auto} (ADP-based) · click to set`}
+          >
+            T{player.tier_auto}
+          </button>
+        ) : (
+          <button
+            onClick={cycleTier}
+            className="tier-badge w-7 h-7 text-xs border-[#2e3148] text-[#555875] hover:text-[#8b90a8]"
+            title="Click to set tier"
+          >
+            –
+          </button>
+        )}
       </td>
+    ),
 
-      {/* Flags */}
-      <td className={`${cellClass} w-16`}>
+    flags: (
+      <td key="flags" className={`${cellClass} w-16`}>
         <div className="flex gap-1">
           <button
             onClick={() => onUpdate(player.id, { starred: !player.starred })}
@@ -206,9 +305,10 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal }) {
           </button>
         </div>
       </td>
+    ),
 
-      {/* Status */}
-      <td className={`${cellClass} w-24`}>
+    status: (
+      <td key="status" className={`${cellClass} w-24`}>
         <button
           onClick={() => onUpdate(player.id, { drafted: !player.drafted })}
           className={`text-xs px-2 py-0.5 rounded border transition-colors ${
@@ -220,9 +320,10 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal }) {
           {player.drafted ? '✓ Drafted' : 'Available'}
         </button>
       </td>
+    ),
 
-      {/* Notes */}
-      <td className={`${cellClass} w-12 text-center`}>
+    notes: (
+      <td key="notes" className={`${cellClass} w-12 text-center`}>
         <button
           onClick={() => onOpenModal(player)}
           className={`text-sm transition-colors hover:text-blue-400 ${
@@ -235,6 +336,12 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal }) {
           📝
         </button>
       </td>
+    ),
+  };
+
+  return (
+    <tr ref={setNodeRef} style={style} className={rowClass}>
+      {columns.map(col => cellRenderers[col.key] || null)}
     </tr>
   );
 }

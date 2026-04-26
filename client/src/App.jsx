@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { usePlayers } from './hooks/usePlayers';
 import FilterBar from './components/FilterBar';
 import DraftBoard from './components/DraftBoard';
@@ -31,20 +31,42 @@ export default function App() {
     sourceStatus,
     refreshing,
     toast,
+    format,
+    setFormat,
+    leagueType,
+    setLeagueType,
+    enabledSources,
+    setEnabledSources,
   } = usePlayers();
 
   const [modalPlayer, setModalPlayer] = useState(null);
+  const [filterBarHeight, setFilterBarHeight] = useState(53);
+  const filterBarRef = useRef(null);
 
   const openModal = useCallback((player) => setModalPlayer(player), []);
   const closeModal = useCallback(() => setModalPlayer(null), []);
 
   const handleModalUpdate = useCallback((id, changes) => {
     updateOverride(id, changes);
-    // Keep modal in sync with local changes
     setModalPlayer(prev => prev && prev.id === id ? { ...prev, ...changes } : prev);
   }, [updateOverride]);
 
+  // Measure FilterBar height so the table sticky header sits precisely below it.
+  useEffect(() => {
+    if (!filterBarRef.current) return;
+    const update = () => {
+      const h = filterBarRef.current?.getBoundingClientRect().height ?? 53;
+      setFilterBarHeight(Math.ceil(h));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(filterBarRef.current);
+    return () => ro.disconnect();
+  }, []);
+
   const seeding = loading && players.length === 0;
+
+  const formatLabel = { BB: 'Best Ball', RD: 'Redraft', DYN: 'Dynasty' }[format] || format;
 
   return (
     <div className="min-h-screen bg-[#0f1117] text-[#e8eaf0]">
@@ -54,7 +76,7 @@ export default function App() {
           <span className="text-2xl">🏈</span>
           <div>
             <h1 className="text-lg font-bold tracking-tight">NFL Draft Cheatsheet</h1>
-            <p className="text-xs text-[#555875]">Best Ball · {new Date().getFullYear()}</p>
+            <p className="text-xs text-[#555875]">0.5 PPR · {formatLabel} · {leagueType} · {new Date().getFullYear()}</p>
           </div>
         </div>
         <div className="text-xs text-[#555875] font-mono">
@@ -63,11 +85,18 @@ export default function App() {
       </header>
 
       <FilterBar
+        ref={filterBarRef}
         filters={filters}
         setFilter={setFilter}
         sourceStatus={sourceStatus}
         refreshing={refreshing}
         onRefresh={refreshSource}
+        format={format}
+        setFormat={setFormat}
+        leagueType={leagueType}
+        setLeagueType={setLeagueType}
+        enabledSources={enabledSources}
+        setEnabledSources={setEnabledSources}
       />
 
       {seeding && (
@@ -86,6 +115,11 @@ export default function App() {
             onUpdate={updateOverride}
             onOpenModal={openModal}
             onReorder={reorderPlayer}
+            format={format}
+            leagueType={leagueType}
+            enabledSources={enabledSources}
+            sourceStatus={sourceStatus}
+            filterBarHeight={filterBarHeight}
           />
         </main>
       )}
@@ -95,6 +129,7 @@ export default function App() {
           player={modalPlayer}
           onClose={closeModal}
           onUpdate={handleModalUpdate}
+          sourceStatus={sourceStatus}
         />
       )}
 
