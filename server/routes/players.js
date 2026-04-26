@@ -8,7 +8,8 @@ function computeFormatConsensus(r, format, leagueType) {
   if (format === 'DYN') return null;
   const isSF = leagueType === '2QB';
   if (format === 'BB' && !isSF) {
-    [r.adp_fantasypros, r.adp_underdog, r.adp_sl_bb].forEach(v => v != null && vals.push(v));
+    // adp_sl_rd used for BB Sleeper — no separate BB URL exists for Sleeper
+    [r.adp_fantasypros, r.adp_underdog, r.adp_sl_rd].forEach(v => v != null && vals.push(v));
   } else if (format === 'BB' && isSF) {
     [r.adp_fp_sf, r.adp_underdog, r.adp_sl_sf].forEach(v => v != null && vals.push(v));
   } else if (format === 'RD' && !isSF) {
@@ -166,7 +167,7 @@ router.get('/', (req, res) => {
       // Count sources that contributed to this format's consensus
       const sourcesUsed = [];
       if (format === 'BB' && !useSF) {
-        [r.adp_fantasypros, r.adp_underdog, r.adp_sl_bb].forEach(v => v != null && sourcesUsed.push(v));
+        [r.adp_fantasypros, r.adp_underdog, r.adp_sl_rd].forEach(v => v != null && sourcesUsed.push(v));
       } else if (format === 'BB' && useSF) {
         [r.adp_fp_sf, r.adp_underdog, r.adp_sl_sf].forEach(v => v != null && sourcesUsed.push(v));
       } else if (format === 'RD' && !useSF) {

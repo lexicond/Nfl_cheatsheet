@@ -62,7 +62,7 @@ function buildColumns(format, leagueType, enabledSources) {
     sourceCols = [
       ...(enabledSources.fantasypros !== false ? [{ label: 'FP', key: 'adp_fp' }] : []),
       ...(enabledSources.underdog !== false ? [{ label: 'UD', key: 'adp_ud' }] : []),
-      ...(enabledSources.sleeper !== false ? [{ label: 'SL', key: 'adp_sl_bb' }] : []),
+      ...(enabledSources.sleeper !== false ? [{ label: 'SL', key: 'adp_sl_rd' }] : []),
     ];
   } else if (format === 'BB' && isSF) {
     sourceCols = [

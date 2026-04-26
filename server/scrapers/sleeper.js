@@ -6,9 +6,9 @@ const { scrapeDraftSharks } = require('../utils/draftsharks');
 const POSITIONS = new Set(['QB', 'RB', 'WR', 'TE']);
 const SEASON_YEAR = new Date().getFullYear();
 
-// DraftSharks Sleeper ADP by format
+// DraftSharks Sleeper ADP by format.
+// No separate BB URL exists for Sleeper; adp/half-ppr/sleeper/12 is used for both BB and RD consensus.
 const SLEEPER_ADP_SOURCES = [
-  { url: 'https://www.draftsharks.com/adp/best-ball/half-ppr/sleeper/12', column: 'adp_sl_bb', label: 'BB' },
   { url: 'https://www.draftsharks.com/adp/half-ppr/sleeper/12', column: 'adp_sl_rd', label: 'RD' },
   { url: 'https://www.draftsharks.com/adp/dynasty/superflex/ppr/sleeper/12', column: 'adp_sl_sf', label: 'SF/DYN' },
 ];

@@ -25,6 +25,7 @@ function parseRoundPick(str, teamSize = 12) {
  */
 async function scrapeDraftSharks(url, teamSize = 12) {
   const res = await axios.get(url, { headers: HEADERS, timeout: 20000 });
+  if (res.status !== 200) throw new Error(`DraftSharks HTTP ${res.status} for ${url}`);
   const $ = cheerio.load(res.data);
   const players = [];
 

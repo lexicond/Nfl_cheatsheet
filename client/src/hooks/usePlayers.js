@@ -83,20 +83,19 @@ export function usePlayers() {
   }, [filters, leagueType, format, showToast]);
 
   const setFormat = useCallback((f) => {
+    const nextFilters = { ...filters, sort: '' };
     setFormatRaw(f);
+    setFiltersState(nextFilters);
     localStorage.setItem('draft_format', JSON.stringify(f));
-    // Reset sort so server picks the format-appropriate default (Sleeper/KTC)
-    setFiltersState(prev => {
-      const next = { ...prev, sort: '' };
-      fetchPlayers(next, leagueType, f);
-      return next;
-    });
-  }, [fetchPlayers, leagueType]);
+    fetchPlayers(nextFilters, leagueType, f);
+  }, [fetchPlayers, filters, leagueType]);
 
   const setLeagueType = useCallback((lt) => {
+    const nextFilters = { ...filters, sort: '' };
     setLeagueTypeRaw(lt);
+    setFiltersState(nextFilters);
     localStorage.setItem('draft_league_type', JSON.stringify(lt));
-    fetchPlayers(filters, lt, format);
+    fetchPlayers(nextFilters, lt, format);
   }, [fetchPlayers, filters, format]);
 
   const setEnabledSources = useCallback((es) => {
