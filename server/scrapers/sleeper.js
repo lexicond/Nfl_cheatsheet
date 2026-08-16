@@ -148,15 +148,20 @@ async function fetchSleeper() {
         const target = (sid && bySleeperId.get(sid)) || (name && byNorm.get(normalizeName(name), position));
         if (!target) continue;
 
+        // Sleeper keeps historical ADP on players who are no longer rostered — Tom
+        // Brady still carries an adp_half_ppr. A null team is how it marks them, so
+        // ADP from a teamless player is discarded rather than ranked.
+        const rostered = !!player.team;
+
         const stats = row.stats || {};
         const pts = stats.pts_half_ppr != null
           ? Math.round(Number(stats.pts_half_ppr) * 10) / 10
           : calcHalfPprPts(stats);
 
-        const adp_rd = cleanAdp(stats.adp_half_ppr);
-        const adp_sf = cleanAdp(stats.adp_2qb);
-        const adp_dyn = cleanAdp(stats.adp_dynasty_half_ppr) ?? cleanAdp(stats.adp_dynasty_ppr);
-        const adp_dyn_sf = cleanAdp(stats.adp_dynasty_2qb);
+        const adp_rd = rostered ? cleanAdp(stats.adp_half_ppr) : null;
+        const adp_sf = rostered ? cleanAdp(stats.adp_2qb) : null;
+        const adp_dyn = rostered ? (cleanAdp(stats.adp_dynasty_half_ppr) ?? cleanAdp(stats.adp_dynasty_ppr)) : null;
+        const adp_dyn_sf = rostered ? cleanAdp(stats.adp_dynasty_2qb) : null;
 
         if (pts == null && adp_rd == null && adp_sf == null && adp_dyn == null && adp_dyn_sf == null) continue;
 

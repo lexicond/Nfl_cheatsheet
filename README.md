@@ -74,6 +74,27 @@ node server/scripts/health-check.js     # freshness, coverage, ranking consisten
 node server/scripts/health-check.js --repair
 ```
 
+---
+
+## The printable cheat sheet
+
+```bash
+node server/scripts/refresh-all.js
+node server/scripts/build-cheatsheet.js   # → cheatsheets/draft-room-<year>.html
+```
+
+One self-contained HTML file — no server, no network — so it opens on a phone in a
+draft room with no signal. It carries every format and league type, and three views:
+
+- **Scarcity map** — every ranked player on a shared pick axis, so you can see where
+  each position's supply thins out, with the two widest drop-offs marked.
+- **Board** — grouped by the round the pick actually falls in, with each contributing
+  source shown next to the consensus.
+- **Tiers** — positional tiers cut where the market leaves a real gap rather than at
+  round numbers.
+
+Plus the players whose projected positional rank disagrees most with what they cost.
+
 ### Sources
 
 | Source | What it provides | Where it comes from |
