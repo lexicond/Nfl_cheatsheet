@@ -39,6 +39,12 @@
   .pos-TE { @apply bg-orange-500/20 text-orange-400 border border-orange-500/30; }
   .pos-K, .pos-DEF { @apply bg-gray-500/20 text-gray-400 border border-gray-500/30; }
 
+  /* Position-colored text for projected points column */
+  .pos-text-QB { @apply text-amber-400; }
+  .pos-text-RB { @apply text-green-400; }
+  .pos-text-WR { @apply text-blue-400; }
+  .pos-text-TE { @apply text-orange-400; }
+
   .tier-badge {
     @apply inline-flex items-center justify-center rounded px-1.5 py-0.5 text-xs font-bold font-mono cursor-pointer;
   }

@@ -16,9 +16,11 @@ app.use(express.json());
 // API routes
 const playersRouter = require('./routes/players');
 const refreshRouter = require('./routes/refresh');
+const healthRouter = require('./routes/health');
 
 app.use('/api/players', playersRouter);
 app.use('/api/refresh', refreshRouter);
+app.use('/api/health', healthRouter);
 
 // Source status lives on the refresh router at /status
 app.get('/api/source-status', (req, res) => {
