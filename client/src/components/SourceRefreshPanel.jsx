@@ -2,12 +2,13 @@ import React, { useState } from 'react';
 
 // All sources with display metadata
 const SOURCE_DEFS = [
-  { key: 'fantasypros', label: 'FP', fullLabel: 'FantasyPros', format: ['BB', 'RD'] },
-  { key: 'underdog',    label: 'UD', fullLabel: 'Underdog/DS/FFC', format: ['BB'] },
-  { key: 'ffc',         label: 'FFC', fullLabel: 'FFC ½PPR', format: ['BB', 'RD'] },
-  { key: 'sleeper',     label: 'SL', fullLabel: 'Sleeper', format: ['BB', 'RD', 'DYN'] },
-  { key: 'ktc',         label: 'KTC', fullLabel: 'KeepTradeCut', format: ['DYN'] },
-  { key: 'fantasycalc', label: 'FC',  fullLabel: 'FantasyCalc', format: ['DYN'] },
+  { key: 'underdog',    label: 'UD',   fullLabel: 'Underdog best ball', format: ['BB'] },
+  { key: 'fantasypros', label: 'FP',   fullLabel: 'FantasyPros ECR', format: ['BB', 'RD', 'DYN'] },
+  { key: 'ffc',         label: 'FFC',  fullLabel: 'FFC mock ADP', format: ['RD'] },
+  { key: 'sleeper',     label: 'SL',   fullLabel: 'Sleeper ADP + projections', format: ['BB', 'RD', 'DYN'] },
+  { key: 'market',      label: 'E/Y',  fullLabel: 'ESPN + Yahoo ADP', format: ['RD'] },
+  { key: 'ktc',         label: 'KTC',  fullLabel: 'KeepTradeCut values', format: ['DYN'] },
+  { key: 'fantasycalc', label: 'FC',   fullLabel: 'FantasyCalc values', format: ['DYN'] },
 ];
 
 function StatusDot({ status }) {
@@ -54,7 +55,7 @@ export default function SourceRefreshPanel({ sourceStatus, refreshing, onRefresh
             className={`flex items-center gap-1 bg-[#1a1d27] border rounded px-2 py-1 transition-opacity ${
               enabled ? 'border-[#2e3148]' : 'border-[#1e2132] opacity-50'
             }`}
-            title={`${src.fullLabel} · ${meta.last_fetched ? new Date(meta.last_fetched).toLocaleString() : 'never fetched'}${meta.notes ? ` · via ${meta.notes}` : ''}`}
+            title={`${src.fullLabel} · ${meta.last_fetched ? new Date(meta.last_fetched).toLocaleString() : 'never fetched'}${meta.notes ? ` · ${meta.notes}` : ''}`}
           >
             {isRefreshing ? <Spinner /> : <StatusDot status={meta.status} />}
             <span className="text-xs text-[#8b90a8]">{src.label}</span>

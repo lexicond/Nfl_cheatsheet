@@ -6,7 +6,7 @@ const DEFAULT_FILTERS = {
   starred: false,
   hideDrafted: true,
   search: '',
-  sort: '',  // empty = server picks format-aware default (Sleeper for BB/RD, KTC for DYN)
+  sort: '',  // empty = server picks the format's own consensus
 };
 
 const DEFAULT_ENABLED_SOURCES = {
@@ -14,6 +14,7 @@ const DEFAULT_ENABLED_SOURCES = {
   underdog: true,
   ffc: true,
   sleeper: true,
+  market: true,
   ktc: true,
   fantasycalc: true,
 };
@@ -108,18 +109,21 @@ export function usePlayers() {
     fetchSourceStatus();
   }, []);
 
+  // The fetch is kicked off outside the state updater: updaters must stay pure, and
+  // React invokes them twice in development, which fired every request twice.
   const setFilter = useCallback((key, value) => {
-    setFiltersState(prev => {
-      const next = { ...prev, [key]: value };
-      if (key === 'search') {
-        clearTimeout(searchDebounceRef.current);
-        searchDebounceRef.current = setTimeout(() => fetchPlayers(next, leagueType), 300);
-      } else {
-        fetchPlayers(next, leagueType);
-      }
-      return next;
-    });
-  }, [fetchPlayers, leagueType]);
+    const next = { ...filters, [key]: value };
+    setFiltersState(next);
+    if (key === 'search') {
+      clearTimeout(searchDebounceRef.current);
+      searchDebounceRef.current = setTimeout(() => fetchPlayers(next, leagueType, format), 300);
+    } else {
+      fetchPlayers(next, leagueType, format);
+    }
+  }, [fetchPlayers, filters, leagueType, format]);
+
+  // Drop any pending debounced search when the hook unmounts.
+  useEffect(() => () => clearTimeout(searchDebounceRef.current), []);
 
   const updateOverride = useCallback(async (id, changes) => {
     setPlayers(prev => prev.map(p => p.id === id ? { ...p, ...changes } : p));
@@ -153,7 +157,7 @@ export function usePlayers() {
       } else {
         if (data.success) {
           const extra = data.actual_source && data.actual_source !== source
-            ? ` (via ${data.actual_source})`
+            ? ` — ${data.actual_source}`
             : '';
           showToast(`${source}${extra} refreshed — ${data.players_updated} players`, 'success');
         } else {

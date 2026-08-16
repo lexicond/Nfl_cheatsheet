@@ -9,39 +9,42 @@ const SORT_COMMON = [
   { value: 'projected_pts', label: 'Proj Pts' },
 ];
 
+// Sort options mirror the columns each format actually shows.
 function getSortOptions(format, leagueType) {
+  const isSF = leagueType === '2QB';
+  const consensus = { value: 'adp_consensus', label: format === 'DYN' ? 'Dynasty Rank' : 'Consensus' };
+
   if (format === 'DYN') return [
+    consensus,
     { value: 'ktc_value', label: 'KTC Value' },
     { value: 'fc_value', label: 'FC Value' },
+    ...(isSF ? [] : [{ value: 'adp_fp_dyn', label: 'FantasyPros DYN' }]),
     ...SORT_COMMON,
   ];
-  if (format === 'BB' && leagueType === '1QB') return [
-    { value: 'adp_sl_bb', label: 'Sleeper ADP' },
-    { value: 'adp_consensus', label: 'Consensus' },
-    { value: 'adp_fantasypros', label: 'FantasyPros' },
-    { value: 'adp_underdog', label: 'Underdog' },
-    ...SORT_COMMON,
-  ];
-  if (format === 'BB') return [ // SF/2QB
-    { value: 'adp_sl_sf', label: 'Sleeper SF' },
-    { value: 'adp_consensus', label: 'Consensus' },
-    { value: 'adp_fp_sf', label: 'FantasyPros SF' },
-    { value: 'adp_underdog', label: 'Underdog' },
-    ...SORT_COMMON,
-  ];
-  if (format === 'RD' && leagueType === '1QB') return [
-    { value: 'adp_sl_rd', label: 'Sleeper ADP' },
-    { value: 'adp_consensus', label: 'Consensus' },
-    { value: 'adp_fp_rd', label: 'FantasyPros' },
-    { value: 'adp_ffc', label: 'FFC ADP' },
-    ...SORT_COMMON,
-  ];
-  return [ // RD SF/2QB
-    { value: 'adp_sl_sf', label: 'Sleeper SF' },
-    { value: 'adp_consensus', label: 'Consensus' },
-    { value: 'adp_fp_sf', label: 'FantasyPros SF' },
-    ...SORT_COMMON,
-  ];
+
+  if (format === 'BB') return isSF
+    ? [consensus,
+       { value: 'adp_fp_sf', label: 'FantasyPros SF' },
+       { value: 'adp_sl_sf', label: 'Sleeper SF' },
+       ...SORT_COMMON]
+    : [consensus,
+       { value: 'adp_underdog', label: 'Underdog ADP' },
+       { value: 'adp_fantasypros', label: 'FantasyPros BB' },
+       ...SORT_COMMON];
+
+  return isSF
+    ? [consensus,
+       { value: 'adp_ffc_sf', label: 'FFC 2QB' },
+       { value: 'adp_fp_sf', label: 'FantasyPros SF' },
+       { value: 'adp_sl_sf', label: 'Sleeper SF' },
+       ...SORT_COMMON]
+    : [consensus,
+       { value: 'adp_ffc', label: 'FFC ADP' },
+       { value: 'adp_fp_rd', label: 'FantasyPros' },
+       { value: 'adp_sl_rd', label: 'Sleeper ADP' },
+       { value: 'adp_espn', label: 'ESPN ADP' },
+       { value: 'adp_yahoo', label: 'Yahoo ADP' },
+       ...SORT_COMMON];
 }
 
 const POS_COLORS = {

@@ -2,6 +2,8 @@ import React, { useState, useRef } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
+const SEASON_YEAR = new Date().getFullYear();
+
 const TIER_BORDER = {
   1: 'border-l-2 border-l-amber-500',
   2: 'border-l-2 border-l-blue-500',
@@ -23,26 +25,48 @@ function TrendIndicator({ trend }) {
   return <span className="text-red-400 text-xs ml-1" title={`Falling ${trend.toFixed(1)} picks`}>▼{Math.abs(trend).toFixed(1)}</span>;
 }
 
-function ValueBadge({ score }) {
+// score = market position rank − projected position rank. Positive means the market
+// drafts him later than the projections rank him.
+function ValueBadge({ score, position }) {
   if (score == null) return null;
-  if (score >= 15) {
-    return <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-green-500/20 text-green-400 border border-green-500/30 font-bold">VALUE</span>;
+  if (score >= 12) {
+    return (
+      <span
+        className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-green-500/20 text-green-400 border border-green-500/30 font-bold"
+        title={`Projected ${score} spots higher at ${position} than his draft cost`}
+      >
+        VALUE
+      </span>
+    );
   }
-  if (score <= -15) {
-    return <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold">REACH</span>;
+  if (score <= -12) {
+    return (
+      <span
+        className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold"
+        title={`Drafted ${Math.abs(score)} spots higher at ${position} than his projection`}
+      >
+        REACH
+      </span>
+    );
   }
   return null;
 }
 
-function bestPosRank(player) {
-  const ranks = [
-    player.pos_rank_fantasypros,
-    player.pos_rank_underdog,
-    player.pos_rank_sleeper,
-  ].filter(r => r != null);
-  if (ranks.length === 0) return null;
-  return Math.min(...ranks);
-}
+// Column key → the field on the player record it renders. Keeps one cell shape for
+// every ADP source instead of a near-identical block per site.
+const ADP_COLUMNS = [
+  ['adp_fp', 'adp_fantasypros'],
+  ['adp_ud', 'adp_underdog'],
+  ['adp_ffc', 'adp_ffc'],
+  ['adp_ffc_sf', 'adp_ffc_sf'],
+  ['adp_fp_rd', 'adp_fp_rd'],
+  ['adp_fp_sf', 'adp_fp_sf'],
+  ['adp_fp_dyn', 'adp_fp_dyn'],
+  ['adp_sl_rd', 'adp_sl_rd'],
+  ['adp_sl_sf', 'adp_sl_sf'],
+  ['adp_espn', 'adp_espn'],
+  ['adp_yahoo', 'adp_yahoo'],
+];
 
 export default function PlayerRow({ player, index, onUpdate, onOpenModal, columns = [], format = 'BB', leagueType = '1QB' }) {
   const [editingRank, setEditingRank] = useState(false);
@@ -79,8 +103,11 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
     if (!isNaN(val) && val > 0) onUpdate(player.id, { personal_rank: val });
   };
 
-  const posRank = bestPosRank(player);
-  const posRankStr = posRank != null ? `${player.position}${posRank}` : '–';
+  // Position rank in the format currently on screen, not whichever source ranked
+  // him highest.
+  const posRankStr = player.pos_rank_consensus != null
+    ? `${player.position}${player.pos_rank_consensus}`
+    : '–';
 
   const rowClass = [
     'table-row-base group',
@@ -143,7 +170,7 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
           <span>{player.name}</span>
           {player.starred && <span className="text-amber-400 text-xs">⭐</span>}
           {player.flagged && <span className="text-red-400 text-xs">🚩</span>}
-          <ValueBadge score={player.value_score} />
+          <ValueBadge score={player.value_score} position={player.position} />
         </div>
         {player.nfl_team && (
           <div className="text-xs text-[#555875] font-mono">{player.nfl_team}</div>
@@ -163,63 +190,28 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
       </td>
     ),
 
-    adp_fp: (
-      <td key="adp_fp" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-        <AdpCell value={player.adp_fantasypros} />
-      </td>
-    ),
-
-    adp_fp_rd: (
-      <td key="adp_fp_rd" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-        <AdpCell value={player.adp_fp_rd} />
-      </td>
-    ),
-
-    adp_fp_sf: (
-      <td key="adp_fp_sf" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-        <AdpCell value={player.adp_fp_sf} />
-      </td>
-    ),
-
-    adp_ud: (
-      <td key="adp_ud" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-        <AdpCell value={player.adp_underdog} />
-      </td>
-    ),
-
-    adp_ffc: (
-      <td key="adp_ffc" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-        <AdpCell value={player.adp_ffc} />
-      </td>
-    ),
-
-    adp_sl_bb: (
-      <td key="adp_sl_bb" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-        <AdpCell value={player.adp_sl_bb} />
-      </td>
-    ),
-
-    adp_sl_rd: (
-      <td key="adp_sl_rd" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-        <AdpCell value={player.adp_sl_rd} />
-      </td>
-    ),
-
-    adp_sl_sf: (
-      <td key="adp_sl_sf" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-        <AdpCell value={player.adp_sl_sf} />
-      </td>
-    ),
+    ...Object.fromEntries(ADP_COLUMNS.map(([key, field]) => [
+      key,
+      (
+        <td key={key} className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
+          <AdpCell value={player[field]} />
+        </td>
+      ),
+    ])),
 
     consensus: (
       <td key="consensus" className={`${cellClass} w-20 font-mono text-[#e8eaf0] text-right`}>
         {player.adp_consensus != null ? (
           <span
-            title={`Based on ${player.adp_source_count || 1} source${(player.adp_source_count || 1) !== 1 ? 's' : ''}`}
+            title={
+              format === 'DYN'
+                ? `Mean rank across ${player.adp_source_count || 1} dynasty value source${(player.adp_source_count || 1) !== 1 ? 's' : ''}`
+                : `Mean ADP across ${player.adp_source_count || 1} source${(player.adp_source_count || 1) !== 1 ? 's' : ''}`
+            }
             className="cursor-default"
           >
             {player.adp_consensus.toFixed(1)}
-            <TrendIndicator trend={player.adp_trend} />
+            {format !== 'DYN' && <TrendIndicator trend={player.adp_trend} />}
           </span>
         ) : <span className="text-[#555875]">–</span>}
       </td>
@@ -230,7 +222,7 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
         {player.projected_pts != null ? (
           <span
             className={`pos-text-${player.position}`}
-            title={`Projected 0.5 PPR points (Sleeper 2025)`}
+            title={`Projected 0.5 PPR points — Sleeper ${SEASON_YEAR}${player.proj_pos_rank != null ? ` (${player.position}${player.proj_pos_rank})` : ''}`}
           >
             {player.projected_pts.toFixed(1)}
           </span>

@@ -130,6 +130,7 @@ export default function App() {
           onClose={closeModal}
           onUpdate={handleModalUpdate}
           sourceStatus={sourceStatus}
+          format={format}
         />
       )}
 

@@ -37,7 +37,24 @@ function AdpRow({ label, adp, posRank, position }) {
   );
 }
 
-export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = {} }) {
+// Every ADP/value source the modal can show, with the field it reads. Rows for
+// sources that have no number for this player are dropped rather than shown as "–",
+// so the panel reflects what was actually fetched.
+const SOURCE_ROWS = [
+  { label: 'Underdog (best ball)', field: 'adp_underdog', posRank: 'pos_rank_underdog' },
+  { label: 'FantasyPros (best ball)', field: 'adp_fantasypros', posRank: 'pos_rank_fantasypros' },
+  { label: 'FantasyPros (½PPR)', field: 'adp_fp_rd' },
+  { label: 'FantasyPros (superflex)', field: 'adp_fp_sf' },
+  { label: 'FantasyPros (dynasty)', field: 'adp_fp_dyn' },
+  { label: 'FFC (½PPR)', field: 'adp_ffc' },
+  { label: 'FFC (2QB)', field: 'adp_ffc_sf' },
+  { label: 'Sleeper (½PPR)', field: 'adp_sl_rd' },
+  { label: 'Sleeper (2QB)', field: 'adp_sl_sf' },
+  { label: 'ESPN (PPR)', field: 'adp_espn' },
+  { label: 'Yahoo (½PPR)', field: 'adp_yahoo' },
+];
+
+export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = {}, format = 'BB' }) {
   const [draft, setDraft] = useState(null);
   const [saved, setSaved] = useState(false);
   const panelRef = useRef(null);
@@ -73,11 +90,7 @@ export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = 
     onUpdate(player.id, { [key]: newVal });
   };
 
-  const udLabel = sourceStatus?.underdog?.notes === 'FFC'
-    ? 'Underdog (FFC fallback)'
-    : sourceStatus?.underdog?.notes === 'DraftSharks'
-    ? 'Underdog (DraftSharks)'
-    : 'Underdog';
+  const udNote = sourceStatus?.underdog?.notes;
 
   return (
     <>
@@ -121,10 +134,17 @@ export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = 
                 </tr>
               </thead>
               <tbody>
-                <AdpRow label="FantasyPros" adp={player.adp_fantasypros} posRank={player.pos_rank_fantasypros} position={player.position} />
-                <AdpRow label={udLabel} adp={player.adp_underdog} posRank={player.pos_rank_underdog} position={player.position} />
-                <AdpRow label="FFC (½PPR)" adp={player.adp_ffc} posRank={null} position={player.position} />
-                <AdpRow label="Sleeper" adp={player.adp_sleeper} posRank={player.pos_rank_sleeper} position={player.position} />
+                {SOURCE_ROWS.filter(row => player[row.field] != null).map(row => (
+                  <AdpRow
+                    key={row.field}
+                    label={row.field === 'adp_underdog' && udNote && !udNote.startsWith('Underdog')
+                      ? `Underdog — ${udNote}`
+                      : row.label}
+                    adp={player[row.field]}
+                    posRank={row.posRank ? player[row.posRank] : null}
+                    position={player.position}
+                  />
+                ))}
                 {(player.ktc_value != null || player.fc_value != null) && (
                   <tr className="border-b border-[#1e2132]">
                     <td className="py-1.5 pr-4 text-xs text-[#8b90a8]">Dynasty (KTC / FC)</td>
@@ -135,11 +155,14 @@ export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = 
                   </tr>
                 )}
                 <tr className="border-b border-[#1e2132]">
-                  <td className="py-1.5 pr-4 text-xs font-semibold text-[#e8eaf0]">Consensus</td>
+                  <td className="py-1.5 pr-4 text-xs font-semibold text-[#e8eaf0]">
+                    {format === 'DYN' ? 'Dynasty rank' : 'Consensus'}
+                  </td>
                   <td className="py-1.5 pr-4 text-xs font-mono font-bold text-[#e8eaf0]">
                     {player.adp_consensus != null ? player.adp_consensus.toFixed(1) : '–'}
                   </td>
                   <td className="py-1.5 text-xs text-[#555875]">
+                    {player.pos_rank_consensus != null ? `${player.position}${player.pos_rank_consensus} · ` : ''}
                     {player.adp_source_count > 0 ? `${player.adp_source_count} source${player.adp_source_count !== 1 ? 's' : ''}` : ''}
                   </td>
                 </tr>

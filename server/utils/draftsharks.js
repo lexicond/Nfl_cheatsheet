@@ -1,69 +1,52 @@
-const axios = require('axios');
-const cheerio = require('cheerio');
+const { get, extractJsObject } = require('./http');
 
-const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Accept': 'text/html,application/xhtml+xml,*/*',
-};
-
-const POS_MAP = { 'QB': 'QB', 'RB': 'RB', 'WR': 'WR', 'TE': 'TE', 'K': 'K', 'DEF': 'DEF', 'DST': 'DEF' };
-
-// "1.10" → overall pick 10 in a 12-team draft
-function parseRoundPick(str, teamSize = 12) {
-  const parts = String(str).split('.');
-  if (parts.length !== 2) return null;
-  const round = parseInt(parts[0], 10);
-  const pick = parseInt(parts[1], 10);
-  if (isNaN(round) || isNaN(pick) || round < 1 || pick < 1) return null;
-  return (round - 1) * teamSize + pick;
-}
+const POS_MAP = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 /**
- * Scrape a DraftSharks ADP table page.
- * Returns array of { name, position, nfl_team, adp }.
- * DraftSharks pages use round.pick format (e.g. "1.10") for all draft types.
+ * Scrape a DraftSharks ADP page.
+ *
+ * The visible table is rendered client-side, so there is nothing to parse in the
+ * DOM. The page ships its data as a `vueAppData` object literal holding
+ * `seed.players` (id → name/team/pos) and `seed.adpSets` (id → overall pick).
+ *
+ * Returns [{ name, position, nfl_team, adp, pos_adp }] sorted by adp.
  */
-async function scrapeDraftSharks(url, teamSize = 12) {
-  const res = await axios.get(url, { headers: HEADERS, timeout: 20000 });
-  if (res.status !== 200) throw new Error(`DraftSharks HTTP ${res.status} for ${url}`);
-  const $ = cheerio.load(res.data);
-  const players = [];
+async function scrapeDraftSharks(url) {
+  const res = await get(url);
+  const data = extractJsObject(res.data, 'vueAppData');
+  if (!data || !data.seed) throw new Error(`No vueAppData payload at ${url}`);
 
-  $('table tbody tr').each((_, row) => {
-    const cells = $(row).find('td');
-    if (cells.length < 3) return;
+  const { players = {}, adpSets = {} } = data.seed;
+  const setKeys = Object.keys(adpSets);
+  if (setKeys.length === 0) throw new Error(`No adpSets at ${url}`);
 
-    const nameEl = $(row).find('a').first();
-    const rawName = (nameEl.text() || $(cells[1]).text()).trim();
-    if (!rawName || rawName.length < 2) return;
+  // A page requested with explicit slugs returns exactly one set; if more than one
+  // ever comes back, take the largest rather than whichever key hashes first.
+  const rows = setKeys
+    .map(k => adpSets[k])
+    .filter(Array.isArray)
+    .sort((a, b) => b.length - a.length)[0] || [];
 
-    let adp = null;
-    let pos = null;
-    let team = null;
-
-    cells.each((_, cell) => {
-      const txt = $(cell).text().trim();
-      if (adp == null) {
-        const rpMatch = txt.match(/^(\d{1,2})\.(\d{1,2})$/);
-        if (rpMatch) { adp = parseRoundPick(txt, teamSize); return; }
-        // Some dynasty pages show a plain overall pick integer
-        if (/^\d+$/.test(txt)) {
-          const n = parseInt(txt, 10);
-          if (n > 0 && n < 700) { adp = n; return; }
-        }
-      }
-      if (pos == null && POS_MAP[txt.toUpperCase()]) pos = POS_MAP[txt.toUpperCase()];
-      if (team == null && /^[A-Z]{2,3}$/.test(txt) && !POS_MAP[txt] && !['NFL', 'ADP', 'RK', 'AVG'].includes(txt)) {
-        team = txt;
-      }
+  const out = [];
+  for (const row of rows) {
+    const p = players[row.id];
+    if (!p) continue;
+    const position = POS_MAP[(p.pos || p.fp || '').toUpperCase()];
+    if (!position) continue;
+    const name = [p.fn, p.ln].filter(Boolean).join(' ').trim();
+    const adp = Number(row.pick);
+    if (!name || !Number.isFinite(adp) || adp <= 0) continue;
+    out.push({
+      name,
+      position,
+      nfl_team: (p.tm || '').toUpperCase() || null,
+      adp,
+      pos_adp: Number.isFinite(Number(row.posAdp)) ? Number(row.posAdp) : null,
     });
+  }
 
-    if (rawName && adp != null && pos) {
-      players.push({ name: rawName, position: pos, nfl_team: team || null, adp });
-    }
-  });
-
-  return players;
+  out.sort((a, b) => a.adp - b.adp);
+  return out;
 }
 
-module.exports = { scrapeDraftSharks, parseRoundPick };
+module.exports = { scrapeDraftSharks };

@@ -18,10 +18,11 @@ import PlayerRow from './PlayerRow';
 // Pixel widths for each column key — used in colgroup for both header and body tables
 const COL_PX = {
   drag: 24, my_rank: 56, rank: 40, name: 200, pos: 56, bye: 40,
-  adp_fp: 64, adp_ud: 64, adp_ffc: 64,
-  adp_fp_rd: 64, adp_fp_sf: 64,
-  adp_sl_bb: 64, adp_sl_rd: 64, adp_sl_sf: 64,
-  consensus: 80, projected_pts: 64, pos_rank: 64,
+  adp_fp: 64, adp_ud: 64, adp_ffc: 64, adp_ffc_sf: 64,
+  adp_fp_rd: 64, adp_fp_sf: 64, adp_fp_dyn: 64,
+  adp_sl_rd: 64, adp_sl_sf: 64,
+  adp_espn: 64, adp_yahoo: 64,
+  consensus: 100, projected_pts: 64, pos_rank: 64,
   ktc_value: 80, fc_value: 80,
   tier: 56, flags: 64, status: 96, notes: 48,
 };
@@ -50,6 +51,9 @@ function buildColumns(format, leagueType, enabledSources) {
       ...base,
       ...(enabledSources.ktc !== false ? [{ label: 'KTC', key: 'ktc_value' }] : []),
       ...(enabledSources.fantasycalc !== false ? [{ label: 'FC', key: 'fc_value' }] : []),
+      // FantasyPros publishes a 1QB dynasty board only, so it is hidden in superflex.
+      ...(enabledSources.fantasypros !== false && !isSF ? [{ label: 'FP DYN', key: 'adp_fp_dyn' }] : []),
+      { label: 'Rank', key: 'consensus' },
       { label: 'Proj', key: 'projected_pts' },
       { label: 'Pos Rk', key: 'pos_rank' },
       ...tail,
@@ -58,27 +62,29 @@ function buildColumns(format, leagueType, enabledSources) {
 
   // ADP source columns vary by format + leagueType
   let sourceCols = [];
+  // Each format shows exactly the sources feeding its consensus, so the columns and
+  // the Consensus number always tell the same story.
   if (format === 'BB' && !isSF) {
     sourceCols = [
-      ...(enabledSources.fantasypros !== false ? [{ label: 'FP', key: 'adp_fp' }] : []),
       ...(enabledSources.underdog !== false ? [{ label: 'UD', key: 'adp_ud' }] : []),
-      ...(enabledSources.sleeper !== false ? [{ label: 'SL', key: 'adp_sl_rd' }] : []),
+      ...(enabledSources.fantasypros !== false ? [{ label: 'FP BB', key: 'adp_fp' }] : []),
     ];
   } else if (format === 'BB' && isSF) {
     sourceCols = [
       ...(enabledSources.fantasypros !== false ? [{ label: 'FP SF', key: 'adp_fp_sf' }] : []),
-      ...(enabledSources.underdog !== false ? [{ label: 'UD', key: 'adp_ud' }] : []),
       ...(enabledSources.sleeper !== false ? [{ label: 'SL SF', key: 'adp_sl_sf' }] : []),
     ];
   } else if (format === 'RD' && !isSF) {
     sourceCols = [
-      ...(enabledSources.fantasypros !== false ? [{ label: 'FP', key: 'adp_fp_rd' }] : []),
       ...(enabledSources.ffc !== false ? [{ label: 'FFC', key: 'adp_ffc' }] : []),
+      ...(enabledSources.fantasypros !== false ? [{ label: 'FP', key: 'adp_fp_rd' }] : []),
       ...(enabledSources.sleeper !== false ? [{ label: 'SL', key: 'adp_sl_rd' }] : []),
+      ...(enabledSources.market !== false ? [{ label: 'ESPN', key: 'adp_espn' }, { label: 'YAH', key: 'adp_yahoo' }] : []),
     ];
   } else {
-    // RD SF
+    // RD superflex
     sourceCols = [
+      ...(enabledSources.ffc !== false ? [{ label: 'FFC SF', key: 'adp_ffc_sf' }] : []),
       ...(enabledSources.fantasypros !== false ? [{ label: 'FP SF', key: 'adp_fp_sf' }] : []),
       ...(enabledSources.sleeper !== false ? [{ label: 'SL SF', key: 'adp_sl_sf' }] : []),
     ];

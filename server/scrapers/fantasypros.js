@@ -1,174 +1,145 @@
-const axios = require('axios');
-const cheerio = require('cheerio');
 const { db } = require('../db');
+const { get, extractJsObject } = require('../utils/http');
 const { normalizeName } = require('../utils/normalize');
+const { createMatcher } = require('../utils/match');
 
-const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-  'Accept-Language': 'en-US,en;q=0.5',
-  'Referer': 'https://www.fantasypros.com/',
-};
+const POS_ALLOW = new Set(['QB', 'RB', 'WR', 'TE']);
 
-const POS_MAP = { 'QB': 'QB', 'RB': 'RB', 'WR': 'WR', 'TE': 'TE', 'K': 'K', 'DST': 'DEF', 'DEF': 'DEF' };
-function parsePosition(raw) {
-  return POS_MAP[(raw || '').toUpperCase().trim()] || raw?.toUpperCase().trim() || null;
-}
-
-// Three format-specific FantasyPros ranking pages
+// FantasyPros renders its ranking tables client-side; the ECR payload is embedded
+// as `ecrData`. Note that best-ball-cheatsheets.php now 302s to the generic
+// consensus page — best-ball-overall.php is the live best-ball URL.
 const FP_SOURCES = [
-  { url: 'https://www.fantasypros.com/nfl/rankings/best-ball-cheatsheets.php', column: 'adp_fantasypros', label: 'BB 1QB' },
-  { url: 'https://www.fantasypros.com/nfl/rankings/half-point-ppr-cheatsheets.php', column: 'adp_fp_rd', label: 'RD 0.5PPR' },
-  { url: 'https://www.fantasypros.com/nfl/rankings/superflex-cheatsheets.php', column: 'adp_fp_sf', label: 'SF/2QB' },
+  { url: 'https://www.fantasypros.com/nfl/rankings/best-ball-overall.php',          column: 'adp_fantasypros', label: 'Best Ball', primary: true },
+  { url: 'https://www.fantasypros.com/nfl/rankings/half-point-ppr-cheatsheets.php', column: 'adp_fp_rd',       label: 'Redraft ½PPR' },
+  { url: 'https://www.fantasypros.com/nfl/rankings/superflex-cheatsheets.php',      column: 'adp_fp_sf',       label: 'Superflex' },
+  { url: 'https://www.fantasypros.com/nfl/rankings/dynasty-overall.php',            column: 'adp_fp_dyn',      label: 'Dynasty' },
 ];
 
-async function scrapeOneFPPage(url) {
-  const res = await axios.get(url, { headers: HEADERS, timeout: 20000 });
-  if (res.status !== 200 || !res.data || res.data.length < 500) return [];
+function parseByeWeek(raw) {
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 1 && n <= 18 ? n : null;
+}
 
-  const $ = cheerio.load(res.data);
+async function scrapeFpPage(url) {
+  const res = await get(url);
+  const data = extractJsObject(res.data, 'ecrData');
+  if (!data || !Array.isArray(data.players)) throw new Error(`No ecrData at ${url}`);
+
   const players = [];
-
-  $('table#ranking-table tbody tr, table.ranking-table tbody tr, #data tr').each((i, row) => {
-    const cells = $(row).find('td');
-    if (cells.length < 4) return;
-
-    const rankText = $(cells[0]).text().trim();
-    const rank = parseFloat(rankText) || (i + 1);
-
-    const nameCell = $(cells[2]).length ? $(cells[2]) : $(cells[1]);
-    const nameEl = nameCell.find('.player-name, .player-info a, a').first();
-    const name = (nameEl.text() || nameCell.text()).trim().replace(/\s+/g, ' ').split('\n')[0].trim();
-
-    const posTeamText = nameCell.find('small, .player-team').text().trim();
-    const parts = posTeamText.split(/\s*[-–]\s*|\s+/);
-    let position = null;
-    let nfl_team = null;
-
-    if (parts.length >= 2) {
-      position = parsePosition(parts[0]);
-      nfl_team = parts[parts.length - 1].toUpperCase();
-    } else if (parts.length === 1) {
-      position = parsePosition(parts[0]);
-    }
-
-    if (!position) {
-      const posCell = $(cells[3]).text().trim();
-      position = parsePosition(posCell);
-    }
-
-    if (!name || name.length < 2) return;
-    players.push({ name, position, nfl_team, rank });
-  });
-
-  // Fallback: embedded JSON
-  if (players.length === 0) {
-    const scriptContent = $('script').map((i, el) => $(el).html()).get().join('\n');
-    const match = scriptContent.match(/ecrData\s*=\s*(\{[\s\S]*?\});/);
-    if (match) {
-      try {
-        const data = JSON.parse(match[1]);
-        (data.players || []).forEach((p, i) => {
-          players.push({
-            name: p.player_name || p.name,
-            position: parsePosition(p.player_position_id || p.position),
-            nfl_team: p.player_team_id || p.team,
-            rank: p.rank_ecr || p.rank || i + 1,
-          });
-        });
-      } catch {}
-    }
+  for (const p of data.players) {
+    const position = (p.player_position_id || '').toUpperCase();
+    if (!POS_ALLOW.has(position)) continue;
+    const name = (p.player_name || '').trim();
+    const rank = Number(p.rank_ecr);
+    if (!name || !Number.isFinite(rank) || rank <= 0) continue;
+    players.push({
+      name,
+      position,
+      nfl_team: (p.player_team_id || '').toUpperCase() || null,
+      rank,
+      bye_week: parseByeWeek(p.player_bye_week),
+      tier: Number.isFinite(Number(p.tier)) ? Number(p.tier) : null,
+      pos_rank: parseInt(String(p.pos_rank || '').replace(/\D/g, ''), 10) || null,
+    });
   }
-
-  return players;
+  return { players, year: data.year, updated: data.last_updated };
 }
 
 async function fetchFantasyPros() {
-  const getPlayer = db.prepare(`SELECT * FROM players WHERE name = ? AND position = ?`);
-  const getByNorm = db.prepare(`SELECT * FROM players WHERE name_normalized = ? AND position = ?`);
-  const upsertPlayer = db.prepare(`
-    INSERT INTO players (name, position, nfl_team, adp_fantasypros, pos_rank_fantasypros, last_updated)
-    VALUES (@name, @position, @nfl_team, @adp_fantasypros, @pos_rank_fantasypros, @last_updated)
-    ON CONFLICT DO NOTHING
+  const findPlayer = createMatcher(db);
+  const now = new Date().toISOString();
+
+  const insertPlayer = db.prepare(`
+    INSERT INTO players (name, name_normalized, position, nfl_team, bye_week, last_updated)
+    VALUES (@name, @name_normalized, @position, @nfl_team, @bye_week, @last_updated)
   `);
   const updateMeta = db.prepare(`
-    UPDATE source_metadata SET last_fetched = ?, player_count = ?, status = ? WHERE source = 'fantasypros'
+    UPDATE source_metadata SET last_fetched = ?, player_count = ?, status = ?, notes = ? WHERE source = 'fantasypros'
   `);
 
-  function findExisting(name, pos) {
-    return getPlayer.get(name, pos) || getByNorm.get(normalizeName(name), pos) || null;
-  }
-
-  // Fetch all 3 pages in parallel
   const results = await Promise.allSettled(
-    FP_SOURCES.map(src => scrapeOneFPPage(src.url).then(players => ({ ...src, players })))
+    FP_SOURCES.map(src => scrapeFpPage(src.url).then(r => ({ ...src, ...r })))
   );
 
-  const now = new Date().toISOString();
-  let totalCount = 0;
-  let anySuccess = false;
+  const notes = [];
+  const failures = [];
+  let primaryCount = 0;
 
-  for (const result of results) {
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    const src = FP_SOURCES[i];
+
     if (result.status === 'rejected') {
-      console.warn(`[FantasyPros] Fetch failed: ${result.reason?.message}`);
-      continue;
-    }
-    const { url, column, label, players } = result.value;
-    if (players.length === 0) {
-      console.warn(`[FantasyPros] No players parsed from ${label} (${url})`);
+      failures.push(`${src.label}: ${result.reason?.message || 'failed'}`);
+      console.warn(`[FantasyPros] ${src.label} failed: ${result.reason?.message}`);
       continue;
     }
 
-    // Build per-column update statement dynamically
-    const updateByName = db.prepare(`
-      UPDATE players SET ${column} = @val, pos_rank_fantasypros = @posRank,
-        nfl_team = COALESCE(@nfl_team, nfl_team), last_updated = @last_updated
-      WHERE name = @name AND position = @position
-    `);
-    const updateById = db.prepare(`
-      UPDATE players SET ${column} = @val, pos_rank_fantasypros = @posRank,
-        nfl_team = COALESCE(@nfl_team, nfl_team), last_updated = @last_updated
+    const { column, label, players, primary } = result.value;
+    if (players.length === 0) {
+      failures.push(`${label}: empty`);
+      continue;
+    }
+
+    // Built per column, so the column name never comes from request input.
+    const updateRank = db.prepare(`
+      UPDATE players
+      SET ${column} = @rank,
+          nfl_team = COALESCE(@nfl_team, nfl_team),
+          bye_week = COALESCE(@bye_week, bye_week),
+          last_updated = @ts
       WHERE id = @id
     `);
+    const updatePrimaryExtras = db.prepare(`
+      UPDATE players SET pos_rank_fantasypros = @pos_rank, fp_tier = @tier WHERE id = @id
+    `);
 
-    const posRankCounters = {};
-    const run = db.transaction(() => {
-      let count = 0;
-      players.forEach(p => {
-        if (!p.name || !p.position) return;
-        posRankCounters[p.position] = (posRankCounters[p.position] || 0) + 1;
-        const posRank = posRankCounters[p.position];
+    const count = db.transaction(() => {
+      let n = 0;
+      for (const p of players) {
+        let target = findPlayer(p.name, p.position, p.nfl_team);
 
-        const existing = findExisting(p.name, p.position);
-        const row = { val: p.rank, posRank, nfl_team: p.nfl_team || null, last_updated: now };
-
-        if (existing) {
-          updateById.run({ ...row, id: existing.id });
-        } else if (column === 'adp_fantasypros') {
-          // Only insert new players when processing the primary column
-          upsertPlayer.run({ name: p.name, position: p.position, nfl_team: p.nfl_team || null,
-            adp_fantasypros: p.rank, pos_rank_fantasypros: posRank, last_updated: now });
-        } else {
-          updateByName.run({ ...row, name: p.name, position: p.position });
+        // Only the best-ball page may introduce players; the other pages would
+        // otherwise create duplicate rows for anyone the matcher misses.
+        if (!target && primary) {
+          const info = insertPlayer.run({
+            name: p.name,
+            name_normalized: normalizeName(p.name),
+            position: p.position,
+            nfl_team: p.nfl_team,
+            bye_week: p.bye_week,
+            last_updated: now,
+          });
+          target = { id: info.lastInsertRowid };
         }
-        count++;
-      });
-      return count;
-    });
+        if (!target) continue;
 
-    const count = run();
-    totalCount += count;
-    anySuccess = true;
+        updateRank.run({ id: target.id, rank: p.rank, nfl_team: p.nfl_team, bye_week: p.bye_week, ts: now });
+        if (primary) updatePrimaryExtras.run({ id: target.id, pos_rank: p.pos_rank, tier: p.tier });
+        n++;
+      }
+      return n;
+    })();
+
+    if (primary) primaryCount = count;
+    notes.push(`${label} ${count}`);
     console.log(`[FantasyPros] ${label}: ${count} players → ${column}`);
   }
 
-  if (!anySuccess) {
-    updateMeta.run(now, 0, 'error');
-    return { success: false, error: 'All FantasyPros URLs failed', source: 'fantasypros', timestamp: now };
+  if (notes.length === 0) {
+    updateMeta.run(now, 0, 'error', failures.join('; ').slice(0, 300));
+    return { success: false, error: `All FantasyPros pages failed: ${failures.join('; ')}`, source: 'fantasypros', timestamp: now };
   }
 
-  updateMeta.run(now, totalCount, 'ok');
-  return { success: true, players_updated: totalCount, source: 'fantasypros', timestamp: now };
+  updateMeta.run(now, primaryCount, 'ok', notes.join(', ') + (failures.length ? ` | failed: ${failures.join('; ')}` : ''));
+  return {
+    success: true,
+    players_updated: primaryCount,
+    pages: notes,
+    failed_pages: failures,
+    source: 'fantasypros',
+    timestamp: now,
+  };
 }
 
 module.exports = { fetchFantasyPros };

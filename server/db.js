@@ -82,6 +82,14 @@ addColumnIfMissing('players', 'adp_fp_sf', 'REAL');
 addColumnIfMissing('players', 'adp_sl_bb', 'REAL');
 addColumnIfMissing('players', 'adp_sl_rd', 'REAL');
 addColumnIfMissing('players', 'adp_sl_sf', 'REAL');
+addColumnIfMissing('players', 'adp_sl_dyn', 'REAL');
+addColumnIfMissing('players', 'adp_sl_dyn_sf', 'REAL');
+addColumnIfMissing('players', 'adp_fp_dyn', 'REAL');
+addColumnIfMissing('players', 'adp_ffc_sf', 'REAL');
+addColumnIfMissing('players', 'adp_yahoo', 'REAL');
+addColumnIfMissing('players', 'dyn_rank_consensus', 'REAL');
+addColumnIfMissing('players', 'dyn_rank_consensus_sf', 'REAL');
+addColumnIfMissing('players', 'fp_tier', 'INTEGER');
 
 // Populate name_normalized for any rows missing it
 (function populateNameNormalized() {
@@ -99,14 +107,39 @@ addColumnIfMissing('players', 'adp_sl_sf', 'REAL');
 const initSource = db.prepare(`
   INSERT OR IGNORE INTO source_metadata (source, status) VALUES (?, 'never')
 `);
-['fantasypros', 'underdog', 'sleeper', 'ffc', 'ktc', 'fantasycalc'].forEach(s => initSource.run(s));
+['fantasypros', 'underdog', 'sleeper', 'ffc', 'ktc', 'fantasycalc', 'market'].forEach(s => initSource.run(s));
 
-// Average non-null ADP values from best-ball sources (FP, UD, FFC)
-// Sleeper ADP is excluded because search_rank is Superflex-weighted
-function computeConsensus(fp, ud, ffc = null) {
-  const vals = [fp, ud, ffc].filter(v => v != null && !isNaN(v));
-  if (vals.length === 0) return null;
-  return vals.reduce((a, b) => a + b, 0) / vals.length;
+// Lookup indexes for the matcher and the projection-rank subquery.
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_players_norm_pos ON players (name_normalized, position);
+  CREATE INDEX IF NOT EXISTS idx_players_sleeper_id ON players (sleeper_player_id);
+  CREATE INDEX IF NOT EXISTS idx_players_pos_proj ON players (position, projected_pts);
+`);
+
+// Source columns that feed the consensus for each format + league type.
+// Sleeper's own per-format ADP is used directly; nothing here mixes scales.
+const CONSENSUS_SOURCES = {
+  // Best ball: only genuinely best-ball markets. Redraft ADP drafts QBs and TEs
+  // later than best ball does, so folding it in here would skew those positions.
+  'BB:1QB':  ['adp_underdog', 'adp_fantasypros'],
+  // Underdog's contests are 1QB, so its ADP is deliberately absent from the SF set.
+  'BB:2QB':  ['adp_fp_sf', 'adp_sl_sf'],
+  'RD:1QB':  ['adp_ffc', 'adp_fp_rd', 'adp_sl_rd', 'adp_espn', 'adp_yahoo'],
+  'RD:2QB':  ['adp_ffc_sf', 'adp_fp_sf', 'adp_sl_sf'],
+};
+
+function consensusColumns(format, leagueType) {
+  return CONSENSUS_SOURCES[`${format}:${leagueType === '2QB' ? '2QB' : '1QB'}`] || [];
 }
 
-module.exports = { db, computeConsensus, DB_PATH };
+// Mean of the non-null source ADPs for a row, rounded to one decimal.
+function computeConsensus(row, format, leagueType) {
+  const vals = consensusColumns(format, leagueType)
+    .map(c => row[c])
+    .filter(v => v != null && Number.isFinite(Number(v)))
+    .map(Number);
+  if (vals.length === 0) return null;
+  return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
+}
+
+module.exports = { db, computeConsensus, consensusColumns, CONSENSUS_SOURCES, DB_PATH };
