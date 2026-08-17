@@ -13,7 +13,19 @@ const { db } = require('../db');
 const { viewSources, COLUMNS, DEFAULT_OFF_FAMILIES } = require('../sources');
 
 const SEASON = new Date().getFullYear();
-const OUT = process.argv[2] || path.join(__dirname, '..', '..', 'cheatsheets', `draft-room-${SEASON}.html`);
+
+// --draft <id|url> attaches a live Sleeper draft; --user <name> marks your own picks
+// and counts down to your turn. Without them the sheet is the static snapshot it has
+// always been.
+const argv = process.argv.slice(2);
+const flag = (name) => {
+  const i = argv.indexOf(`--${name}`);
+  return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null;
+};
+const positional = argv.filter((a, i) =>
+  !a.startsWith('--') && !(i > 0 && argv[i - 1].startsWith('--')));
+
+const OUT = positional[0] || path.join(__dirname, '..', '..', 'cheatsheets', `draft-room-${SEASON}.html`);
 const ASSETS = path.join(__dirname, '..', 'cheatsheet');
 
 const FORMATS = [['BB', '1QB'], ['BB', '2QB'], ['RD', '1QB'], ['RD', '2QB'], ['DYN', '1QB'], ['DYN', '2QB']];
@@ -86,6 +98,9 @@ const num = v => (v == null ? null : Math.round(Number(v) * 10) / 10);
 const int = v => (v == null ? null : Math.round(Number(v)));
 
 const players = rows.filter(r => keep.has(r.id)).map(r => ({
+  // sid is Sleeper's own player id — how a live draft's picks find their row without
+  // going anywhere near name matching.
+  sid: r.sleeper_player_id || null,
   n: r.name, t: r.nfl_team, p: r.position, b: r.bye_week, pr: num(r.projected_pts),
   ud: num(r.adp_underdog), fpb: num(r.adp_fantasypros), fpr: num(r.adp_fp_rd),
   fps: num(r.adp_fp_sf), fpd: num(r.adp_fp_dyn), ffc: num(r.adp_ffc), ffs: num(r.adp_ffc_sf),
@@ -111,6 +126,28 @@ const fetchedAt = key => {
 
 const css = fs.readFileSync(path.join(ASSETS, 'style.css'), 'utf8');
 const js = fs.readFileSync(path.join(ASSETS, 'board.js'), 'utf8');
+const liveJs = fs.readFileSync(path.join(ASSETS, 'live.js'), 'utf8');
+
+// Accepts a draft URL or a bare id, the same as the app.
+const draftRef = flag('draft');
+const draftId = draftRef
+  ? (/^\d{6,25}$/.test(draftRef.trim())
+      ? draftRef.trim()
+      : (draftRef.match(/sleeper\.(?:com|app)\/draft\/[a-z]+\/(\d{6,25})/i) || [])[1] || null)
+  : null;
+if (draftRef && !draftId) {
+  console.error(`Could not read a draft id from "${draftRef}"`);
+  process.exit(1);
+}
+// Sleeper's scoring_type says half_ppr for a best ball league and a redraft one alike,
+// so which of the two this is cannot be read off the draft — take it from --format,
+// defaulting to redraft. Dynasty and superflex it can tell, and does.
+const liveFormat = ['BB', 'RD'].includes((flag('format') || '').toUpperCase())
+  ? flag('format').toUpperCase()
+  : 'RD';
+const LIVE = draftId
+  ? { draftId, username: flag('user'), slot: null, season: String(SEASON), format: liveFormat }
+  : null;
 const builtAt = new Date().toUTCString().replace(/^\w+, /, '').replace(/:\d\d GMT$/, ' UTC');
 
 const html = `<!doctype html>
@@ -183,8 +220,17 @@ ${css}
         <button data-set="pos=TE" data-p="TE" aria-pressed="false">TE</button>
       </div>
     </div>
+    ${LIVE ? `<div class="group">
+      <span class="lab">Drafted</span>
+      <div class="seg" role="group" aria-label="Players already taken">
+        <button data-set="hideTaken=1" aria-pressed="true">Hide</button>
+        <button data-set="hideTaken=0" aria-pressed="false">Show</button>
+      </div>
+    </div>` : ''}
     <div class="note" id="count"></div>
   </nav>
+
+  <div id="livebar" class="livebar" hidden></div>
 
   <section class="sec" id="sources-sec">
     <div class="sec-head">
@@ -271,7 +317,10 @@ const SOURCE_META = ${JSON.stringify(SOURCE_META)};
 const FAMILY_OF = ${JSON.stringify(FAMILY_OF)};
 const DEFAULT_OFF = ${JSON.stringify(DEFAULT_OFF_FAMILIES)};
 const REFERENCE_SOURCES = ${JSON.stringify(REFERENCE_SOURCES)};
+const LIVE = ${JSON.stringify(LIVE)};
+${liveJs}
 ${js}
+startLive();
 </script>
 </body>
 </html>

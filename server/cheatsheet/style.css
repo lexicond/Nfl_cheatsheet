@@ -354,3 +354,54 @@ footer .fine { color: var(--faint); line-height: 1.7; }
   padding: 4px 6px; cursor: pointer;
 }
 .selectish:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+
+/* ---- live Sleeper draft ---------------------------------------------------
+   Styled from the existing tokens so both themes follow without a second
+   palette. --rb is the sheet's green and doubles as the live signal. */
+.livebar {
+  position: sticky; top: 0; z-index: 40;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap;
+  margin: 0 0 10px;
+  padding: 8px 11px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--rb);
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+  font-size: 11.5px;
+}
+.livebar .lv-left, .livebar .lv-right {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+}
+.lv-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--rb);
+  flex: none; animation: lvpulse 2s ease-in-out infinite;
+}
+.lv-dot.bad { background: var(--te); animation: none; }
+@keyframes lvpulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .lv-dot { animation: none; } }
+
+.lv-name { font-weight: 600; color: var(--ink); }
+.lv-count { font-family: var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.lv-count b { color: var(--ink); }
+.lv-turn { font-family: var(--mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.lv-turn b { color: var(--rb); }
+.lv-done { font-family: var(--mono); color: var(--muted); }
+.lv-warn { font-family: var(--mono); color: var(--te); font-size: 10.5px; }
+.lv-you {
+  font-family: var(--mono); font-weight: 600; letter-spacing: .08em;
+  color: var(--rb); background: var(--rb-bg);
+  border: 1px solid var(--rb); border-radius: 3px; padding: 2px 7px;
+}
+
+/* A player already taken, when "Show" is on. */
+tr.taken { opacity: .42; }
+tr.taken .pname { text-decoration: line-through; text-decoration-thickness: 1px; }
+.tkchip {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .05em;
+  color: var(--muted); background: var(--sunk);
+  border: 1px solid var(--rule); border-radius: 2px;
+  padding: 1px 4px; white-space: nowrap;
+}
+.tkchip.mine { color: var(--rb); border-color: var(--rb); background: var(--rb-bg); }
