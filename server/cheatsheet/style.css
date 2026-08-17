@@ -163,16 +163,44 @@ body {
 .map-ticks span { position: absolute; transform: translateX(-50%); }
 
 /* ---------- board ---------- */
-.round {
-  display: flex; align-items: center; gap: 10px;
-  margin: 18px 0 6px;
-  font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted);
+/* One table for the whole board, so the header can stay put while you scroll it.
+   Chrome will not stick a cell inside a border-collapse: collapse table, so the board
+   table uses separate borders with zero spacing — visually identical, since every rule
+   here is a single cell border. */
+.board-table { border-collapse: separate; border-spacing: 0; }
+.board-table thead th {
+  position: sticky; top: 0; z-index: 5;
+  background: var(--paper);
+  box-shadow: inset 0 -1px 0 var(--rule-2);
 }
-.round::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
-.round:first-child { margin-top: 0; }
+/* Round markers are dividers, not pinned headings — Chrome will not reliably stick a
+   tbody cell, and the Rd column carries the round on every row anyway. */
+.board-table tbody tr.roundrow td {
+  background: var(--paper);
+  padding: 10px 8px 4px;
+  font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--muted); text-align: left;
+  border-bottom: 1px solid var(--rule-2);
+}
+.board-table tbody tr.roundrow:hover td { background: var(--paper); }
+.muted { color: var(--faint); }
+.gap-cheap { color: var(--rb); font-weight: 700; }
+.gap-dear { color: var(--te); font-weight: 700; }
+.split-wide { color: var(--te); }
 
 table { width: 100%; border-collapse: collapse; }
 .scroller { overflow-x: auto; }
+
+/* The board scrolls inside its own pane rather than with the page.
+   A horizontal-overflow wrapper is always a scroll container, so a header inside it can
+   never stick to the page — giving the pane a height instead means the header sticks to
+   something real, and stays visible for all 240 rows. */
+.board-scroll {
+  max-height: calc(100vh - 130px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-bottom: 1px solid var(--rule);
+}
 thead th {
   text-align: right; font-weight: 400; font-size: 10px; letter-spacing: .1em;
   text-transform: uppercase; color: var(--faint);
@@ -317,3 +345,12 @@ footer .fine { color: var(--faint); line-height: 1.7; }
 }
 .srcreset:hover { color: var(--ink); }
 @media (max-width: 700px) { .srccard .tip { width: min(300px, 78vw); } }
+
+/* ---------- sort + team size ---------- */
+.selectish {
+  font: inherit; font-size: 11px; letter-spacing: .02em;
+  background: var(--card); color: var(--ink);
+  border: 1px solid var(--rule-2); border-radius: 3px;
+  padding: 4px 6px; cursor: pointer;
+}
+.selectish:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }

@@ -10,45 +10,21 @@ const SORT_COMMON = [
   { value: 'projected_pts', label: 'Proj Pts' },
 ];
 
-// Sort options mirror the columns each format actually shows.
-function getSortOptions(format, leagueType) {
-  const isSF = leagueType === '2QB';
+// Sort options are built from the sources currently switched on, so the dropdown never
+// offers a column the board is not showing.
+function getSortOptions(view, excluded, format) {
   const consensus = { value: 'adp_consensus', label: format === 'DYN' ? 'Dynasty Rank' : 'Consensus' };
+  if (!view) return [consensus, ...SORT_COMMON];
 
-  if (format === 'DYN') return [
+  const active = [...view.consensus, ...view.reference].filter(s => !excluded.includes(s.family));
+  return [
     consensus,
-    { value: 'ktc_value', label: 'KeepTradeCut' },
-    { value: 'ds_value', label: 'DynastySuperflex' },
-    { value: 'fc_value', label: 'FantasyCalc' },
-    { value: isSF ? 'adp_fp_dyn_sf' : 'adp_fp_dyn', label: 'FantasyPros DYN' },
-    { value: 'adp_sl_dyn', label: 'Sleeper DYN' },
-    { value: 'age', label: 'Age (youngest)' },
+    ...active.map(s => ({ value: s.column, label: s.label })),
+    { value: 'sleeper_gap', label: 'Cheapest on Sleeper' },
+    { value: 'spread', label: 'Most disagreement' },
+    ...(format === 'DYN' ? [{ value: 'age', label: 'Age (youngest)' }] : []),
     ...SORT_COMMON,
   ];
-
-  if (format === 'BB') return isSF
-    ? [consensus,
-       { value: 'adp_fp_sf', label: 'FantasyPros SF' },
-       { value: 'adp_sl_sf', label: 'Sleeper SF' },
-       ...SORT_COMMON]
-    : [consensus,
-       { value: 'adp_underdog', label: 'Underdog ADP' },
-       { value: 'adp_fantasypros', label: 'FantasyPros BB' },
-       ...SORT_COMMON];
-
-  return isSF
-    ? [consensus,
-       { value: 'adp_ffc_sf', label: 'FFC 2QB' },
-       { value: 'adp_fp_sf', label: 'FantasyPros SF' },
-       { value: 'adp_sl_sf', label: 'Sleeper SF' },
-       ...SORT_COMMON]
-    : [consensus,
-       { value: 'adp_ffc', label: 'FFC ADP' },
-       { value: 'adp_fp_rd', label: 'FantasyPros' },
-       { value: 'adp_sl_rd', label: 'Sleeper ADP' },
-       { value: 'adp_espn', label: 'ESPN ADP' },
-       { value: 'adp_yahoo', label: 'Yahoo ADP' },
-       ...SORT_COMMON];
 }
 
 const POS_COLORS = {
@@ -69,6 +45,8 @@ const LEAGUE_TYPES = [
   { value: '2QB', label: 'SF/2QB' },
 ];
 
+const TEAM_SIZES = [8, 10, 12, 14];
+
 // Position scarcity context for best ball 3WR format
 const SCARCITY = {
   WR: { format: 'BB', label: '3 starters · depth premium' },
@@ -79,7 +57,8 @@ const SCARCITY = {
 
 const FilterBar = forwardRef(function FilterBar(
   { filters, setFilter, sourceStatus, refreshing, onRefresh, format, setFormat,
-    leagueType, setLeagueType, view, excluded, onToggleSource, onResetSources, formatLabel },
+    leagueType, setLeagueType, view, excluded, onToggleSource, onEnableAllSources,
+    formatLabel, teamSize, setTeamSize },
   ref
 ) {
   const searchRef = useRef(null);
@@ -203,7 +182,7 @@ const FilterBar = forwardRef(function FilterBar(
           className="input text-xs py-1 pr-6"
         >
           <option value="">Default</option>
-          {getSortOptions(format, leagueType).map(o => (
+          {getSortOptions(view, excluded, format).map(o => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
@@ -224,7 +203,7 @@ const FilterBar = forwardRef(function FilterBar(
             view={view}
             excluded={excluded}
             onToggleSource={onToggleSource}
-            onResetSources={onResetSources}
+            onEnableAllSources={onEnableAllSources}
             sourceStatus={sourceStatus}
             formatLabel={formatLabel}
             leagueType={leagueType}
@@ -270,6 +249,26 @@ const FilterBar = forwardRef(function FilterBar(
               }`}
             >
               {lt.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="w-px h-4 bg-[#2e3148]" />
+
+        <span className="text-xs text-[#555875]">Teams:</span>
+        <div className="flex items-center gap-1">
+          {TEAM_SIZES.map(n => (
+            <button
+              key={n}
+              onClick={() => setTeamSize(n)}
+              className={`text-xs px-2 py-0.5 rounded border transition-colors font-medium ${
+                teamSize === n
+                  ? 'bg-green-500/20 border-green-500/50 text-green-300'
+                  : 'border-[#2e3148] text-[#555875] hover:text-[#8b90a8]'
+              }`}
+              title={`${n}-team league — sets round boundaries and tier bands`}
+            >
+              {n}
             </button>
           ))}
         </div>

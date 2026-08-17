@@ -61,7 +61,7 @@ function SourceRow({ source, enabled, onToggle, status, canToggle }) {
         id={`src-${source.column}`}
         checked={enabled}
         disabled={!canToggle}
-        onChange={() => onToggle(source.column)}
+        onChange={() => onToggle()}
         className="accent-blue-500 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
       />
       <label
@@ -87,7 +87,7 @@ function SourceRow({ source, enabled, onToggle, status, canToggle }) {
 }
 
 export default function SourcePanel({
-  view, excluded = [], onToggleSource, onResetSources,
+  view, excluded = [], onToggleSource, onEnableAllSources,
   sourceStatus = {}, formatLabel, leagueType,
 }) {
   const [open, setOpen] = useState(false);
@@ -104,8 +104,11 @@ export default function SourcePanel({
 
   if (!view) return null;
 
-  const isExcluded = col => excluded.includes(col);
-  const averaged = view.consensus.filter(s => !isExcluded(s.column));
+  // Exclusions are held by family, so a market stays off across 1QB and Superflex.
+  const isExcluded = src => excluded.includes(src.family);
+  const averaged = view.consensus.filter(s => !isExcluded(s));
+  // Only call the view edited if something it actually offers has been switched off.
+  const editedHere = [...view.consensus, ...view.reference].some(isExcluded);
   // Never let the last source be switched off — the board would have nothing to rank by.
   const canToggleOff = averaged.length > 1;
 
@@ -119,7 +122,7 @@ export default function SourcePanel({
       >
         <span className="text-[#8b90a8]">Sources</span>
         <span className="font-mono text-[#e8eaf0]">{averaged.length}/{view.consensus.length}</span>
-        {excluded.length > 0 && <span className="text-amber-400 text-[10px]">edited</span>}
+        {editedHere && <span className="text-amber-400 text-[10px]">edited</span>}
         <span className="text-[#555875]">{open ? '▲' : '▼'}</span>
       </button>
 
@@ -143,9 +146,9 @@ export default function SourcePanel({
               <SourceRow
                 key={s.column}
                 source={s}
-                enabled={!isExcluded(s.column)}
-                canToggle={isExcluded(s.column) || canToggleOff}
-                onToggle={onToggleSource}
+                enabled={!isExcluded(s)}
+                canToggle={isExcluded(s) || canToggleOff}
+                onToggle={() => onToggleSource(s.family)}
                 status={sourceStatus[s.source]}
               />
             ))}
@@ -161,9 +164,9 @@ export default function SourcePanel({
                   <SourceRow
                     key={s.column}
                     source={s}
-                    enabled={!isExcluded(s.column)}
+                    enabled={!isExcluded(s)}
                     canToggle
-                    onToggle={onToggleSource}
+                    onToggle={() => onToggleSource(s.family)}
                     status={sourceStatus[s.source]}
                   />
                 ))}
@@ -171,12 +174,12 @@ export default function SourcePanel({
             </>
           )}
 
-          {excluded.length > 0 && (
+          {editedHere && (
             <button
-              onClick={onResetSources}
+              onClick={onEnableAllSources}
               className="btn-ghost text-[11px] px-2 py-1 mt-3 w-full"
             >
-              Turn all sources back on
+              Turn every source on
             </button>
           )}
         </div>

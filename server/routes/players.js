@@ -1,47 +1,44 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
-const { viewSources } = require('../sources');
+const { viewSources, sleeperBaseline, COLUMNS, FIELD_ALIAS } = require('../sources');
 const { applyConsensus, activeColumns, parseExcluded } = require('../consensus');
 
 const FORMATS = new Set(['BB', 'RD', 'DYN']);
 const LEAGUE_TYPES = new Set(['1QB', '2QB']);
+const TEAM_SIZES = [8, 10, 12, 14];
 
 // Sort keys the client may ask for, mapped to how the value is read off a row.
 // Sorting happens in JS because the headline number (consensus, dynasty rank) is
 // derived per request from the format, and does not exist as a column.
-const SORT_KEYS = {
-  personal_rank:   { get: r => r.personal_rank, dir: 'asc' },
-  adp_consensus:   { get: r => r.adp_consensus, dir: 'asc' },
-  adp_fantasypros: { get: r => r.adp_fantasypros, dir: 'asc' },
-  adp_underdog:    { get: r => r.adp_underdog, dir: 'asc' },
-  adp_ffc:         { get: r => r.adp_ffc, dir: 'asc' },
-  adp_ffc_sf:      { get: r => r.adp_ffc_sf, dir: 'asc' },
-  adp_fp_rd:       { get: r => r.adp_fp_rd, dir: 'asc' },
-  adp_fp_sf:       { get: r => r.adp_fp_sf, dir: 'asc' },
-  adp_fp_dyn:      { get: r => r.adp_fp_dyn, dir: 'asc' },
-  adp_sl_rd:       { get: r => r.adp_sl_rd, dir: 'asc' },
-  adp_sl_sf:       { get: r => r.adp_sl_sf, dir: 'asc' },
-  adp_espn:        { get: r => r.adp_espn, dir: 'asc' },
-  adp_yahoo:       { get: r => r.adp_yahoo, dir: 'asc' },
-  projected_pts:   { get: r => r.projected_pts, dir: 'desc' },
-  ktc_value:       { get: r => r.ktc_value, dir: 'desc' },
-  fc_value:        { get: r => r.fc_value, dir: 'desc' },
-  ds_value:        { get: r => r.ds_value, dir: 'desc' },
-  dp_value:        { get: r => r.dp_value, dir: 'desc' },
-  adp_fp_dyn_sf:   { get: r => r.adp_fp_dyn_sf, dir: 'asc' },
-  adp_sl_dyn:      { get: r => r.adp_sl_dyn, dir: 'asc' },
-  age:             { get: r => r.age, dir: 'asc' },
+// Sort keys. Every source column is sortable by name, so the client can offer exactly
+// the sources currently switched on without this list needing to know about them.
+const DERIVED_SORTS = {
+  personal_rank: { get: r => r.personal_rank, dir: 'asc' },
+  adp_consensus: { get: r => r.adp_consensus, dir: 'asc' },
+  projected_pts: { get: r => r.projected_pts, dir: 'desc' },
+  age:           { get: r => r.age, dir: 'asc' },
+  spread:        { get: r => r.spread, dir: 'desc' },
+  sleeper_gap:   { get: r => r.sleeper_gap, dir: 'desc' },
 };
 
-// Every format defaults to its own headline number rather than a single source,
-// so the board is never ordered by a column that format does not populate.
+function sortSpec(key) {
+  if (DERIVED_SORTS[key]) return DERIVED_SORTS[key];
+  const col = COLUMNS[key];
+  if (!col) return null;
+  // A source column: values count down from the best (trade values) or up (ADP, ranks).
+  const field = FIELD_ALIAS[key] || key;
+  return { get: r => r[field], dir: col.kind === 'value' ? 'desc' : 'asc' };
+}
+
+// Every format defaults to its own headline number rather than a single source, so the
+// board is never ordered by a column that format does not populate.
 const DEFAULT_SORT = { BB: 'adp_consensus', RD: 'adp_consensus', DYN: 'adp_consensus' };
 
 // Any one of these means a source has an opinion about the player.
 const SIGNAL_COLUMNS = [
   'adp_underdog', 'adp_fantasypros', 'adp_ffc', 'adp_ffc_sf',
-  'adp_fp_rd', 'adp_fp_sf', 'adp_fp_dyn',
+  'adp_fp_rd', 'adp_fp_sf', 'adp_fp_dyn', 'adp_fp_dyn_sf',
   'adp_sl_rd', 'adp_sl_sf', 'adp_sl_dyn', 'adp_sl_dyn_sf',
   'adp_espn', 'adp_yahoo',
   'ktc_value', 'ktc_value_sf', 'fc_value', 'fc_value_sf',
@@ -49,12 +46,15 @@ const SIGNAL_COLUMNS = [
   'projected_pts',
 ];
 
-function tierFromAdp(adp) {
-  if (adp == null) return null;
-  if (adp <= 5) return 1;
-  if (adp <= 18) return 2;
-  if (adp <= 36) return 3;
-  if (adp <= 72) return 4;
+// Tier boundaries in rounds rather than picks, so they follow the league size.
+const TIER_ROUNDS = [0.5, 1.5, 3, 6];
+
+function tierForPick(pick, teamSize) {
+  if (pick == null) return null;
+  const round = pick / teamSize;
+  for (let i = 0; i < TIER_ROUNDS.length; i++) {
+    if (round <= TIER_ROUNDS[i]) return i + 1;
+  }
   return 5;
 }
 
@@ -65,6 +65,8 @@ router.get('/', (req, res) => {
     // Sources the user has switched off. They are dropped from the average, not just
     // hidden, so the headline number always matches the sources shown as feeding it.
     const excluded = parseExcluded(req.query.exclude);
+    // Round numbers and tier bands depend on how many teams are in the league.
+    const teamSize = TEAM_SIZES.includes(Number(req.query.teamSize)) ? Number(req.query.teamSize) : 12;
     const format = FORMATS.has(req.query.format) ? req.query.format : 'BB';
     const leagueType = LEAGUE_TYPES.has(req.query.leagueType) ? req.query.leagueType : '1QB';
     const isSF = leagueType === '2QB';
@@ -113,9 +115,39 @@ router.get('/', (req, res) => {
         adp_consensus: headline,
         adp_source_count: sourceCount,
         adp_trend: adpTrend,
-        tier_auto: tierFromAdp(headline),
+        // Dynasty's headline is already a rank, so it needs no pick-to-round mapping.
+        round: headline != null && format !== 'DYN' ? Math.ceil(headline / teamSize) : null,
+        tier_auto: tierForPick(headline, teamSize),
       };
     });
+
+    // How this player sits on Sleeper against the consensus. Sleeper is where the
+    // drafting happens, so the useful question is whether he comes cheaper there.
+    // Computed from Sleeper's own board whether or not Sleeper feeds the consensus.
+    const baseline = sleeperBaseline(format, leagueType);
+    if (baseline) {
+      const slRank = new Map();
+      enriched
+        .filter(p => p[baseline.column] != null)
+        .sort((a, b) => a[baseline.column] - b[baseline.column])
+        .forEach((p, i) => slRank.set(p.id, i + 1));
+
+      const consensusRank = new Map();
+      enriched
+        .filter(p => p.adp_consensus != null)
+        .sort((a, b) => a.adp_consensus - b.adp_consensus)
+        .forEach((p, i) => consensusRank.set(p.id, i + 1));
+
+      for (const p of enriched) {
+        const sl = slRank.get(p.id);
+        const cons = consensusRank.get(p.id);
+        // Positive means Sleeper drafts him later than the consensus rates him, so he
+        // can be had cheaper there.
+        p.sleeper_gap = sl != null && cons != null ? sl - cons : null;
+      }
+    } else {
+      for (const p of enriched) p.sleeper_gap = null;
+    }
 
     // Positional ranks, computed over the full pool: where a player sits among his
     // position by this format's consensus, and by projected points.
@@ -155,8 +187,7 @@ router.get('/', (req, res) => {
       return true;
     });
 
-    const sortKey = SORT_KEYS[sort] ? sort : DEFAULT_SORT[format];
-    const { get, dir } = SORT_KEYS[sortKey];
+    const { get, dir } = sortSpec(sort) || sortSpec(DEFAULT_SORT[format]);
 
     result.sort((a, b) => {
       // Drafted players always sink, whatever the sort.
@@ -175,6 +206,8 @@ router.get('/', (req, res) => {
       view: viewSources(format, leagueType),
       excluded: [...excluded],
       active_sources: activeColumns(format, leagueType, excluded),
+      team_size: teamSize,
+      sleeper_baseline: sleeperBaseline(format, leagueType),
       players: result.map(project),
     });
   } catch (err) {
@@ -193,7 +226,7 @@ const RESPONSE_FIELDS = [
   'adp_consensus', 'adp_source_count', 'adp_trend',
   'projected_pts', 'proj_pos_rank', 'pos_rank_consensus', 'value_score',
   'ktc_value', 'fc_value', 'ds_value', 'dp_value', 'adp_fp_dyn', 'adp_sl_dyn',
-  'age', 'fp_tier', 'tier_auto',
+  'age', 'fp_tier', 'tier_auto', 'round', 'spread', 'sleeper_gap',
   'personal_rank', 'tier', 'starred', 'flagged', 'drafted',
   'note_upside', 'note_downside', 'note_sources', 'note_personal',
   'last_updated',

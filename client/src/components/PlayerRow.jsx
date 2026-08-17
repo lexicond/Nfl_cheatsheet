@@ -211,6 +211,47 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
       </td>
     ),
 
+    round: (
+      <td key="round" className={`${cellClass} w-11 font-mono text-[#8b90a8] text-center`}>
+        {player.round != null ? player.round : '–'}
+      </td>
+    ),
+
+    // How this player sits on Sleeper against the consensus. Positive means Sleeper
+    // drafts him later, so he comes cheaper in the room you are actually drafting in.
+    sleeper_gap: (
+      <td key="sleeper_gap" className={`${cellClass} w-16 font-mono text-right`}>
+        {player.sleeper_gap == null || Math.abs(player.sleeper_gap) < 5 ? (
+          <span className="text-[#555875]">{player.sleeper_gap == null ? '–' : '·'}</span>
+        ) : (
+          <span
+            className={player.sleeper_gap > 0 ? 'text-green-400' : 'text-amber-400'}
+            title={player.sleeper_gap > 0
+              ? `Sleeper drafts him ${player.sleeper_gap} places later than the consensus — cheaper there`
+              : `Sleeper drafts him ${Math.abs(player.sleeper_gap)} places earlier than the consensus — dearer there`}
+          >
+            {player.sleeper_gap > 0 ? `+${player.sleeper_gap}` : player.sleeper_gap}
+          </span>
+        )}
+      </td>
+    ),
+
+    // How far apart the selected sources are on him.
+    spread: (
+      <td key="spread" className={`${cellClass} w-15 font-mono text-right`}>
+        {player.spread == null ? (
+          <span className="text-[#555875]">–</span>
+        ) : (
+          <span
+            className={player.spread >= 24 ? 'text-orange-400' : player.spread >= 12 ? 'text-[#8b90a8]' : 'text-[#555875]'}
+            title={`Your sources are ${player.spread} places apart on him`}
+          >
+            {player.spread.toFixed(0)}
+          </span>
+        )}
+      </td>
+    ),
+
     age: (
       <td key="age" className={`${cellClass} w-12 font-mono text-[#8b90a8] text-center`}>
         {player.age != null ? player.age.toFixed(0) : '–'}

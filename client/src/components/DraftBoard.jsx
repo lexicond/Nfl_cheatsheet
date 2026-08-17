@@ -24,6 +24,7 @@ const COL_PX = {
   adp_sl_rd: 64, adp_sl_sf: 64,
   adp_espn: 64, adp_yahoo: 64,
   consensus: 100, projected_pts: 64, pos_rank: 64, age: 48,
+  round: 44, sleeper_gap: 60, spread: 58,
   ktc_value: 80, fc_value: 80, ds_value: 80, dp_value: 80,
   tier: 56, flags: 64, status: 96, notes: 48,
 };
@@ -50,9 +51,11 @@ function buildColumns(format, view, excluded) {
     { label: 'Notes', key: 'notes' },
   ];
 
+  // Exclusions are held by family, not column, so a market switched off stays off
+  // across a view's 1QB and Superflex boards.
   const sourceCols = view
     ? [...view.consensus, ...view.reference]
-        .filter(src => !excluded.includes(src.column))
+        .filter(src => !excluded.includes(src.family))
         .map(src => ({ label: src.short, key: src.field, numeric: true }))
     : [];
 
@@ -60,6 +63,9 @@ function buildColumns(format, view, excluded) {
     ...base,
     ...sourceCols,
     { label: format === 'DYN' ? 'Rank' : 'Consensus', key: 'consensus' },
+    ...(format === 'DYN' ? [] : [{ label: 'Rd', key: 'round' }]),
+    { label: 'Δ SL', key: 'sleeper_gap' },
+    { label: 'Split', key: 'spread' },
     { label: 'Proj', key: 'projected_pts' },
     { label: 'Pos Rk', key: 'pos_rank' },
     ...tail,

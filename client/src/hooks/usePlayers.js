@@ -9,9 +9,10 @@ const DEFAULT_FILTERS = {
   sort: '',  // empty = server picks the format's own consensus
 };
 
-// Columns the user has switched off, by column name. Stored per view, because
-// "no ESPN" in redraft says nothing about which dynasty markets you trust.
-const DEFAULT_EXCLUDED = {};
+// Sources the user has switched off, by family. One list for the whole app rather than
+// one per view: a family covers a market's 1QB and Superflex boards together, so
+// flipping Superflex no longer silently re-enables something you turned off.
+// null means "not customised" — the server applies its own defaults.
 
 function loadLS(key, fallback) {
   try {
@@ -34,12 +35,11 @@ export function usePlayers() {
   // Format settings — persisted in localStorage
   const [format, setFormatRaw] = useState(() => loadLS('draft_format', 'BB'));
   const [leagueType, setLeagueTypeRaw] = useState(() => loadLS('draft_league_type', '1QB'));
-  const [excludedByView, setExcludedByView] = useState(() => loadLS('draft_excluded_sources', DEFAULT_EXCLUDED));
+  const [excluded, setExcludedRaw] = useState(() => loadLS('draft_excluded_families', null));
+  const [teamSize, setTeamSizeRaw] = useState(() => loadLS('draft_team_size', 12));
   const [view, setView] = useState(null);
 
   const searchDebounceRef = useRef(null);
-  const viewKey = `${format}:${leagueType}`;
-  const excluded = excludedByView[viewKey] || [];
 
   const showToast = useCallback((message, type = 'info') => {
     setToast({ message, type, id: Date.now() });
@@ -58,7 +58,8 @@ export function usePlayers() {
     currentFilters = filters,
     currentLeagueType = leagueType,
     currentFormat = format,
-    currentExcluded = null,
+    currentExcluded = undefined,
+    currentTeamSize = teamSize,
   ) => {
     setLoading(true);
     setError(null);
@@ -73,57 +74,65 @@ export function usePlayers() {
       params.set('leagueType', currentLeagueType);
       params.set('format', currentFormat);
 
-      const off = currentExcluded ?? (excludedByView[`${currentFormat}:${currentLeagueType}`] || []);
-      if (off.length > 0) params.set('exclude', off.join(','));
+      // Omitting the parameter asks for the server's defaults; sending it — even empty —
+      // means the user has made a choice, including "everything on".
+      const off = currentExcluded !== undefined ? currentExcluded : excluded;
+      if (off !== null) params.set('exclude', off.join(','));
+      params.set('teamSize', currentTeamSize);
 
       const res = await fetch(`/api/players?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setPlayers(data.players || []);
       setView(data.view || null);
+      // First load has no stored choice, so adopt whatever the server switched on.
+      if (excluded === null && Array.isArray(data.excluded)) setExcludedRaw(data.excluded);
     } catch (err) {
       setError(err.message);
       showToast(`Failed to load players: ${err.message}`, 'error');
     } finally {
       setLoading(false);
     }
-  }, [filters, leagueType, format, excludedByView, showToast]);
+  }, [filters, leagueType, format, excluded, teamSize, showToast]);
 
   const setFormat = useCallback((f) => {
     const nextFilters = { ...filters, sort: '' };
     setFormatRaw(f);
     setFiltersState(nextFilters);
     localStorage.setItem('draft_format', JSON.stringify(f));
-    fetchPlayers(nextFilters, leagueType, f, excludedByView[`${f}:${leagueType}`] || []);
-  }, [fetchPlayers, filters, leagueType, excludedByView]);
+    fetchPlayers(nextFilters, leagueType, f);
+  }, [fetchPlayers, filters, leagueType]);
 
   const setLeagueType = useCallback((lt) => {
     const nextFilters = { ...filters, sort: '' };
     setLeagueTypeRaw(lt);
     setFiltersState(nextFilters);
     localStorage.setItem('draft_league_type', JSON.stringify(lt));
-    fetchPlayers(nextFilters, lt, format, excludedByView[`${format}:${lt}`] || []);
+    fetchPlayers(nextFilters, lt, format);
   }, [fetchPlayers, filters, format]);
+
+  const applyExcluded = useCallback((next) => {
+    setExcludedRaw(next);
+    localStorage.setItem('draft_excluded_families', JSON.stringify(next));
+    fetchPlayers(filters, leagueType, format, next);
+  }, [fetchPlayers, filters, leagueType, format]);
 
   // Toggling a source changes the consensus, so the board is refetched rather than
   // just re-rendered with a column hidden.
-  const toggleSource = useCallback((column) => {
-    const current = excludedByView[viewKey] || [];
-    const next = current.includes(column)
-      ? current.filter(c => c !== column)
-      : [...current, column];
-    const merged = { ...excludedByView, [viewKey]: next };
-    setExcludedByView(merged);
-    localStorage.setItem('draft_excluded_sources', JSON.stringify(merged));
-    fetchPlayers(filters, leagueType, format, next);
-  }, [excludedByView, viewKey, fetchPlayers, filters, leagueType, format]);
+  const toggleSource = useCallback((family) => {
+    const current = excluded || [];
+    applyExcluded(current.includes(family)
+      ? current.filter(c => c !== family)
+      : [...current, family]);
+  }, [excluded, applyExcluded]);
 
-  const resetSources = useCallback(() => {
-    const merged = { ...excludedByView, [viewKey]: [] };
-    setExcludedByView(merged);
-    localStorage.setItem('draft_excluded_sources', JSON.stringify(merged));
-    fetchPlayers(filters, leagueType, format, []);
-  }, [excludedByView, viewKey, fetchPlayers, filters, leagueType, format]);
+  const enableAllSources = useCallback(() => applyExcluded([]), [applyExcluded]);
+
+  const setTeamSize = useCallback((size) => {
+    setTeamSizeRaw(size);
+    localStorage.setItem('draft_team_size', JSON.stringify(size));
+    fetchPlayers(filters, leagueType, format, undefined, size);
+  }, [fetchPlayers, filters, leagueType, format]);
 
   useEffect(() => {
     fetchPlayers();
@@ -239,8 +248,10 @@ export function usePlayers() {
     leagueType,
     setLeagueType,
     view,
-    excluded,
+    excluded: excluded || [],
     toggleSource,
-    resetSources,
+    enableAllSources,
+    teamSize,
+    setTeamSize,
   };
 }

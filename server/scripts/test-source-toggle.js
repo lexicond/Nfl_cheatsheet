@@ -11,6 +11,10 @@ const { db } = require('../db');
 const { viewSources, COLUMNS } = require('../sources');
 const { applyConsensus, activeColumns, parseExcluded } = require('../consensus');
 
+// Exclusions are held by source family, not by column, so that a market switched off
+// stays off across a view's 1QB and Superflex boards.
+const familyOf = column => COLUMNS[column].family;
+
 let fails = 0;
 const check = (name, cond, detail = '') => {
   console.log(`  ${cond ? '✓' : '✗'} ${name}${detail ? ` — ${detail}` : ''}`);
@@ -24,7 +28,7 @@ const FORMATS = [['BB', '1QB'], ['BB', '2QB'], ['RD', '1QB'], ['RD', '2QB'], ['D
 for (const [format, league] of FORMATS) {
   console.log(`\n${format}:${league}`);
   const view = viewSources(format, league);
-  const all = applyConsensus(rows, format, league);
+  const all = applyConsensus(rows, format, league, new Set());
   const baseOrder = order(all);
   const cols = view.consensus.map(s => s.column);
 
@@ -32,7 +36,7 @@ for (const [format, league] of FORMATS) {
 
   // Dropping any one input must move the board.
   for (const col of cols) {
-    const dropped = applyConsensus(rows, format, league, new Set([col]));
+    const dropped = applyConsensus(rows, format, league, new Set([familyOf(col)]));
     const changedOrder = JSON.stringify(order(dropped)) !== JSON.stringify(baseOrder);
     const changedCount = dropped.some(r => {
       const before = all.find(x => x.id === r.id);
@@ -43,37 +47,42 @@ for (const [format, league] of FORMATS) {
 
   // Reference columns are displayed but must never move the number.
   for (const ref of view.reference) {
-    const dropped = applyConsensus(rows, format, league, new Set([ref.column]));
+    const dropped = applyConsensus(rows, format, league, new Set([familyOf(ref.column)]));
     check(`dropping ${ref.short} leaves the consensus alone (reference only)`,
       JSON.stringify(order(dropped)) === JSON.stringify(baseOrder));
   }
 
   // One source left is still a usable board.
-  const lastOnly = new Set(cols.slice(1));
+  const lastOnly = new Set(cols.slice(1).map(familyOf));
   const single = applyConsensus(rows, format, league, lastOnly);
   check('a single remaining source still ranks players', order(single).length > 50,
     `${order(single).length} ranked on ${COLUMNS[cols[0]].short} alone`);
 
   // Excluding everything yields no ranking rather than a wrong one.
-  const none = applyConsensus(rows, format, league, new Set(cols));
+  const none = applyConsensus(rows, format, league, new Set(cols.map(familyOf)));
   check('excluding every source ranks nobody', order(none).length === 0);
 
   // Exclusions must not leak between views.
   const otherFormat = FORMATS.find(([f, l]) => f !== format || l !== league);
-  const leak = applyConsensus(rows, otherFormat[0], otherFormat[1], new Set(cols));
-  const clean = applyConsensus(rows, otherFormat[0], otherFormat[1]);
-  const shared = cols.filter(c => activeColumns(otherFormat[0], otherFormat[1]).includes(c));
-  if (shared.length === 0) {
+  // Families are shared deliberately across league types, so a leak check only makes
+  // sense where the other view has no family in common with this one.
+  const famSet = new Set(cols.map(familyOf));
+  const otherFams = activeColumns(otherFormat[0], otherFormat[1]).map(familyOf);
+  if (!otherFams.some(f => famSet.has(f))) {
+    const leak = applyConsensus(rows, otherFormat[0], otherFormat[1], famSet);
+    const clean = applyConsensus(rows, otherFormat[0], otherFormat[1], new Set());
     check(`exclusions do not leak into ${otherFormat[0]}:${otherFormat[1]}`,
       JSON.stringify(order(leak)) === JSON.stringify(order(clean)));
   }
 }
 
 console.log('\nInput handling');
-check('unknown column names are ignored', parseExcluded('not_a_column,adp_espn').size === 1);
-check('empty parameter yields no exclusions', parseExcluded('').size === 0);
-check('undefined parameter yields no exclusions', parseExcluded(undefined).size === 0);
-check('whitespace is tolerated', parseExcluded(' adp_espn , adp_yahoo ').size === 2);
+check('unknown family names are ignored', parseExcluded('not_a_family,espn').size === 1);
+check('empty parameter means the user switched everything on', parseExcluded('').size === 0);
+check('omitted parameter falls back to the defaults', parseExcluded(undefined).size > 0);
+check('whitespace is tolerated', parseExcluded(' espn , yahoo ').size === 2);
+check('a family covers both league types', familyOf('adp_fp_sf') === familyOf('adp_fp_rd'));
+check('KTC and DynastySuperflex stay separate families', familyOf('ktc_value') !== familyOf('ds_value'));
 
 console.log(`\n${fails === 0 ? 'PASSED' : `FAILED — ${fails}`}\n`);
 process.exit(fails === 0 ? 0 : 1);

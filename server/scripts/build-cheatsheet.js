@@ -10,7 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 const { db } = require('../db');
-const { viewSources } = require('../sources');
+const { viewSources, COLUMNS, DEFAULT_OFF_FAMILIES } = require('../sources');
 
 const SEASON = new Date().getFullYear();
 const OUT = process.argv[2] || path.join(__dirname, '..', '..', 'cheatsheets', `draft-room-${SEASON}.html`);
@@ -59,6 +59,13 @@ for (const [format, leagueType] of FORMATS) {
       scoringLabel: s.scoringLabel, provider: s.provider, what: s.what,
     };
   }
+}
+
+// Payload key -> source family, so the sheet can hold one off-list across every view.
+const FAMILY_OF = {};
+for (const [column, def] of Object.entries(COLUMNS)) {
+  const k = PAYLOAD_KEY[column];
+  if (k) FAMILY_OF[k] = def.family;
 }
 
 // Only rostered players: Sleeper still carries historical ADP for retired names,
@@ -154,6 +161,18 @@ ${css}
       </div>
     </div>
     <div class="group">
+      <span class="lab">Teams</span>
+      <div class="seg" role="group" aria-label="League size">
+        <button data-set="teams=10" aria-pressed="false">10</button>
+        <button data-set="teams=12" aria-pressed="true">12</button>
+        <button data-set="teams=14" aria-pressed="false">14</button>
+      </div>
+    </div>
+    <div class="group">
+      <span class="lab">Sort</span>
+      <select class="selectish" id="sortby" aria-label="Sort the board by"></select>
+    </div>
+    <div class="group">
       <span class="lab">Pos</span>
       <div class="seg pos" role="group" aria-label="Position">
         <button data-set="pos=null" aria-pressed="true">All</button>
@@ -173,7 +192,7 @@ ${css}
     </div>
     <div class="srcbar">
       <div class="srclist" id="src-list"></div>
-      <button class="srcreset" id="src-reset" hidden>Turn all sources back on</button>
+      <button class="srcreset" id="src-reset" hidden>Turn every source on</button>
     </div>
   </section>
 
@@ -189,7 +208,7 @@ ${css}
   <section class="sec" id="board-sec">
     <div class="sec-head">
       <h2>The board</h2>
-      <p id="board-why">Grouped by the round the pick actually falls in, at 12 teams.</p>
+      <p id="board-why"></p>
     </div>
     <div id="board"></div>
   </section>
@@ -248,6 +267,8 @@ ${css}
 <script>
 const PLAYERS = ${JSON.stringify(players)};
 const SOURCE_META = ${JSON.stringify(SOURCE_META)};
+const FAMILY_OF = ${JSON.stringify(FAMILY_OF)};
+const DEFAULT_OFF = ${JSON.stringify(DEFAULT_OFF_FAMILIES)};
 const REFERENCE_SOURCES = ${JSON.stringify(REFERENCE_SOURCES)};
 ${js}
 </script>

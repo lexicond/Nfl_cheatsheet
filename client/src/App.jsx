@@ -38,7 +38,9 @@ export default function App() {
     view,
     excluded,
     toggleSource,
-    resetSources,
+    enableAllSources,
+    teamSize,
+    setTeamSize,
   } = usePlayers();
 
   const [modalPlayer, setModalPlayer] = useState(null);
@@ -78,7 +80,7 @@ export default function App() {
           <span className="text-2xl">🏈</span>
           <div>
             <h1 className="text-lg font-bold tracking-tight">NFL Draft Cheatsheet</h1>
-            <p className="text-xs text-[#555875]">0.5 PPR · {formatLabel} · {leagueType} · {new Date().getFullYear()}</p>
+            <p className="text-xs text-[#555875]">0.5 PPR · {formatLabel} · {leagueType} · {teamSize}-team · {new Date().getFullYear()}</p>
           </div>
         </div>
         <div className="text-xs text-[#555875] font-mono">
@@ -100,8 +102,10 @@ export default function App() {
         view={view}
         excluded={excluded}
         onToggleSource={toggleSource}
-        onResetSources={resetSources}
+        onEnableAllSources={enableAllSources}
         formatLabel={formatLabel}
+        teamSize={teamSize}
+        setTeamSize={setTeamSize}
       />
 
       {seeding && (
