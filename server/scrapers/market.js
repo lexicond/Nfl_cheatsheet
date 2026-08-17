@@ -1,5 +1,5 @@
 const { db } = require('../db');
-const { createMatcher } = require('../utils/match');
+const { createMatcher, createClaimGuard } = require('../utils/match');
 const { scrapeDraftSharks } = require('../utils/draftsharks');
 
 // Home-league platform ADP. ESPN and Yahoo drafts behave differently from the
@@ -44,11 +44,12 @@ async function fetchMarket() {
     // Existing players only — these boards never introduce rows of their own.
     const updateAdp = db.prepare(`UPDATE players SET ${column} = @adp, last_updated = @ts WHERE id = @id`);
 
+    const claim = createClaimGuard(`Market ${label}`);
     const count = db.transaction(() => {
       let n = 0;
       for (const p of players) {
         const target = findPlayer(p.name, p.position, p.nfl_team);
-        if (!target) continue;
+        if (!target || !claim(target.id, p.name)) continue;
         updateAdp.run({ id: target.id, adp: p.adp, ts: now });
         n++;
       }

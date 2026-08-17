@@ -1,7 +1,7 @@
 const { db } = require('../db');
 const { get, JSON_HEADERS } = require('../utils/http');
 const { normalizeName } = require('../utils/normalize');
-const { createMatcher } = require('../utils/match');
+const { createMatcher, createClaimGuard } = require('../utils/match');
 
 const POS_ALLOW = new Set(['QB', 'RB', 'WR', 'TE']);
 const SEASON_YEAR = new Date().getFullYear();
@@ -76,6 +76,7 @@ async function fetchFFC() {
       WHERE id = @id
     `);
 
+    const claim = createClaimGuard(`FFC ${src.label}`);
     const count = db.transaction(() => {
       let n = 0;
       for (const p of players) {
@@ -92,7 +93,7 @@ async function fetchFFC() {
           });
           target = { id: info.lastInsertRowid };
         }
-        if (!target) continue;
+        if (!target || !claim(target.id, p.name)) continue;
         updateAdp.run({ id: target.id, adp: p.adp, nfl_team: p.nfl_team, bye_week: p.bye_week, ts: now });
         n++;
       }

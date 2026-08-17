@@ -1,7 +1,7 @@
 const { db } = require('../db');
 const { get, extractJsObject } = require('../utils/http');
 const { normalizeName } = require('../utils/normalize');
-const { createMatcher } = require('../utils/match');
+const { createMatcher, createClaimGuard } = require('../utils/match');
 
 const POS_ALLOW = new Set(['QB', 'RB', 'WR', 'TE']);
 
@@ -137,6 +137,7 @@ async function fetchFantasyPros() {
       UPDATE players SET pos_rank_fantasypros = @pos_rank, fp_tier = @tier WHERE id = @id
     `);
 
+    const claim = createClaimGuard(`FantasyPros ${label}`);
     const count = db.transaction(() => {
       let n = 0;
       for (const p of players) {
@@ -155,7 +156,7 @@ async function fetchFantasyPros() {
           });
           target = { id: info.lastInsertRowid };
         }
-        if (!target) continue;
+        if (!target || !claim(target.id, p.name)) continue;
 
         updateRank.run({ id: target.id, rank: p.rank, nfl_team: p.nfl_team, bye_week: p.bye_week, ts: now });
         if (primary) updatePrimaryExtras.run({ id: target.id, pos_rank: p.pos_rank, tier: p.tier });

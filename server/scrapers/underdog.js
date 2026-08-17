@@ -1,7 +1,7 @@
 const { db } = require('../db');
 const { get, JSON_HEADERS } = require('../utils/http');
 const { normalizeName } = require('../utils/normalize');
-const { createMatcher } = require('../utils/match');
+const { createMatcher, createClaimGuard } = require('../utils/match');
 const { scrapeDraftSharks } = require('../utils/draftsharks');
 
 const POS_ALLOW = new Set(['QB', 'RB', 'WR', 'TE']);
@@ -85,6 +85,7 @@ async function fetchUnderdog() {
   players.sort((a, b) => a.adp - b.adp);
 
   const posCounters = {};
+  const claim = createClaimGuard('Underdog');
   const count = db.transaction(() => {
     let n = 0;
     for (const p of players) {
@@ -93,6 +94,7 @@ async function fetchUnderdog() {
       const pos_rank = posCounters[p.position];
 
       const target = findPlayer(p.name, p.position, p.nfl_team);
+      if (target && !claim(target.id, p.name)) continue;
       if (target) {
         updatePlayer.run({ id: target.id, adp: p.adp, pos_rank, nfl_team: p.nfl_team, ts: now });
       } else {

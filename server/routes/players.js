@@ -216,9 +216,14 @@ function rankWithin(players, valueOf, dir, field) {
     byPosition.get(p.position).push(p);
   }
   for (const group of byPosition.values()) {
-    group.sort((a, b) => dir === 'desc'
-      ? Number(valueOf(b)) - Number(valueOf(a))
-      : Number(valueOf(a)) - Number(valueOf(b)));
+    group.sort((a, b) => {
+      const diff = dir === 'desc'
+        ? Number(valueOf(b)) - Number(valueOf(a))
+        : Number(valueOf(a)) - Number(valueOf(b));
+      // Ties break on name, exactly as the board does, so the row at the top of the
+      // board is never shown as the second-ranked player at his position.
+      return diff !== 0 ? diff : a.name.localeCompare(b.name);
+    });
     group.forEach((p, i) => { p[field] = i + 1; });
   }
 }

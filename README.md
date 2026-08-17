@@ -176,6 +176,7 @@ skews a best-ball board and a 1QB ranking never skews a superflex one:
 │   └── scripts/
 │       ├── refresh-all.js  Refresh every source from the CLI
 │       ├── validate-sources.js Assert each format contains what it claims
+│       ├── audit-matching.js  Find name-matching damage across sources
 │       ├── test-source-toggle.js Assert switching a source off changes the board
 │       ├── build-cheatsheet.js Render the standalone cheat sheet
 │       └── health-check.js Data health report

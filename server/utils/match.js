@@ -25,16 +25,49 @@ function aliasOf(norm) {
   return ALIASES[norm] || null;
 }
 
+// First-name pairs the prefix rule below cannot bridge, because the short form is not
+// a prefix of the long one. Kenny/Kenneth is the case that split one running back
+// across two rows until it was added here.
+const NICKNAMES = [
+  ['kenny', 'kenneth'], ['mike', 'michael'], ['bobby', 'robert'], ['bob', 'robert'],
+  ['bill', 'william'], ['billy', 'william'], ['jim', 'james'], ['jimmy', 'james'],
+  ['drew', 'andrew'], ['andy', 'andrew'], ['tony', 'anthony'], ['nate', 'nathaniel'],
+  ['nate', 'nathan'], ['rick', 'richard'], ['ricky', 'richard'], ['ted', 'theodore'],
+  ['tj', 'tyler'], ['dj', 'demetrius'], ['chuck', 'charles'], ['charlie', 'charles'],
+  ['hank', 'henry'], ['jack', 'john'], ['johnny', 'john'], ['joe', 'joseph'],
+  ['tom', 'thomas'], ['tommy', 'thomas'], ['steve', 'stephen'], ['steve', 'steven'],
+];
+const NICKNAME_PAIRS = new Set(NICKNAMES.flatMap(([a, b]) => [`${a}|${b}`, `${b}|${a}`]));
+
+/**
+ * Are these two first names plausibly the same person?
+ *
+ * Uniqueness alone is not enough for a surname match. If a source lists a player the
+ * database has never seen, the only row sharing his surname is by definition unique —
+ * so "Omari Evans" resolved onto Mike Evans and overwrote his ranking. The first names
+ * have to be compatible too: identical, one an abbreviation of the other, or an
+ * initial.
+ */
+function firstNamesCompatible(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  // A bare initial, however it was punctuated before normalising.
+  if (a.length === 1 || b.length === 1) return a[0] === b[0];
+  if (NICKNAME_PAIRS.has(`${a}|${b}`)) return true;
+  // Ken / Kenneth, Josh / Joshua, Cam / Cameron.
+  const [shortName, longName] = a.length <= b.length ? [a, b] : [b, a];
+  return shortName.length >= 3 && longName.startsWith(shortName);
+}
+
 /**
  * Build a matcher bound to a db handle.
  *
- * Match order: exact name+pos → normalized name+pos → alias → last name + pos + team →
- * last name + pos when that last name is unique for the position.
+ * Match order: exact name+pos → normalized name+pos → alias → surname + pos + team →
+ * surname + pos, and every surname route additionally requires compatible first names.
  *
- * The last-name fallbacks deliberately refuse ambiguous hits. Two players share a
- * surname far more often than sources abbreviate a first name, so a greedy LIKE
- * match writes one player's ADP onto another (this is how "B. Robinson" used to
- * land on Bijan instead of Brian).
+ * When the source gives a team, a surname match must be on that team. Falling through
+ * to a same-surname player on a different team is how one player's numbers land on
+ * another's row.
  */
 function createMatcher(db) {
   const byExact = db.prepare('SELECT * FROM players WHERE name = ? AND position = ?');
@@ -67,23 +100,40 @@ function createMatcher(db) {
     const parts = norm.split(' ');
     if (parts.length < 2) return null;
     const last = parts[parts.length - 1];
-    const firstInitial = parts[0][0];
+    const first = parts[0];
     const likeLast = `% ${last}`;
 
+    const firstOf = row => (row.name_normalized || '').split(' ')[0];
+    const compatible = list => list.filter(r => firstNamesCompatible(first, firstOf(r)));
+
     if (team) {
-      const teamHits = byLastTeam.all(position, team.toUpperCase(), last, likeLast);
+      const teamHits = compatible(byLastTeam.all(position, team.toUpperCase(), last, likeLast));
       if (teamHits.length === 1) return teamHits[0];
-      const initialHits = teamHits.filter(r => (r.name_normalized || '')[0] === firstInitial);
-      if (initialHits.length === 1) return initialHits[0];
+      // The source knows the team. If nobody on it fits, this is a player the database
+      // does not have — not a reason to reach for the same surname elsewhere.
+      return null;
     }
 
-    const hits = byLast.all(position, last, likeLast);
-    if (hits.length === 1) return hits[0];
-    const initialHits = hits.filter(r => (r.name_normalized || '')[0] === firstInitial);
-    if (initialHits.length === 1) return initialHits[0];
-
-    return null;
+    const hits = compatible(byLast.all(position, last, likeLast));
+    return hits.length === 1 ? hits[0] : null;
   };
 }
 
-module.exports = { createMatcher, ALIASES };
+/**
+ * Guard against two source entries landing on the same row within one pass. Even with
+ * a strict matcher this can happen through the alias table, and silently taking
+ * whichever came last is how a star ends up with a bench player's ranking.
+ */
+function createClaimGuard(label) {
+  const claimed = new Map();
+  return function claim(id, name) {
+    if (claimed.has(id)) {
+      console.warn(`[${label}] "${name}" also matched the row already taken by "${claimed.get(id)}" — keeping the first`);
+      return false;
+    }
+    claimed.set(id, name);
+    return true;
+  };
+}
+
+module.exports = { createMatcher, createClaimGuard, firstNamesCompatible, ALIASES };

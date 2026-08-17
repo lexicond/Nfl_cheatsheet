@@ -1,6 +1,6 @@
 const { db } = require('../db');
 const { get, JSON_HEADERS } = require('../utils/http');
-const { createMatcher } = require('../utils/match');
+const { createMatcher, createClaimGuard } = require('../utils/match');
 
 const POS_ALLOW = new Set(['QB', 'RB', 'WR', 'TE']);
 
@@ -78,6 +78,7 @@ async function fetchDynastyProcess() {
     return { success: false, error: 'CSV parsed but no skill-position rows', source: 'dynastyprocess', timestamp: now };
   }
 
+  const claim = createClaimGuard('DynastyProcess');
   const count = db.transaction(() => {
     let n = 0;
     for (const r of rows) {
@@ -87,7 +88,7 @@ async function fetchDynastyProcess() {
       if (!r.player || !Number.isFinite(v1qb) || v1qb <= 0) continue;
 
       const target = findPlayer(r.player, pos, (r.team || '').toUpperCase() || null);
-      if (!target) continue;
+      if (!target || !claim(target.id, r.player)) continue;
       const age = parseFloat(r.age);
       updateValues.run({
         id: target.id,

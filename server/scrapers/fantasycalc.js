@@ -1,6 +1,6 @@
 const { db } = require('../db');
 const { get, JSON_HEADERS } = require('../utils/http');
-const { createMatcher } = require('../utils/match');
+const { createMatcher, createClaimGuard } = require('../utils/match');
 
 const POS_ALLOW = new Set(['QB', 'RB', 'WR', 'TE']);
 
@@ -58,11 +58,12 @@ async function fetchFantasyCalc() {
   }
 
   const base = players1QB || playersSF;
+  const claim = createClaimGuard('FantasyCalc');
   const count = db.transaction(() => {
     let n = 0;
     for (const p of base) {
       const target = (p.sleeper_id && bySleeperId.get(p.sleeper_id)) || findPlayer(p.name, p.position, p.nfl_team);
-      if (!target) continue;
+      if (!target || !claim(target.id, p.name)) continue;
 
       const v1qb = players1QB ? p.value : null;
       const vsf = playersSF

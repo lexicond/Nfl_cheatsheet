@@ -1,6 +1,6 @@
 const { db } = require('../db');
 const { get, JSON_HEADERS } = require('../utils/http');
-const { createMatcher } = require('../utils/match');
+const { createMatcher, createClaimGuard } = require('../utils/match');
 
 const POS_ALLOW = new Set(['QB', 'RB', 'WR', 'TE']);
 const BASE = 'https://dynasty-daddy.com/api/v1/player';
@@ -53,12 +53,13 @@ async function fetchDynastyDaddy() {
 
   // Resolve each Dynasty Daddy player to a local row once, then reuse for both markets.
   const resolved = new Map();
+  const claim = createClaimGuard('DynastyDaddy');
   let ageCount = 0;
   db.transaction(() => {
     for (const [nameId, p] of byNameId) {
       const sid = p.sleeper_id != null ? String(p.sleeper_id) : null;
       const target = (sid && bySleeperId.get(sid)) || findPlayer(p.full_name, p.position, p.team);
-      if (!target) continue;
+      if (!target || !claim(target.id, p.full_name)) continue;
       resolved.set(nameId, target.id);
       const age = Number(p.age);
       if (Number.isFinite(age) && age > 0 && age < 50) { updateAge.run({ id: target.id, age }); ageCount++; }

@@ -147,7 +147,18 @@ export function usePlayers() {
   useEffect(() => () => clearTimeout(searchDebounceRef.current), []);
 
   const updateOverride = useCallback(async (id, changes) => {
-    setPlayers(prev => prev.map(p => p.id === id ? { ...p, ...changes } : p));
+    setPlayers(prev => {
+      const next = prev.map(p => (p.id === id ? { ...p, ...changes } : p));
+      // Marking a player drafted has to take them off the board straight away — during
+      // a live draft that is the whole point of the action, and waiting for the next
+      // fetch left them sitting there looking available.
+      return next.filter(p => {
+        if (filters.hideDrafted && p.drafted) return false;
+        if (filters.starred && !p.starred) return false;
+        if (filters.tier != null && p.tier !== filters.tier) return false;
+        return true;
+      });
+    });
     try {
       const res = await fetch(`/api/players/${id}/override`, {
         method: 'PATCH',
@@ -159,7 +170,7 @@ export function usePlayers() {
       showToast(`Save failed: ${err.message}`, 'error');
       fetchPlayers();
     }
-  }, [fetchPlayers, showToast]);
+  }, [fetchPlayers, filters, showToast]);
 
   const refreshSource = useCallback(async (source) => {
     setRefreshing(prev => ({ ...prev, [source]: true }));
