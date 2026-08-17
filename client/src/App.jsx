@@ -41,6 +41,7 @@ export default function App() {
     enableAllSources,
     teamSize,
     setTeamSize,
+    sleeperBaseline,
   } = usePlayers();
 
   const [modalPlayer, setModalPlayer] = useState(null);
@@ -129,6 +130,7 @@ export default function App() {
             view={view}
             excluded={excluded}
             sourceStatus={sourceStatus}
+            sleeperBaseline={sleeperBaseline}
             filterBarHeight={filterBarHeight}
           />
         </main>

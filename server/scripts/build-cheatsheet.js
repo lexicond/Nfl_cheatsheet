@@ -163,6 +163,7 @@ ${css}
     <div class="group">
       <span class="lab">Teams</span>
       <div class="seg" role="group" aria-label="League size">
+        <button data-set="teams=8" aria-pressed="false">8</button>
         <button data-set="teams=10" aria-pressed="false">10</button>
         <button data-set="teams=12" aria-pressed="true">12</button>
         <button data-set="teams=14" aria-pressed="false">14</button>

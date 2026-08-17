@@ -22,10 +22,17 @@ const DERIVED_SORTS = {
   sleeper_gap:   { get: r => r.sleeper_gap, dir: 'desc' },
 };
 
-function sortSpec(key) {
+/**
+ * Resolve a requested sort key.
+ *
+ * A source column only sorts if it is actually live in this view — otherwise the board
+ * would silently stay ordered by a source the user has switched off and can no longer
+ * see, while the dropdown shows something else entirely.
+ */
+function sortSpec(key, allowedColumns) {
   if (DERIVED_SORTS[key]) return DERIVED_SORTS[key];
   const col = COLUMNS[key];
-  if (!col) return null;
+  if (!col || !allowedColumns.includes(key)) return null;
   // A source column: values count down from the best (trade values) or up (ADP, ranks).
   const field = FIELD_ALIAS[key] || key;
   return { get: r => r[field], dir: col.kind === 'value' ? 'desc' : 'asc' };
@@ -125,6 +132,7 @@ router.get('/', (req, res) => {
     // drafting happens, so the useful question is whether he comes cheaper there.
     // Computed from Sleeper's own board whether or not Sleeper feeds the consensus.
     const baseline = sleeperBaseline(format, leagueType);
+    let sleeperNorms = null;
     if (baseline) {
       const slRank = new Map();
       enriched
@@ -145,6 +153,22 @@ router.get('/', (req, res) => {
         // can be had cheaper there.
         p.sleeper_gap = sl != null && cons != null ? sl - cons : null;
       }
+
+      // Best ball has no Sleeper board, so the baseline is Sleeper's redraft ADP — and
+      // best ball values positions differently, which puts a standing offset on whole
+      // positions (quarterbacks read positive, tight ends negative, before any player
+      // is genuinely cheap). The median offset per position is reported so the number
+      // can be read against its own norm instead of against zero.
+      const norms = {};
+      for (const pos of ['QB', 'RB', 'WR', 'TE']) {
+        const vals = enriched
+          .filter(p => p.position === pos && p.sleeper_gap != null && p.adp_consensus != null
+            && consensusRank.get(p.id) <= 150)
+          .map(p => p.sleeper_gap)
+          .sort((a, b) => a - b);
+        norms[pos] = vals.length >= 8 ? vals[Math.floor(vals.length / 2)] : 0;
+      }
+      sleeperNorms = norms;
     } else {
       for (const p of enriched) p.sleeper_gap = null;
     }
@@ -187,7 +211,16 @@ router.get('/', (req, res) => {
       return true;
     });
 
-    const { get, dir } = sortSpec(sort) || sortSpec(DEFAULT_SORT[format]);
+    // Reference columns are displayed but not averaged; they are still sortable.
+    const sortable = [
+      ...activeColumns(format, leagueType, excluded),
+      ...viewSources(format, leagueType).reference
+        .filter(r => !excluded.has(r.family))
+        .map(r => r.column),
+    ];
+    const resolved = sortSpec(sort, sortable);
+    const effectiveSort = resolved ? sort : DEFAULT_SORT[format];
+    const { get, dir } = resolved || DERIVED_SORTS[DEFAULT_SORT[format]];
 
     result.sort((a, b) => {
       // Drafted players always sink, whatever the sort.
@@ -207,7 +240,9 @@ router.get('/', (req, res) => {
       excluded: [...excluded],
       active_sources: activeColumns(format, leagueType, excluded),
       team_size: teamSize,
-      sleeper_baseline: sleeperBaseline(format, leagueType),
+      // What the board was actually ordered by, so the client can correct a stale choice.
+      sort: effectiveSort,
+      sleeper_baseline: baseline ? { ...baseline, positional_norms: sleeperNorms } : null,
       players: result.map(project),
     });
   } catch (err) {

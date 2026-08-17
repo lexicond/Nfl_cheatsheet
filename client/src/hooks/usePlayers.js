@@ -38,6 +38,7 @@ export function usePlayers() {
   const [excluded, setExcludedRaw] = useState(() => loadLS('draft_excluded_families', null));
   const [teamSize, setTeamSizeRaw] = useState(() => loadLS('draft_team_size', 12));
   const [view, setView] = useState(null);
+  const [sleeperBaseline, setSleeperBaseline] = useState(null);
 
   const searchDebounceRef = useRef(null);
 
@@ -85,8 +86,14 @@ export function usePlayers() {
       const data = await res.json();
       setPlayers(data.players || []);
       setView(data.view || null);
+      setSleeperBaseline(data.sleeper_baseline || null);
       // First load has no stored choice, so adopt whatever the server switched on.
       if (excluded === null && Array.isArray(data.excluded)) setExcludedRaw(data.excluded);
+      // The server refuses to sort by a source that is switched off. Adopt what it
+      // actually used, so the dropdown always reflects the order on screen.
+      if (data.sort !== undefined) {
+        setFiltersState(prev => (prev.sort === data.sort ? prev : { ...prev, sort: data.sort }));
+      }
     } catch (err) {
       setError(err.message);
       showToast(`Failed to load players: ${err.message}`, 'error');
@@ -253,5 +260,6 @@ export function usePlayers() {
     enableAllSources,
     teamSize,
     setTeamSize,
+    sleeperBaseline,
   };
 }

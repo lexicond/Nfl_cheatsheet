@@ -143,6 +143,20 @@ function pool() {
     p.slGap = sl != null ? sl - (i + 1) : null;
   });
 
+  // Best ball has no Sleeper board, so the baseline is Sleeper's redraft ADP — and best
+  // ball values positions differently, which puts a standing offset on whole positions.
+  // Subtracting each position's median makes the number read against its own norm.
+  const norms = {};
+  for (const pos of POS) {
+    const vals = rows.filter((p, i) => p.p === pos && p.slGap != null && i < 150)
+      .map(p => p.slGap).sort((a, b) => a - b);
+    norms[pos] = vals.length >= 8 ? vals[Math.floor(vals.length / 2)] : 0;
+  }
+  rows.forEach(p => {
+    p.slNorm = norms[p.p] || 0;
+    p.slGapAdj = p.slGap == null ? null : p.slGap - p.slNorm;
+  });
+
   return rows;
 }
 
@@ -221,6 +235,10 @@ function renderBoard(rows) {
   </tr></thead>`;
 
   const colCount = 4 + cols.length + (state.format === 'DYN' ? 3 : 4) + 2;
+  // Round markers only mean anything while the board is in draft order. Under any other
+  // sort they would interleave — Round 34, Round 19, Round 31 — so they are dropped and
+  // the Rd column carries the round instead.
+  const showGroups = state.sort === '';
   let body = '';
   let lastGroup = null;
   let n = 0;
@@ -230,7 +248,7 @@ function renderBoard(rows) {
     const group = state.format === 'DYN'
       ? `Top ${Math.ceil(n / 24) * 24}`
       : `Round ${p.round}`;
-    if (group !== lastGroup) {
+    if (showGroups && group !== lastGroup) {
       body += `<tr class="roundrow"><td colspan="${colCount}">${esc(group)}</td></tr>`;
       lastGroup = group;
     }
@@ -241,9 +259,13 @@ function renderBoard(rows) {
           ? `Projects ${d} spots higher at ${p.p} than his draft cost`
           : `Drafted ${Math.abs(d)} spots earlier at ${p.p} than he projects`}">${d > 0 ? '\u25b2' : '\u25bc'}${Math.abs(d)}</span>`;
 
-    const gap = p.slGap == null ? '<span class="muted">&ndash;</span>'
-      : Math.abs(p.slGap) < 5 ? '<span class="muted">&middot;</span>'
-      : `<span class="${p.slGap > 0 ? 'gap-cheap' : 'gap-dear'}">${p.slGap > 0 ? '+' : ''}${p.slGap}</span>`;
+    const g = p.slGapAdj;
+    const normNote = p.slNorm ? ` (against the ${p.slNorm > 0 ? '+' : ''}${p.slNorm} every ${p.p} carries here)` : '';
+    const gap = g == null ? '<span class="muted">&ndash;</span>'
+      : Math.abs(g) < 5 ? '<span class="muted">&middot;</span>'
+      : `<span class="${g > 0 ? 'gap-cheap' : 'gap-dear'}" title="${g > 0
+          ? `Sleeper drafts him ${g} places later than the consensus, so he comes cheaper there`
+          : `Sleeper drafts him ${Math.abs(g)} places earlier than the consensus, so he costs more there`}${normNote}">${g > 0 ? '+' : ''}${g}</span>`;
 
     const split = p.spread == null ? '<span class="muted">&ndash;</span>'
       : `<span class="${p.spread >= 24 ? 'split-wide' : p.spread >= 12 ? '' : 'muted'}">${p.spread}</span>`;
@@ -383,7 +405,7 @@ function sortRows(rows) {
     if (bv == null) return -1;
     return dir === 'desc' ? bv - av : av - bv;
   });
-  if (k === '__gap') return by(p => p.slGap, 'desc');
+  if (k === '__gap') return by(p => p.slGapAdj, 'desc');
   if (k === '__split') return by(p => p.spread, 'desc');
   if (k === '__age') return by(p => p.age, 'asc');
   if (k === '__proj') return by(p => p.pr, 'desc');
@@ -407,9 +429,12 @@ function render() {
   if (state.view === 'board') renderBoard(sortRows(rows).slice(0, 240)); else renderCols(all);
   renderCalls(all);
 
-  document.getElementById('board-why').textContent = state.format === 'DYN'
-    ? 'Ordered by mean rank across the dynasty value sources, in blocks of 24.'
-    : `Grouped by the round the pick falls in at ${state.teams} teams. Headings stay put as you scroll.`;
+  const sortLabel = document.querySelector('#sortby option:checked');
+  document.getElementById('board-why').textContent = state.sort !== ''
+    ? `Ordered by ${(sortLabel ? sortLabel.textContent : 'your chosen source').toLowerCase()}. The Rd column still shows the round at ${state.teams} teams.`
+    : state.format === 'DYN'
+      ? 'Ordered by mean rank across the dynasty value sources, in blocks of 24.'
+      : `Grouped by the round the pick falls in at ${state.teams} teams. Headings stay put as you scroll.`;
 
   const active = activeSources().length;
   document.getElementById('count').textContent =

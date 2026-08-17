@@ -112,7 +112,7 @@ function HeaderRow({ columns }) {
 export default function DraftBoard({
   players, loading, onUpdate, onOpenModal, onReorder,
   format = 'BB', leagueType = '1QB', view = null, excluded = [], sourceStatus = {},
-  filterBarHeight = 53,
+  sleeperBaseline = null, filterBarHeight = 53,
 }) {
   const [activeId, setActiveId] = useState(null);
   const headerScrollRef = useRef(null);
@@ -222,6 +222,7 @@ export default function DraftBoard({
                   columns={columns}
                   format={format}
                   leagueType={leagueType}
+                  sleeperBaseline={sleeperBaseline}
                 />
               ))}
             </tbody>

@@ -52,7 +52,10 @@ function ValueBadge({ score, position }) {
   return null;
 }
 
-export default function PlayerRow({ player, index, onUpdate, onOpenModal, columns = [], format = 'BB', leagueType = '1QB' }) {
+export default function PlayerRow({
+  player, index, onUpdate, onOpenModal, columns = [],
+  format = 'BB', leagueType = '1QB', sleeperBaseline = null,
+}) {
   const [editingRank, setEditingRank] = useState(false);
   const [rankInput, setRankInput] = useState('');
   const rankRef = useRef(null);
@@ -86,6 +89,11 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
     const val = parseInt(rankInput, 10);
     if (!isNaN(val) && val > 0) onUpdate(player.id, { personal_rank: val });
   };
+
+  // Where the Sleeper baseline is a stand-in, whole positions carry a standing offset,
+  // so the gap is read against its position's norm rather than against zero.
+  const gapNorm = (sleeperBaseline?.positional_norms?.[player.position]) ?? 0;
+  const gapVsNorm = player.sleeper_gap == null ? null : player.sleeper_gap - gapNorm;
 
   // Position rank in the format currently on screen, not whichever source ranked
   // him highest.
@@ -221,16 +229,19 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
     // drafts him later, so he comes cheaper in the room you are actually drafting in.
     sleeper_gap: (
       <td key="sleeper_gap" className={`${cellClass} w-16 font-mono text-right`}>
-        {player.sleeper_gap == null || Math.abs(player.sleeper_gap) < 5 ? (
-          <span className="text-[#555875]">{player.sleeper_gap == null ? '–' : '·'}</span>
+        {gapVsNorm == null || Math.abs(gapVsNorm) < 5 ? (
+          <span className="text-[#555875]">{gapVsNorm == null ? '–' : '·'}</span>
         ) : (
           <span
-            className={player.sleeper_gap > 0 ? 'text-green-400' : 'text-amber-400'}
-            title={player.sleeper_gap > 0
-              ? `Sleeper drafts him ${player.sleeper_gap} places later than the consensus — cheaper there`
-              : `Sleeper drafts him ${Math.abs(player.sleeper_gap)} places earlier than the consensus — dearer there`}
+            className={gapVsNorm > 0 ? 'text-green-400' : 'text-amber-400'}
+            title={(gapVsNorm > 0
+              ? `Sleeper drafts him ${gapVsNorm} places later than the consensus — cheaper there`
+              : `Sleeper drafts him ${Math.abs(gapVsNorm)} places earlier than the consensus — dearer there`)
+              + (gapNorm !== 0
+                ? `. Measured against the ${gapNorm > 0 ? '+' : ''}${gapNorm} that every ${player.position} carries here, because Sleeper publishes no best-ball board and this baseline is its ½PPR redraft ADP`
+                : '')}
           >
-            {player.sleeper_gap > 0 ? `+${player.sleeper_gap}` : player.sleeper_gap}
+            {gapVsNorm > 0 ? `+${gapVsNorm}` : gapVsNorm}
           </span>
         )}
       </td>
@@ -238,7 +249,7 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
 
     // How far apart the selected sources are on him.
     spread: (
-      <td key="spread" className={`${cellClass} w-15 font-mono text-right`}>
+      <td key="spread" className={`${cellClass} w-16 font-mono text-right`}>
         {player.spread == null ? (
           <span className="text-[#555875]">–</span>
         ) : (
