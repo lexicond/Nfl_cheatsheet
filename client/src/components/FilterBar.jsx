@@ -16,9 +16,12 @@ function getSortOptions(format, leagueType) {
 
   if (format === 'DYN') return [
     consensus,
-    { value: 'ktc_value', label: 'KTC Value' },
-    { value: 'fc_value', label: 'FC Value' },
-    ...(isSF ? [] : [{ value: 'adp_fp_dyn', label: 'FantasyPros DYN' }]),
+    { value: 'ktc_value', label: 'KeepTradeCut' },
+    { value: 'ds_value', label: 'DynastySuperflex' },
+    { value: 'fc_value', label: 'FantasyCalc' },
+    { value: isSF ? 'adp_fp_dyn_sf' : 'adp_fp_dyn', label: 'FantasyPros DYN' },
+    { value: 'adp_sl_dyn', label: 'Sleeper DYN' },
+    { value: 'age', label: 'Age (youngest)' },
     ...SORT_COMMON,
   ];
 

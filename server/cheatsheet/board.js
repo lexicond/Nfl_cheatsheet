@@ -21,10 +21,15 @@ function headline(p) {
   return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
 }
 
+// Dynasty inputs, in the same order the app averages them.
+const DYN_SOURCES = {
+  '1QB': [['ktc', 'KTC'], ['ds', 'DSF'], ['fc', 'FCalc'], ['fpd', 'FP DYN'], ['sld', 'SL DYN']],
+  '2QB': [['kts', 'KTC'], ['dss', 'DSF'], ['fcs', 'FCalc'], ['fpds', 'FP DYN'], ['slds', 'SL DYN']],
+};
+
 function sourceCount(p) {
   if (state.format === 'DYN') {
-    const cols = state.league === '2QB' ? ['kts', 'fcs', 'dys'] : ['ktc', 'fc', 'fpd'];
-    return cols.filter(c => p[c] != null).length;
+    return DYN_SOURCES[state.league].filter(([f]) => p[f] != null).length;
   }
   return SOURCES[key()].filter(([f]) => p[f] != null).length;
 }
@@ -109,11 +114,11 @@ function renderMap(rows) {
 /* ---------------- board ---------------- */
 function renderBoard(rows) {
   const cols = state.format === 'DYN'
-    ? [['KTC', p => (state.league === '2QB' ? p.kts : p.ktc)], ['FCalc', p => (state.league === '2QB' ? p.fcs : p.fc)]]
+    ? DYN_SOURCES[state.league].map(([f, label]) => [label, p => p[f]])
     : SOURCES[key()].map(([f, label]) => [label, p => p[f]]);
 
   const head = `<thead><tr>
-    <th class="l">#</th><th class="l">Player</th><th>Pos</th><th>Bye</th>
+    <th class="l">#</th><th class="l">Player</th><th>Pos</th><th>${state.format === 'DYN' ? 'Age' : 'Bye'}</th>
     ${cols.map(c => `<th>${esc(c[0])}</th>`).join('')}
     <th>${state.format === 'DYN' ? 'Rank' : 'Consensus'}</th><th>Proj pts</th><th>Proj rk</th>
   </tr></thead>`;
@@ -140,7 +145,7 @@ function renderBoard(rows) {
       <td class="nm"><div class="pname">${esc(p.n)} ${delta}</div>
         <div class="pmeta">${esc(p.t || 'FA')} · ${p.p}${p.pr_pos}${p.sc < 2 ? ' · 1 source' : ''}</div></td>
       <td><span class="chip ${p.p}">${p.p}</span></td>
-      <td class="dim">${p.b ?? '–'}</td>
+      <td class="dim">${(state.format === 'DYN' ? p.age : p.b) ?? '–'}</td>
       ${cols.map(c => { const v = c[1](p); return `<td class="dim">${v == null ? '–' : (v > 999 ? v.toLocaleString() : fmt1(v))}</td>`; }).join('')}
       <td class="big">${fmt1(p.h)}</td>
       <td class="dim">${p.pr == null ? '–' : p.pr.toFixed(0)}</td>
@@ -163,7 +168,7 @@ function renderCols(rows) {
         <div class="tier-lab">Tier ${i + 1}</div>
         <ol>${t.map(p => `<li>
           <span class="n">${esc(p.n)}</span>
-          <span class="t">${esc(p.t || 'FA')}${p.b ? ' · ' + p.b : ''}</span>
+          <span class="t">${esc(p.t || 'FA')}${state.format === 'DYN' ? (p.age ? ' · ' + p.age : '') : (p.b ? ' · ' + p.b : '')}</span>
           <span class="a">${fmt1(p.h)}</span>
         </li>`).join('')}</ol>
       </div>`).join('')}

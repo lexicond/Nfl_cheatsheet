@@ -100,12 +100,13 @@ Plus the players whose projected positional rank disagrees most with what they c
 | Source | What it provides | Where it comes from |
 |---|---|---|
 | **Underdog** | Best ball ADP (½PPR, 12-team) | DraftSharks' Underdog board — Underdog publishes no public API |
-| **FantasyPros** | Expert consensus rankings: best ball, ½PPR redraft, superflex, dynasty. Also bye weeks and expert tiers | `ecrData` payload embedded in each rankings page |
+| **FantasyPros** | Expert consensus rankings: best ball, ½PPR redraft, ½PPR superflex, dynasty, dynasty superflex. Also bye weeks and expert tiers | `ecrData` payload embedded in each rankings page |
 | **FFC** | Real mock-draft ADP, ½PPR and 2QB | Fantasy Football Calculator public JSON API |
 | **Sleeper** | Player roster, season projections, and Sleeper's own ADP for ½PPR / 2QB / dynasty / dynasty-SF | `api.sleeper.app` projections endpoint |
 | **ESPN + Yahoo** (`market`) | Home-league platform ADP | DraftSharks' ESPN and Yahoo boards |
-| **KTC** | Dynasty values, 1QB and superflex | DynastyProcess daily CSV of KeepTradeCut values |
+| **Dynasty Daddy** | KeepTradeCut and DynastySuperflex values, 1QB and superflex; player ages and cross-platform ids | `dynasty-daddy.com/api/v1/player` — markets 0 and 3 |
 | **FantasyCalc** | Dynasty trade values, 1QB and superflex | FantasyCalc public API |
+| **DynastyProcess** | Dynasty values and player ages. Displayed but **not** averaged — see below | DynastyProcess daily CSV |
 
 If a source fails, existing data for that source is preserved — only a successful fetch updates the values.
 
@@ -152,6 +153,7 @@ skews a best-ball board and a 1QB ranking never skews a superflex one:
 ├── server/
 │   ├── index.js           Express entry point + auto-seed
 │   ├── db.js              SQLite setup, schema, migrations
+│   ├── sources.js         Every column: provider, format, scoring, consensus set
 │   ├── routes/
 │   │   ├── players.js     GET /api/players, PATCH override, POST reorder
 │   │   └── refresh.js     POST /api/refresh/:source, GET /api/source-status
@@ -161,7 +163,8 @@ skews a best-ball board and a 1QB ranking never skews a superflex one:
 │   │   ├── underdog.js    Underdog best-ball ADP (FFC fallback)
 │   │   ├── ffc.js         Fantasy Football Calculator mock-draft ADP
 │   │   ├── market.js      ESPN + Yahoo platform ADP
-│   │   ├── ktc.js         KeepTradeCut dynasty values
+│   │   ├── dynastydaddy.js KeepTradeCut + DynastySuperflex values, ages
+│   │   ├── dynastyprocess.js DynastyProcess values and ages
 │   │   ├── fantasycalc.js FantasyCalc dynasty values
 │   │   └── seed.js        Hardcoded fallback, last resort only
 │   ├── utils/
@@ -170,7 +173,9 @@ skews a best-ball board and a 1QB ranking never skews a superflex one:
 │   │   ├── normalize.js   Name normalisation
 │   │   └── draftsharks.js DraftSharks ADP board parser
 │   └── scripts/
-│       ├── refresh-all.js Refresh every source from the CLI
+│       ├── refresh-all.js  Refresh every source from the CLI
+│       ├── validate-sources.js Assert each format contains what it claims
+│       ├── build-cheatsheet.js Render the standalone cheat sheet
 │       └── health-check.js Data health report
 ├── client/
 │   ├── src/

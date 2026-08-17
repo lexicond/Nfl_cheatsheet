@@ -4,8 +4,14 @@ const { createMatcher } = require('../utils/match');
 
 const POS_ALLOW = new Set(['QB', 'RB', 'WR', 'TE']);
 
-// KeepTradeCut's own pages are client-rendered and rate-limited; DynastyProcess
-// republishes the same crowd-sourced values as a daily CSV.
+// DynastyProcess publishes a daily CSV of its own dynasty values plus the
+// FantasyPros dynasty ECR they are built from (ecr_1qb / ecr_2qb).
+//
+// These are NOT KeepTradeCut values, despite often being described that way — they
+// correlate 0.98 with FantasyPros dynasty ECR, so dp_value is kept as a displayed
+// column but deliberately excluded from the dynasty consensus, which already
+// averages FantasyPros directly. Ages come from here; they drive the dynasty-versus-
+// redraft check in scripts/validate-sources.js.
 const CSV_URL = 'https://raw.githubusercontent.com/dynastyprocess/data/master/files/values-players.csv';
 
 function parseCsv(text) {
@@ -42,15 +48,19 @@ function parseCsv(text) {
   });
 }
 
-async function fetchKTC() {
+async function fetchDynastyProcess() {
   const findPlayer = createMatcher(db);
   const now = new Date().toISOString();
 
-  const updateKTC = db.prepare(`
-    UPDATE players SET ktc_value = @v1qb, ktc_value_sf = @v2qb, last_updated = @ts WHERE id = @id
+  const updateValues = db.prepare(`
+    UPDATE players
+    SET dp_value = @v1qb, dp_value_sf = @v2qb,
+        age = COALESCE(@age, age),
+        last_updated = @ts
+    WHERE id = @id
   `);
   const updateMeta = db.prepare(`
-    UPDATE source_metadata SET last_fetched = ?, player_count = ?, status = ?, notes = ? WHERE source = 'ktc'
+    UPDATE source_metadata SET last_fetched = ?, player_count = ?, status = ?, notes = ? WHERE source = 'dynastyprocess'
   `);
 
   let rows;
@@ -59,13 +69,13 @@ async function fetchKTC() {
     rows = parseCsv(res.data).filter(r => POS_ALLOW.has((r.pos || '').toUpperCase()));
   } catch (err) {
     updateMeta.run(now, 0, 'error', err.message.slice(0, 200));
-    console.warn('[KTC] DynastyProcess CSV fetch failed:', err.message);
-    return { success: false, error: err.message, source: 'ktc', timestamp: now };
+    console.warn('[DynastyProcess] DynastyProcess CSV fetch failed:', err.message);
+    return { success: false, error: err.message, source: 'dynastyprocess', timestamp: now };
   }
 
   if (rows.length === 0) {
     updateMeta.run(now, 0, 'error', 'CSV had no skill-position rows');
-    return { success: false, error: 'CSV parsed but no skill-position rows', source: 'ktc', timestamp: now };
+    return { success: false, error: 'CSV parsed but no skill-position rows', source: 'dynastyprocess', timestamp: now };
   }
 
   const count = db.transaction(() => {
@@ -78,7 +88,14 @@ async function fetchKTC() {
 
       const target = findPlayer(r.player, pos, (r.team || '').toUpperCase() || null);
       if (!target) continue;
-      updateKTC.run({ id: target.id, v1qb, v2qb: Number.isFinite(v2qb) ? v2qb : v1qb, ts: now });
+      const age = parseFloat(r.age);
+      updateValues.run({
+        id: target.id,
+        v1qb,
+        v2qb: Number.isFinite(v2qb) ? v2qb : v1qb,
+        age: Number.isFinite(age) && age > 0 && age < 50 ? age : null,
+        ts: now,
+      });
       n++;
     }
     return n;
@@ -86,8 +103,8 @@ async function fetchKTC() {
 
   const scrapeDate = rows[0]?.scrape_date || 'unknown';
   updateMeta.run(now, count, 'ok', `DynastyProcess ${scrapeDate}`);
-  console.log(`[KTC] Updated ${count} players from DynastyProcess CSV (${scrapeDate})`);
-  return { success: true, players_updated: count, as_of: scrapeDate, source: 'ktc', timestamp: now };
+  console.log(`[DynastyProcess] Updated ${count} players (values + ages), CSV dated ${scrapeDate}`);
+  return { success: true, players_updated: count, as_of: scrapeDate, source: 'dynastyprocess', timestamp: now };
 }
 
-module.exports = { fetchKTC };
+module.exports = { fetchDynastyProcess };

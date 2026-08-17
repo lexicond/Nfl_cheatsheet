@@ -21,7 +21,7 @@ const PER_FORMAT = 300;
 const SOURCE_COUNT = {
   'BB:1QB': '2 best-ball sources', 'BB:2QB': '2 superflex sources',
   'RD:1QB': '5 redraft markets', 'RD:2QB': '3 superflex sources',
-  'DYN:1QB': '4 dynasty sources', 'DYN:2QB': '3 dynasty sources',
+  'DYN:1QB': '5 dynasty sources', 'DYN:2QB': '5 dynasty sources',
 };
 
 function headline(r, format, leagueType) {
@@ -51,7 +51,12 @@ const players = rows.filter(r => keep.has(r.id)).map(r => ({
   ud: num(r.adp_underdog), fpb: num(r.adp_fantasypros), fpr: num(r.adp_fp_rd),
   fps: num(r.adp_fp_sf), fpd: num(r.adp_fp_dyn), ffc: num(r.adp_ffc), ffs: num(r.adp_ffc_sf),
   slr: num(r.adp_sl_rd), sls: num(r.adp_sl_sf), esp: num(r.adp_espn), yah: num(r.adp_yahoo),
-  ktc: r.ktc_value, kts: r.ktc_value_sf, fc: int(r.fc_value), fcs: int(r.fc_value_sf),
+  ktc: r.ktc_value, kts: r.ktc_value_sf,
+  ds: r.ds_value, dss: r.ds_value_sf,
+  fc: int(r.fc_value), fcs: int(r.fc_value_sf),
+  fpd: num(r.adp_fp_dyn), fpds: num(r.adp_fp_dyn_sf),
+  sld: num(r.adp_sl_dyn), slds: num(r.adp_sl_dyn_sf),
+  age: r.age == null ? null : Math.round(Number(r.age)),
   dy: num(r.dyn_rank_consensus), dys: num(r.dyn_rank_consensus_sf),
 }));
 
@@ -88,7 +93,7 @@ ${css}
     </div>
     <div class="stamp">
       Built <b>${builtAt}</b><br>
-      ${players.length} rostered players · 7 sources
+      ${players.length} rostered players · 8 sources
     </div>
   </header>
 
@@ -180,13 +185,17 @@ ${css}
       <li><b>Fantasy Football Calculator</b> — live mock-draft ADP, ½PPR and 2QB · ${fetchedAt('ffc')}</li>
       <li><b>Sleeper</b> — season projections and Sleeper's own ADP by format · ${fetchedAt('sleeper')}</li>
       <li><b>ESPN and Yahoo</b> — home-league platform ADP, via DraftSharks · ${fetchedAt('market')}</li>
-      <li><b>KeepTradeCut</b> — dynasty values, 1QB and superflex, via DynastyProcess · ${fetchedAt('ktc')}</li>
+      <li><b>KeepTradeCut and DynastySuperflex</b> — two independent dynasty markets, 1QB and superflex, via Dynasty Daddy · ${fetchedAt('dynastydaddy')}</li>
       <li><b>FantasyCalc</b> — dynasty trade values, 1QB and superflex · ${fetchedAt('fantasycalc')}</li>
+      <li><b>DynastyProcess</b> — dynasty values and player ages; shown but not averaged, being FantasyPros-derived · ${fetchedAt('dynastyprocess')}</li>
     </ul>
     <p class="fine">
       Each format averages only the sources that publish that format, so redraft ADP never skews the best-ball
-      board and 1QB rankings never skew superflex. Dynasty has no ADP: its number is the mean <em>rank</em> across
-      KeepTradeCut, FantasyCalc, FantasyPros dynasty and Sleeper dynasty ADP, which sit on different scales.
+      board and 1QB rankings never skew superflex — superflex boards come from genuinely superflex feeds, and
+      dynasty from genuinely dynasty ones. Dynasty has no ADP: its number is the mean <em>rank</em> across
+      KeepTradeCut, DynastySuperflex, FantasyCalc, FantasyPros dynasty and Sleeper dynasty ADP, which sit on
+      different scales. DynastyProcess is displayed but deliberately left out of that average, since its values
+      track FantasyPros dynasty ECR at rho 0.98 and would weight FantasyPros twice.
       Projections are Sleeper's half-PPR season totals. Players without an NFL team are excluded.
     </p>
   </footer>

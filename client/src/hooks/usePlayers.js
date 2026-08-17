@@ -15,8 +15,9 @@ const DEFAULT_ENABLED_SOURCES = {
   ffc: true,
   sleeper: true,
   market: true,
-  ktc: true,
+  dynastydaddy: true,
   fantasycalc: true,
+  dynastyprocess: true,
 };
 
 function loadLS(key, fallback) {

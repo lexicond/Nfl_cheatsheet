@@ -1,11 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const { db, computeConsensus } = require('../db');
+const { dynastyInputs } = require('../sources');
 const { fetchSleeper } = require('../scrapers/sleeper');
 const { fetchFantasyPros } = require('../scrapers/fantasypros');
 const { fetchUnderdog } = require('../scrapers/underdog');
 const { fetchFFC } = require('../scrapers/ffc');
-const { fetchKTC } = require('../scrapers/ktc');
+const { fetchDynastyProcess } = require('../scrapers/dynastyprocess');
+const { fetchDynastyDaddy } = require('../scrapers/dynastydaddy');
 const { fetchFantasyCalc } = require('../scrapers/fantasycalc');
 const { fetchMarket } = require('../scrapers/market');
 
@@ -17,26 +19,9 @@ const SCRAPERS = {
   underdog: fetchUnderdog,
   ffc: fetchFFC,
   market: fetchMarket,
-  ktc: fetchKTC,
+  dynastyprocess: fetchDynastyProcess,
+  dynastydaddy: fetchDynastyDaddy,
   fantasycalc: fetchFantasyCalc,
-};
-
-// Dynasty sources publish on incompatible scales (KTC 0–10000, FantasyCalc trade
-// value, FP/Sleeper draft position), so they are averaged as ranks, not raw values.
-const DYNASTY_SOURCES = {
-  '1QB': [
-    { column: 'ktc_value', direction: 'desc' },
-    { column: 'fc_value', direction: 'desc' },
-    { column: 'adp_fp_dyn', direction: 'asc' },
-    { column: 'adp_sl_dyn', direction: 'asc' },
-  ],
-  // FantasyPros publishes no superflex dynasty board, so its 1QB ranks are left out
-  // here rather than quietly pushing quarterbacks down the superflex list.
-  '2QB': [
-    { column: 'ktc_value_sf', direction: 'desc' },
-    { column: 'fc_value_sf', direction: 'desc' },
-    { column: 'adp_sl_dyn_sf', direction: 'asc' },
-  ],
 };
 
 // POST /api/refresh/:source
@@ -114,14 +99,15 @@ function recomputeDerived() {
   try {
     const rows = db.prepare(`
       SELECT id, adp_underdog, adp_fantasypros,
-             ktc_value, ktc_value_sf, fc_value, fc_value_sf,
-             adp_fp_dyn, adp_sl_dyn, adp_sl_dyn_sf
+             ktc_value, ktc_value_sf, fc_value, fc_value_sf, ds_value, ds_value_sf,
+             adp_fp_dyn, adp_fp_dyn_sf, adp_sl_dyn, adp_sl_dyn_sf
       FROM players
     `).all();
 
     const dynRanks = { '1QB': new Map(), '2QB': new Map() };
 
-    for (const [leagueType, sources] of Object.entries(DYNASTY_SOURCES)) {
+    for (const leagueType of ['1QB', '2QB']) {
+      const sources = dynastyInputs(leagueType);
       const perPlayer = new Map();
       for (const src of sources) {
         const ranked = rows

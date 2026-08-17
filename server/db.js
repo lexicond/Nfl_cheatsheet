@@ -89,6 +89,12 @@ addColumnIfMissing('players', 'adp_ffc_sf', 'REAL');
 addColumnIfMissing('players', 'adp_yahoo', 'REAL');
 addColumnIfMissing('players', 'dyn_rank_consensus', 'REAL');
 addColumnIfMissing('players', 'dyn_rank_consensus_sf', 'REAL');
+addColumnIfMissing('players', 'adp_fp_dyn_sf', 'REAL');
+addColumnIfMissing('players', 'age', 'REAL');
+addColumnIfMissing('players', 'dp_value', 'INTEGER');
+addColumnIfMissing('players', 'dp_value_sf', 'INTEGER');
+addColumnIfMissing('players', 'ds_value', 'INTEGER');
+addColumnIfMissing('players', 'ds_value_sf', 'INTEGER');
 addColumnIfMissing('players', 'fp_tier', 'INTEGER');
 
 // Populate name_normalized for any rows missing it
@@ -107,7 +113,7 @@ addColumnIfMissing('players', 'fp_tier', 'INTEGER');
 const initSource = db.prepare(`
   INSERT OR IGNORE INTO source_metadata (source, status) VALUES (?, 'never')
 `);
-['fantasypros', 'underdog', 'sleeper', 'ffc', 'ktc', 'fantasycalc', 'market'].forEach(s => initSource.run(s));
+['fantasypros', 'underdog', 'sleeper', 'ffc', 'market', 'dynastyprocess', 'dynastydaddy', 'fantasycalc'].forEach(s => initSource.run(s));
 
 // Lookup indexes for the matcher and the projection-rank subquery.
 db.exec(`
@@ -116,24 +122,13 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_players_pos_proj ON players (position, projected_pts);
 `);
 
-// Source columns that feed the consensus for each format + league type.
-// Sleeper's own per-format ADP is used directly; nothing here mixes scales.
-const CONSENSUS_SOURCES = {
-  // Best ball: only genuinely best-ball markets. Redraft ADP drafts QBs and TEs
-  // later than best ball does, so folding it in here would skew those positions.
-  'BB:1QB':  ['adp_underdog', 'adp_fantasypros'],
-  // Underdog's contests are 1QB, so its ADP is deliberately absent from the SF set.
-  'BB:2QB':  ['adp_fp_sf', 'adp_sl_sf'],
-  'RD:1QB':  ['adp_ffc', 'adp_fp_rd', 'adp_sl_rd', 'adp_espn', 'adp_yahoo'],
-  'RD:2QB':  ['adp_ffc_sf', 'adp_fp_sf', 'adp_sl_sf'],
-};
+const { consensusColumns } = require('./sources');
 
-function consensusColumns(format, leagueType) {
-  return CONSENSUS_SOURCES[`${format}:${leagueType === '2QB' ? '2QB' : '1QB'}`] || [];
-}
-
-// Mean of the non-null source ADPs for a row, rounded to one decimal.
+// Mean of the non-null source values for a row, rounded to one decimal.
+// Dynasty is excluded here — its inputs are on different scales and are ranked
+// before averaging, in routes/refresh.js.
 function computeConsensus(row, format, leagueType) {
+  if (format === 'DYN') return null;
   const vals = consensusColumns(format, leagueType)
     .map(c => row[c])
     .filter(v => v != null && Number.isFinite(Number(v)))
@@ -142,4 +137,4 @@ function computeConsensus(row, format, leagueType) {
   return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
 }
 
-module.exports = { db, computeConsensus, consensusColumns, CONSENSUS_SOURCES, DB_PATH };
+module.exports = { db, computeConsensus, DB_PATH };

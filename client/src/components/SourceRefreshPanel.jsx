@@ -7,8 +7,9 @@ const SOURCE_DEFS = [
   { key: 'ffc',         label: 'FFC',  fullLabel: 'FFC mock ADP', format: ['RD'] },
   { key: 'sleeper',     label: 'SL',   fullLabel: 'Sleeper ADP + projections', format: ['BB', 'RD', 'DYN'] },
   { key: 'market',      label: 'E/Y',  fullLabel: 'ESPN + Yahoo ADP', format: ['RD'] },
-  { key: 'ktc',         label: 'KTC',  fullLabel: 'KeepTradeCut values', format: ['DYN'] },
-  { key: 'fantasycalc', label: 'FC',   fullLabel: 'FantasyCalc values', format: ['DYN'] },
+  { key: 'dynastydaddy',   label: 'KTC',  fullLabel: 'KeepTradeCut + DynastySuperflex', format: ['DYN'] },
+  { key: 'fantasycalc',    label: 'FC',   fullLabel: 'FantasyCalc values', format: ['DYN'] },
+  { key: 'dynastyprocess', label: 'DP',   fullLabel: 'DynastyProcess values + ages', format: ['DYN'] },
 ];
 
 function StatusDot({ status }) {

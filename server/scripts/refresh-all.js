@@ -10,7 +10,8 @@ const SCRAPERS = [
   ['underdog', () => require('../scrapers/underdog').fetchUnderdog()],
   ['ffc', () => require('../scrapers/ffc').fetchFFC()],
   ['market', () => require('../scrapers/market').fetchMarket()],
-  ['ktc', () => require('../scrapers/ktc').fetchKTC()],
+  ['dynastyprocess', () => require('../scrapers/dynastyprocess').fetchDynastyProcess()],
+  ['dynastydaddy', () => require('../scrapers/dynastydaddy').fetchDynastyDaddy()],
   ['fantasycalc', () => require('../scrapers/fantasycalc').fetchFantasyCalc()],
 ];
 

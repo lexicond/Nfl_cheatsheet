@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { db, computeConsensus, consensusColumns } = require('../db');
+const { db, computeConsensus } = require('../db');
+const { consensusColumns } = require('../sources');
 
 const FORMATS = new Set(['BB', 'RD', 'DYN']);
 const LEAGUE_TYPES = new Set(['1QB', '2QB']);
@@ -25,6 +26,11 @@ const SORT_KEYS = {
   projected_pts:   { get: r => r.projected_pts, dir: 'desc' },
   ktc_value:       { get: r => r.ktc_value, dir: 'desc' },
   fc_value:        { get: r => r.fc_value, dir: 'desc' },
+  ds_value:        { get: r => r.ds_value, dir: 'desc' },
+  dp_value:        { get: r => r.dp_value, dir: 'desc' },
+  adp_fp_dyn_sf:   { get: r => r.adp_fp_dyn_sf, dir: 'asc' },
+  adp_sl_dyn:      { get: r => r.adp_sl_dyn, dir: 'asc' },
+  age:             { get: r => r.age, dir: 'asc' },
 };
 
 // Every format defaults to its own headline number rather than a single source,
@@ -38,6 +44,7 @@ const SIGNAL_COLUMNS = [
   'adp_sl_rd', 'adp_sl_sf', 'adp_sl_dyn', 'adp_sl_dyn_sf',
   'adp_espn', 'adp_yahoo',
   'ktc_value', 'ktc_value_sf', 'fc_value', 'fc_value_sf',
+  'ds_value', 'ds_value_sf', 'dp_value', 'dp_value_sf',
   'projected_pts',
 ];
 
@@ -86,7 +93,8 @@ router.get('/', (req, res) => {
         ? [
             isSF ? r.ktc_value_sf : r.ktc_value,
             isSF ? r.fc_value_sf : r.fc_value,
-            isSF ? null : r.adp_fp_dyn,
+            isSF ? r.ds_value_sf : r.ds_value,
+            isSF ? r.adp_fp_dyn_sf : r.adp_fp_dyn,
             isSF ? r.adp_sl_dyn_sf : r.adp_sl_dyn,
           ].filter(v => v != null).length
         : sourceCols.filter(c => r[c] != null).length;
@@ -104,6 +112,10 @@ router.get('/', (req, res) => {
         drafted: r.drafted === 1,
         ktc_value: isSF ? (r.ktc_value_sf ?? r.ktc_value) : r.ktc_value,
         fc_value: isSF ? (r.fc_value_sf ?? r.fc_value) : r.fc_value,
+        ds_value: isSF ? (r.ds_value_sf ?? r.ds_value) : r.ds_value,
+        dp_value: isSF ? (r.dp_value_sf ?? r.dp_value) : r.dp_value,
+        adp_fp_dyn: isSF ? r.adp_fp_dyn_sf : r.adp_fp_dyn,
+        adp_sl_dyn: isSF ? r.adp_sl_dyn_sf : r.adp_sl_dyn,
         adp_consensus: headline,
         adp_source_count: sourceCount,
         adp_trend: adpTrend,
@@ -181,7 +193,8 @@ const RESPONSE_FIELDS = [
   'adp_sl_rd', 'adp_sl_sf', 'adp_espn', 'adp_yahoo',
   'adp_consensus', 'adp_source_count', 'adp_trend',
   'projected_pts', 'proj_pos_rank', 'pos_rank_consensus', 'value_score',
-  'ktc_value', 'fc_value', 'fp_tier', 'tier_auto',
+  'ktc_value', 'fc_value', 'ds_value', 'dp_value', 'adp_fp_dyn', 'adp_sl_dyn',
+  'age', 'fp_tier', 'tier_auto',
   'personal_rank', 'tier', 'starred', 'flagged', 'drafted',
   'note_upside', 'note_downside', 'note_sources', 'note_personal',
   'last_updated',

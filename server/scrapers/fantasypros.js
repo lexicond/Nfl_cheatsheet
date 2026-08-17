@@ -6,13 +6,43 @@ const { createMatcher } = require('../utils/match');
 const POS_ALLOW = new Set(['QB', 'RB', 'WR', 'TE']);
 
 // FantasyPros renders its ranking tables client-side; the ECR payload is embedded
-// as `ecrData`. Note that best-ball-cheatsheets.php now 302s to the generic
-// consensus page — best-ball-overall.php is the live best-ball URL.
+// as `ecrData`.
+//
+// Several plausible-looking URLs (best-ball-cheatsheets, dynasty-superflex-overall,
+// best-ball-half-ppr-overall, dynasty-ppr-overall …) quietly redirect to the generic
+// standard-scoring redraft board and still return a valid 200 with valid ecrData.
+// Nothing in the response says it is the wrong board except the type and scoring
+// fields, so `expect` below is checked on every fetch and a mismatch is rejected.
 const FP_SOURCES = [
-  { url: 'https://www.fantasypros.com/nfl/rankings/best-ball-overall.php',          column: 'adp_fantasypros', label: 'Best Ball', primary: true },
-  { url: 'https://www.fantasypros.com/nfl/rankings/half-point-ppr-cheatsheets.php', column: 'adp_fp_rd',       label: 'Redraft ½PPR' },
-  { url: 'https://www.fantasypros.com/nfl/rankings/superflex-cheatsheets.php',      column: 'adp_fp_sf',       label: 'Superflex' },
-  { url: 'https://www.fantasypros.com/nfl/rankings/dynasty-overall.php',            column: 'adp_fp_dyn',      label: 'Dynasty' },
+  {
+    url: 'https://www.fantasypros.com/nfl/rankings/best-ball-overall.php',
+    column: 'adp_fantasypros', label: 'Best Ball', primary: true,
+    expect: { type: 'Best Ball', scoring: 'PPR' },
+  },
+  {
+    url: 'https://www.fantasypros.com/nfl/rankings/half-point-ppr-cheatsheets.php',
+    column: 'adp_fp_rd', label: 'Redraft ½PPR',
+    expect: { type: 'Draft Half PPR', scoring: 'HALF' },
+  },
+  {
+    // superflex-cheatsheets.php is the STANDARD-scoring superflex board; this app
+    // is half-PPR throughout, so it uses the half-PPR superflex board instead.
+    url: 'https://www.fantasypros.com/nfl/rankings/half-point-ppr-superflex-cheatsheets.php',
+    column: 'adp_fp_sf', label: 'Superflex ½PPR',
+    expect: { type: 'Draft Half PPR', scoring: 'HALF' },
+  },
+  {
+    url: 'https://www.fantasypros.com/nfl/rankings/dynasty-overall.php',
+    column: 'adp_fp_dyn', label: 'Dynasty',
+    expect: { type: 'Dynasty', scoring: 'PPR' },
+  },
+  {
+    // dynasty-superflex-overall.php and the ppr-/half-point-ppr- prefixed variants all
+    // redirect to the generic redraft board; this is the real one.
+    url: 'https://www.fantasypros.com/nfl/rankings/dynasty-superflex.php',
+    column: 'adp_fp_dyn_sf', label: 'Dynasty SF',
+    expect: { type: 'Dynasty', scoring: 'PPR' },
+  },
 ];
 
 function parseByeWeek(raw) {
@@ -20,10 +50,23 @@ function parseByeWeek(raw) {
   return Number.isFinite(n) && n >= 1 && n <= 18 ? n : null;
 }
 
-async function scrapeFpPage(url) {
+async function scrapeFpPage(url, expect) {
   const res = await get(url);
   const data = extractJsObject(res.data, 'ecrData');
   if (!data || !Array.isArray(data.players)) throw new Error(`No ecrData at ${url}`);
+
+  if (expect) {
+    if (data.type !== expect.type || data.scoring !== expect.scoring) {
+      throw new Error(
+        `${url} served "${data.type}/${data.scoring}", expected "${expect.type}/${expect.scoring}" ` +
+        '— the page most likely now redirects to a different board'
+      );
+    }
+  }
+  const wantYear = new Date().getFullYear();
+  if (data.year && Number(data.year) !== wantYear) {
+    throw new Error(`${url} served ${data.year} rankings, expected ${wantYear}`);
+  }
 
   const players = [];
   for (const p of data.players) {
@@ -58,7 +101,7 @@ async function fetchFantasyPros() {
   `);
 
   const results = await Promise.allSettled(
-    FP_SOURCES.map(src => scrapeFpPage(src.url).then(r => ({ ...src, ...r })))
+    FP_SOURCES.map(src => scrapeFpPage(src.url, src.expect).then(r => ({ ...src, ...r })))
   );
 
   const notes = [];

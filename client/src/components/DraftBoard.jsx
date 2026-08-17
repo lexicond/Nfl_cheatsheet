@@ -22,8 +22,8 @@ const COL_PX = {
   adp_fp_rd: 64, adp_fp_sf: 64, adp_fp_dyn: 64,
   adp_sl_rd: 64, adp_sl_sf: 64,
   adp_espn: 64, adp_yahoo: 64,
-  consensus: 100, projected_pts: 64, pos_rank: 64,
-  ktc_value: 80, fc_value: 80,
+  consensus: 100, projected_pts: 64, pos_rank: 64, age: 48,
+  ktc_value: 80, fc_value: 80, ds_value: 80, dp_value: 80,
   tier: 56, flags: 64, status: 96, notes: 48,
 };
 
@@ -49,10 +49,15 @@ function buildColumns(format, leagueType, enabledSources) {
   if (format === 'DYN') {
     return [
       ...base,
-      ...(enabledSources.ktc !== false ? [{ label: 'KTC', key: 'ktc_value' }] : []),
+      { label: 'Age', key: 'age' },
+      ...(enabledSources.dynastydaddy !== false
+        ? [{ label: 'KTC', key: 'ktc_value' }, { label: 'DSF', key: 'ds_value' }] : []),
       ...(enabledSources.fantasycalc !== false ? [{ label: 'FC', key: 'fc_value' }] : []),
-      // FantasyPros publishes a 1QB dynasty board only, so it is hidden in superflex.
-      ...(enabledSources.fantasypros !== false && !isSF ? [{ label: 'FP DYN', key: 'adp_fp_dyn' }] : []),
+      ...(enabledSources.fantasypros !== false ? [{ label: 'FP DYN', key: 'adp_fp_dyn' }] : []),
+      ...(enabledSources.sleeper !== false ? [{ label: 'SL DYN', key: 'adp_sl_dyn' }] : []),
+      // Shown but never averaged — DynastyProcess is derived from the FantasyPros ECR
+      // already in the consensus.
+      ...(enabledSources.dynastyprocess !== false ? [{ label: 'DP', key: 'dp_value' }] : []),
       { label: 'Rank', key: 'consensus' },
       { label: 'Proj', key: 'projected_pts' },
       { label: 'Pos Rk', key: 'pos_rank' },

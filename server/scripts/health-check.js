@@ -3,7 +3,8 @@
 
 // Requires resolve relative to this file, so they must not be written as if the
 // process were running from the repo root.
-const { db, consensusColumns } = require('../db');
+const { db } = require('../db');
+const { consensusColumns } = require('../sources');
 const { normalizeName } = require('../utils/normalize');
 
 const REPAIR = process.argv.includes('--repair');

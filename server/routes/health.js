@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { db, consensusColumns } = require('../db');
+const { db } = require('../db');
+const { consensusColumns } = require('../sources');
 
 const STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 

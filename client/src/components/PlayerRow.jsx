@@ -66,6 +66,7 @@ const ADP_COLUMNS = [
   ['adp_sl_sf', 'adp_sl_sf'],
   ['adp_espn', 'adp_espn'],
   ['adp_yahoo', 'adp_yahoo'],
+  ['adp_sl_dyn', 'adp_sl_dyn'],
 ];
 
 export default function PlayerRow({ player, index, onUpdate, onOpenModal, columns = [], format = 'BB', leagueType = '1QB' }) {
@@ -236,9 +237,18 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
       </td>
     ),
 
-    fc_value: (
-      <td key="fc_value" className={`${cellClass} w-20 font-mono text-[#8b90a8] text-right`}>
-        {player.fc_value != null ? player.fc_value.toFixed(0) : <span className="text-[#555875]">–</span>}
+    ...Object.fromEntries(['fc_value', 'ds_value', 'dp_value'].map(field => [
+      field,
+      (
+        <td key={field} className={`${cellClass} w-20 font-mono text-[#8b90a8] text-right`}>
+          {player[field] != null ? player[field].toLocaleString() : <span className="text-[#555875]">–</span>}
+        </td>
+      ),
+    ])),
+
+    age: (
+      <td key="age" className={`${cellClass} w-12 font-mono text-[#8b90a8] text-center`}>
+        {player.age != null ? player.age.toFixed(0) : '–'}
       </td>
     ),
 
