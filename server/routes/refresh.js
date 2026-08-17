@@ -1,19 +1,26 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
+const { adpConsensus, dynastyRanks } = require('../consensus');
 const { fetchSleeper } = require('../scrapers/sleeper');
 const { fetchFantasyPros } = require('../scrapers/fantasypros');
 const { fetchUnderdog } = require('../scrapers/underdog');
 const { fetchFFC } = require('../scrapers/ffc');
-const { fetchKTC } = require('../scrapers/ktc');
+const { fetchDynastyProcess } = require('../scrapers/dynastyprocess');
+const { fetchDynastyDaddy } = require('../scrapers/dynastydaddy');
 const { fetchFantasyCalc } = require('../scrapers/fantasycalc');
+const { fetchMarket } = require('../scrapers/market');
 
+// Sleeper runs first on a full refresh: it owns the roster rows and the Sleeper
+// ids the other sources match against.
 const SCRAPERS = {
+  sleeper: fetchSleeper,
   fantasypros: fetchFantasyPros,
   underdog: fetchUnderdog,
-  sleeper: fetchSleeper,
   ffc: fetchFFC,
-  ktc: fetchKTC,
+  market: fetchMarket,
+  dynastyprocess: fetchDynastyProcess,
+  dynastydaddy: fetchDynastyDaddy,
   fantasycalc: fetchFantasyCalc,
 };
 
@@ -27,34 +34,33 @@ router.post('/:source', async (req, res) => {
   }
 
   try {
+    saveConsensusSnapshot();
+
     if (source === 'all') {
-      // Save previous consensus before recompute
-      saveConsensusSnapshot();
-
-      const settled = await Promise.allSettled(
-        Object.entries(SCRAPERS).map(([key, fn]) =>
-          fn().then(r => [key, r]).catch(e => [key, { success: false, error: e.message }])
-        )
-      );
-
       const results = {};
-      for (const s of settled) {
-        if (s.status === 'fulfilled') {
-          const [key, result] = s.value;
-          results[key] = result;
+      // Sequential, not parallel: the scrapers all write the same SQLite file and
+      // every non-Sleeper source matches against rows Sleeper has to insert first.
+      for (const [key, fn] of Object.entries(SCRAPERS)) {
+        try {
+          results[key] = await fn();
+        } catch (err) {
+          console.error(`[refresh:all] ${key} threw:`, err.message);
+          results[key] = { success: false, error: err.message, source: key };
         }
       }
-
-      recomputeAllConsensus();
-      return res.json({ success: true, source: 'all', results, timestamp: new Date().toISOString() });
+      recomputeDerived();
+      const failed = Object.entries(results).filter(([, r]) => !r.success).map(([k]) => k);
+      return res.json({
+        success: failed.length === 0,
+        source: 'all',
+        failed_sources: failed,
+        results,
+        timestamp: new Date().toISOString(),
+      });
     }
 
-    // Single source refresh
-    saveConsensusSnapshot();
-    const fn = SCRAPERS[source];
-    const result = await fn();
-    recomputeAllConsensus();
-
+    const result = await SCRAPERS[source]();
+    recomputeDerived();
     res.json(result);
   } catch (err) {
     console.error(`[POST /api/refresh/${source}]`, err);
@@ -62,7 +68,7 @@ router.post('/:source', async (req, res) => {
   }
 });
 
-// GET /api/source-status
+// GET /api/refresh/status
 router.get('/status', (req, res) => {
   try {
     const rows = db.prepare('SELECT * FROM source_metadata').all();
@@ -74,38 +80,55 @@ router.get('/status', (req, res) => {
   }
 });
 
-// Snapshot current consensus so trend arrows can show movement on next refresh
+// Snapshot the current consensus so trend arrows can show movement after the refresh.
 function saveConsensusSnapshot() {
   try {
-    db.prepare(`
-      UPDATE players SET adp_consensus_prev = adp_consensus WHERE adp_consensus IS NOT NULL
-    `).run();
+    db.prepare('UPDATE players SET adp_consensus_prev = adp_consensus WHERE adp_consensus IS NOT NULL').run();
   } catch (err) {
     console.error('[saveConsensusSnapshot]', err.message);
   }
 }
 
-// Recompute the stored adp_consensus as BB 1QB baseline (FP BB + UD BB + SL BB)
-// This is used only for trend arrows (adp_consensus_prev comparison).
-// Per-request consensus for all formats is computed in JS in routes/players.js.
-function recomputeAllConsensus() {
+/**
+ * Rebuild the stored derived columns:
+ *  - adp_consensus: best-ball 1QB baseline, the series the trend arrows compare against
+ *  - dyn_rank_consensus[_sf]: mean rank across the dynasty value sources
+ * Per-request consensus for the other formats is computed in routes/players.js.
+ */
+function recomputeDerived() {
   try {
-    db.prepare(`
-      UPDATE players
-      SET adp_consensus = (
-        SELECT AVG(v)
-        FROM (
-          SELECT adp_fantasypros AS v WHERE adp_fantasypros IS NOT NULL
-          UNION ALL
-          SELECT adp_underdog WHERE adp_underdog IS NOT NULL
-          UNION ALL
-          SELECT adp_sl_bb WHERE adp_sl_bb IS NOT NULL
-        )
-      )
-    `).run();
+    const rows = db.prepare(`
+      SELECT id, adp_underdog, adp_fantasypros,
+             ktc_value, ktc_value_sf, fc_value, fc_value_sf, ds_value, ds_value_sf,
+             adp_fp_dyn, adp_fp_dyn_sf, adp_sl_dyn, adp_sl_dyn_sf
+      FROM players
+    `).all();
+
+    const dyn1qb = dynastyRanks(rows, '1QB');
+    const dynSf = dynastyRanks(rows, '2QB');
+
+    const update = db.prepare(`
+      UPDATE players SET adp_consensus = @consensus,
+                         dyn_rank_consensus = @dyn,
+                         dyn_rank_consensus_sf = @dynSf
+      WHERE id = @id
+    `);
+
+    db.transaction(() => {
+      for (const r of rows) {
+        update.run({
+          id: r.id,
+          // Stored as the best-ball 1QB baseline; the trend arrows compare against it.
+          consensus: adpConsensus(r, 'BB', '1QB'),
+          dyn: dyn1qb.get(r.id) ?? null,
+          dynSf: dynSf.get(r.id) ?? null,
+        });
+      }
+    })();
   } catch (err) {
-    console.error('[recomputeAllConsensus]', err.message);
+    console.error('[recomputeDerived]', err.message);
   }
 }
 
 module.exports = router;
+module.exports.recomputeDerived = recomputeDerived;

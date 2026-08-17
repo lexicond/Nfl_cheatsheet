@@ -32,19 +32,29 @@ const SEED_PLAYERS = [
   { name: 'Rashee Rice', position: 'WR', nfl_team: 'KC', adp: 30 },
 ];
 
+// Last-resort only: this list is a static snapshot and will be out of date. It
+// exists so the UI is never blank, not as a data source — every real ADP column is
+// left null so a stale name never masquerades as a fetched ranking.
 function seedFallback(db) {
+  const { normalizeName } = require('../utils/normalize');
   const insert = db.prepare(`
-    INSERT OR IGNORE INTO players (name, position, nfl_team, adp_consensus, last_updated)
-    VALUES (@name, @position, @nfl_team, @adp_consensus, @last_updated)
+    INSERT OR IGNORE INTO players (name, name_normalized, position, nfl_team, adp_consensus, last_updated)
+    VALUES (@name, @name_normalized, @position, @nfl_team, @adp_consensus, @last_updated)
   `);
   const now = new Date().toISOString();
-  const runAll = db.transaction(() => {
+  db.transaction(() => {
     SEED_PLAYERS.forEach(p => {
-      insert.run({ name: p.name, position: p.position, nfl_team: p.nfl_team, adp_consensus: p.adp, last_updated: now });
+      insert.run({
+        name: p.name,
+        name_normalized: normalizeName(p.name),
+        position: p.position,
+        nfl_team: p.nfl_team,
+        adp_consensus: p.adp,
+        last_updated: now,
+      });
     });
-  });
-  runAll();
-  console.log('[Seed] Inserted fallback top-30 players');
+  })();
+  console.log('[Seed] Inserted fallback top-30 players (static snapshot — refresh to replace)');
 }
 
 module.exports = { seedFallback };

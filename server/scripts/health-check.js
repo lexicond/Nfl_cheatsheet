@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Self-repairing health check. Usage: node server/scripts/health-check.js [--repair]
 
-const path = require('path');
-// Load db from parent directory context
-process.chdir(path.join(__dirname, '..', '..'));
-const { db } = require('../server/db');
-const { normalizeName } = require('../server/utils/normalize');
+// Requires resolve relative to this file, so they must not be written as if the
+// process were running from the repo root.
+const { db } = require('../db');
+const { consensusColumns } = require('../sources');
+const { normalizeName } = require('../utils/normalize');
 
 const REPAIR = process.argv.includes('--repair');
 const STALE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -44,6 +44,7 @@ const withKTC = db.prepare('SELECT COUNT(*) as c FROM players WHERE ktc_value IS
 const withNorm = db.prepare('SELECT COUNT(*) as c FROM players WHERE name_normalized IS NOT NULL').get().c;
 const withFP = db.prepare('SELECT COUNT(*) as c FROM players WHERE adp_fantasypros IS NOT NULL').get().c;
 const withUD = db.prepare('SELECT COUNT(*) as c FROM players WHERE adp_underdog IS NOT NULL').get().c;
+const withBye = db.prepare('SELECT COUNT(*) as c FROM players WHERE bye_week IS NOT NULL').get().c;
 
 log(total > 500 ? 'ok' : 'warn', `Total players: ${total}`);
 log(withNorm === total ? 'ok' : 'warn', `name_normalized: ${withNorm}/${total} (${(100*withNorm/total).toFixed(0)}%)`);
@@ -51,20 +52,24 @@ log(withProj > 100 ? 'ok' : 'warn', `projected_pts: ${withProj}/${total} (${(100
 log(withKTC > 100 ? 'ok' : 'warn', `ktc_value: ${withKTC}/${total} (${(100*withKTC/total).toFixed(0)}%)`);
 log(withFP > 100 ? 'ok' : 'warn', `adp_fantasypros: ${withFP}/${total}`);
 log(withUD > 100 ? 'ok' : 'warn', `adp_underdog: ${withUD}/${total}`);
+log(withBye > 300 ? 'ok' : 'warn', `bye_week: ${withBye}/${total}`);
 
 // 3. Ranking consistency — top 20 consensus should appear in top 35 of each source
 console.log('\n=== Ranking Consistency (top 20 consensus) ===');
+// adp_consensus is the best-ball 1QB baseline, so only its own inputs are checked;
+// a redraft or dynasty column disagreeing is a format difference, not a fault.
+const bbCols = consensusColumns('BB', '1QB');
 const top20 = db.prepare(`
-  SELECT name, position, adp_consensus, adp_fantasypros, adp_underdog, adp_ffc
+  SELECT name, position, adp_consensus, ${bbCols.join(', ')}
   FROM players WHERE adp_consensus IS NOT NULL
   ORDER BY adp_consensus LIMIT 20
 `).all();
 
 for (const p of top20) {
   const mismatches = [];
-  if (p.adp_fantasypros != null && p.adp_fantasypros > 35) mismatches.push(`FP:${p.adp_fantasypros.toFixed(0)}`);
-  if (p.adp_underdog != null && p.adp_underdog > 35) mismatches.push(`UD:${p.adp_underdog.toFixed(0)}`);
-  if (p.adp_ffc != null && p.adp_ffc > 35) mismatches.push(`FFC:${p.adp_ffc.toFixed(0)}`);
+  for (const col of bbCols) {
+    if (p[col] != null && p[col] > 35) mismatches.push(`${col.replace('adp_', '')}:${p[col].toFixed(0)}`);
+  }
   if (mismatches.length > 0) {
     log('warn', `${p.name} (consensus ${p.adp_consensus.toFixed(0)}) ranked outside top 35 in: ${mismatches.join(', ')}`);
   } else {

@@ -16,26 +16,32 @@ import {
 import PlayerRow from './PlayerRow';
 
 // Pixel widths for each column key — used in colgroup for both header and body tables
+// Any column not listed falls back to 68px, which suits a right-aligned ADP number.
 const COL_PX = {
   drag: 24, my_rank: 56, rank: 40, name: 200, pos: 56, bye: 40,
-  adp_fp: 64, adp_ud: 64, adp_ffc: 64,
-  adp_fp_rd: 64, adp_fp_sf: 64,
-  adp_sl_bb: 64, adp_sl_rd: 64, adp_sl_sf: 64,
-  consensus: 80, projected_pts: 64, pos_rank: 64,
-  ktc_value: 80, fc_value: 80,
+  adp_fp: 64, adp_ud: 64, adp_ffc: 64, adp_ffc_sf: 64,
+  adp_fp_rd: 64, adp_fp_sf: 64, adp_fp_dyn: 64,
+  adp_sl_rd: 64, adp_sl_sf: 64,
+  adp_espn: 64, adp_yahoo: 64,
+  consensus: 100, projected_pts: 64, pos_rank: 64, age: 48,
+  round: 44, sleeper_gap: 60, spread: 58,
+  ktc_value: 80, fc_value: 80, ds_value: 80, dp_value: 80,
   tier: 56, flags: 64, status: 96, notes: 48,
 };
 
-function buildColumns(format, leagueType, enabledSources) {
-  const isSF = leagueType === '2QB';
-
+/**
+ * Columns come from the server's view descriptor rather than a copy of the source
+ * registry kept here — so the columns on screen are exactly the sources the server
+ * says feed this view, and a source switched off disappears from both.
+ */
+function buildColumns(format, view, excluded) {
   const base = [
     { label: '', key: 'drag' },
     { label: 'My #', key: 'my_rank' },
     { label: '#', key: 'rank' },
     { label: 'Name', key: 'name' },
     { label: 'Pos', key: 'pos' },
-    { label: 'Bye', key: 'bye' },
+    format === 'DYN' ? { label: 'Age', key: 'age' } : { label: 'Bye', key: 'bye' },
   ];
 
   const tail = [
@@ -45,49 +51,21 @@ function buildColumns(format, leagueType, enabledSources) {
     { label: 'Notes', key: 'notes' },
   ];
 
-  if (format === 'DYN') {
-    return [
-      ...base,
-      ...(enabledSources.ktc !== false ? [{ label: 'KTC', key: 'ktc_value' }] : []),
-      ...(enabledSources.fantasycalc !== false ? [{ label: 'FC', key: 'fc_value' }] : []),
-      { label: 'Proj', key: 'projected_pts' },
-      { label: 'Pos Rk', key: 'pos_rank' },
-      ...tail,
-    ];
-  }
-
-  // ADP source columns vary by format + leagueType
-  let sourceCols = [];
-  if (format === 'BB' && !isSF) {
-    sourceCols = [
-      ...(enabledSources.fantasypros !== false ? [{ label: 'FP', key: 'adp_fp' }] : []),
-      ...(enabledSources.underdog !== false ? [{ label: 'UD', key: 'adp_ud' }] : []),
-      ...(enabledSources.sleeper !== false ? [{ label: 'SL', key: 'adp_sl_rd' }] : []),
-    ];
-  } else if (format === 'BB' && isSF) {
-    sourceCols = [
-      ...(enabledSources.fantasypros !== false ? [{ label: 'FP SF', key: 'adp_fp_sf' }] : []),
-      ...(enabledSources.underdog !== false ? [{ label: 'UD', key: 'adp_ud' }] : []),
-      ...(enabledSources.sleeper !== false ? [{ label: 'SL SF', key: 'adp_sl_sf' }] : []),
-    ];
-  } else if (format === 'RD' && !isSF) {
-    sourceCols = [
-      ...(enabledSources.fantasypros !== false ? [{ label: 'FP', key: 'adp_fp_rd' }] : []),
-      ...(enabledSources.ffc !== false ? [{ label: 'FFC', key: 'adp_ffc' }] : []),
-      ...(enabledSources.sleeper !== false ? [{ label: 'SL', key: 'adp_sl_rd' }] : []),
-    ];
-  } else {
-    // RD SF
-    sourceCols = [
-      ...(enabledSources.fantasypros !== false ? [{ label: 'FP SF', key: 'adp_fp_sf' }] : []),
-      ...(enabledSources.sleeper !== false ? [{ label: 'SL SF', key: 'adp_sl_sf' }] : []),
-    ];
-  }
+  // Exclusions are held by family, not column, so a market switched off stays off
+  // across a view's 1QB and Superflex boards.
+  const sourceCols = view
+    ? [...view.consensus, ...view.reference]
+        .filter(src => !excluded.includes(src.family))
+        .map(src => ({ label: src.short, key: src.field, numeric: true }))
+    : [];
 
   return [
     ...base,
     ...sourceCols,
-    { label: 'Consensus', key: 'consensus' },
+    { label: format === 'DYN' ? 'Rank' : 'Consensus', key: 'consensus' },
+    ...(format === 'DYN' ? [] : [{ label: 'Rd', key: 'round' }]),
+    { label: 'Δ SL', key: 'sleeper_gap' },
+    { label: 'Split', key: 'spread' },
     { label: 'Proj', key: 'projected_pts' },
     { label: 'Pos Rk', key: 'pos_rank' },
     ...tail,
@@ -110,7 +88,7 @@ function TableColgroup({ columns }) {
   return (
     <colgroup>
       {columns.map(col => (
-        <col key={col.key} style={{ width: COL_PX[col.key] || 64, minWidth: COL_PX[col.key] || 64 }} />
+        <col key={col.key} style={{ width: COL_PX[col.key] || 68, minWidth: COL_PX[col.key] || 68 }} />
       ))}
     </colgroup>
   );
@@ -133,15 +111,15 @@ function HeaderRow({ columns }) {
 
 export default function DraftBoard({
   players, loading, onUpdate, onOpenModal, onReorder,
-  format = 'BB', leagueType = '1QB', enabledSources = {}, sourceStatus = {},
-  filterBarHeight = 53,
+  format = 'BB', leagueType = '1QB', view = null, excluded = [], sourceStatus = {},
+  sleeperBaseline = null, filterBarHeight = 53,
 }) {
   const [activeId, setActiveId] = useState(null);
   const headerScrollRef = useRef(null);
   const bodyScrollRef = useRef(null);
 
-  const columns = buildColumns(format, leagueType, enabledSources);
-  const totalWidth = columns.reduce((sum, col) => sum + (COL_PX[col.key] || 64), 0);
+  const columns = buildColumns(format, view, excluded);
+  const totalWidth = columns.reduce((sum, col) => sum + (COL_PX[col.key] || 68), 0);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -244,6 +222,7 @@ export default function DraftBoard({
                   columns={columns}
                   format={format}
                   leagueType={leagueType}
+                  sleeperBaseline={sleeperBaseline}
                 />
               ))}
             </tbody>

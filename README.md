@@ -4,6 +4,9 @@ A personal best ball fantasy football draft board with multi-source ADP, drag-an
 
 **Stack:** Node.js + Express · React + Tailwind · SQLite (better-sqlite3) · Vite · Railway
 
+> Picking this up mid-stream? Read **[HANDOVER.md](HANDOVER.md)** for current state and open
+> work, and **[CLAUDE.md](CLAUDE.md)** for the traps in the data sources.
+
 ---
 
 ## Local Development
@@ -52,28 +55,76 @@ Railway sets `RAILWAY_VOLUME_MOUNT_PATH` automatically when you attach a volume.
 ## Refreshing Data Sources
 
 ### Via the UI
-Click the **↻** button next to any source in the top-right refresh panel, or **Refresh All** to update all three simultaneously.
+Click the **↻** button next to any source in the top-right refresh panel, or **Refresh All** to update every source in turn.
 
 ### Via the API
 ```bash
-# Refresh one source
-curl -X POST http://localhost:3000/api/refresh/sleeper
-curl -X POST http://localhost:3000/api/refresh/fantasypros
+# Refresh one source: sleeper | fantasypros | underdog | ffc | market | ktc | fantasycalc
 curl -X POST http://localhost:3000/api/refresh/underdog
 
-# Refresh all
+# Refresh all (runs sequentially — Sleeper first, since it owns the roster rows)
 curl -X POST http://localhost:3000/api/refresh/all
 
-# Check source status
+# Check source status and data health
 curl http://localhost:3000/api/source-status
+curl http://localhost:3000/api/health
 ```
 
-### Source notes
-- **Sleeper** — public JSON API, no auth required, most reliable. Uses `search_rank` as ADP proxy.
-- **FantasyPros** — scrapes the best ball cheatsheet page. May occasionally be blocked (shows ⚠ Failed). Try refreshing.
-- **Underdog** — tries their API endpoints first, then falls back to scraping. May return no data if their API changes.
+### From the command line
+```bash
+node server/scripts/refresh-all.js      # every source, then rebuild derived columns
+node server/scripts/health-check.js     # freshness, coverage, ranking consistency
+node server/scripts/health-check.js --repair
+```
+
+---
+
+## The printable cheat sheet
+
+```bash
+node server/scripts/refresh-all.js
+node server/scripts/build-cheatsheet.js   # → cheatsheets/draft-room-<year>.html
+```
+
+One self-contained HTML file — no server, no network — so it opens on a phone in a
+draft room with no signal. It carries every format and league type, and three views:
+
+- **Scarcity map** — every ranked player on a shared pick axis, so you can see where
+  each position's supply thins out, with the two widest drop-offs marked.
+- **Board** — grouped by the round the pick actually falls in, with each contributing
+  source shown next to the consensus.
+- **Tiers** — positional tiers cut where the market leaves a real gap rather than at
+  round numbers.
+
+Plus the players whose projected positional rank disagrees most with what they cost.
+
+### Sources
+
+| Source | What it provides | Where it comes from |
+|---|---|---|
+| **Underdog** | Best ball ADP (½PPR, 12-team) | DraftSharks' Underdog board — Underdog publishes no public API |
+| **FantasyPros** | Expert consensus rankings: best ball, ½PPR redraft, ½PPR superflex, dynasty, dynasty superflex. Also bye weeks and expert tiers | `ecrData` payload embedded in each rankings page |
+| **FFC** | Real mock-draft ADP, ½PPR and 2QB | Fantasy Football Calculator public JSON API |
+| **Sleeper** | Player roster, season projections, and Sleeper's own ADP for ½PPR / 2QB / dynasty / dynasty-SF | `api.sleeper.app` projections endpoint |
+| **ESPN + Yahoo** (`market`) | Home-league platform ADP | DraftSharks' ESPN and Yahoo boards |
+| **Dynasty Daddy** | KeepTradeCut and DynastySuperflex values, 1QB and superflex; player ages and cross-platform ids | `dynasty-daddy.com/api/v1/player` — markets 0 and 3 |
+| **FantasyCalc** | Dynasty trade values, 1QB and superflex | FantasyCalc public API |
+| **DynastyProcess** | Dynasty values and player ages. Displayed but **not** averaged — see below | DynastyProcess daily CSV |
 
 If a source fails, existing data for that source is preserved — only a successful fetch updates the values.
+
+### How the consensus is built
+
+Each format averages **only sources that publish that format**, so a redraft ADP never
+skews a best-ball board and a 1QB ranking never skews a superflex one:
+
+| Format | Sources averaged |
+|---|---|
+| Best ball, 1QB | Underdog ADP + FantasyPros best-ball ECR |
+| Best ball, superflex | FantasyPros SF + Sleeper 2QB |
+| Redraft, 1QB | FFC + FantasyPros ½PPR + Sleeper ½PPR + ESPN + Yahoo |
+| Redraft, superflex | FFC 2QB + FantasyPros SF + Sleeper 2QB |
+| Dynasty | Mean **rank** across KTC, FantasyCalc, FantasyPros dynasty and Sleeper dynasty ADP (the values are on different scales, so they are ranked before averaging) |
 
 ---
 
@@ -86,7 +137,8 @@ If a source fails, existing data for that source is preserved — only a success
 | Hide drafted players | "Hide Drafted" toggle (on by default) |
 | Starred only | "Starred Only" toggle |
 | Search | Type in the search box (debounced 300ms) |
-| Sort | Dropdown: Consensus ADP / My Rank / UD / FP / Sleeper |
+| Sort | Dropdown — options follow the format on screen (Consensus, each source, Proj Pts, My Rank) |
+| Switch format | Best Ball / Redraft / Dynasty, and 1QB / SF-2QB — columns, consensus and sort all follow |
 | Set personal rank | Click the "My #" cell and type a number |
 | Drag to reorder | Grab the ⠿ handle on the left side of any row |
 | Cycle tier | Click the tier badge in the row |
@@ -104,14 +156,33 @@ If a source fails, existing data for that source is preserved — only a success
 ├── server/
 │   ├── index.js           Express entry point + auto-seed
 │   ├── db.js              SQLite setup, schema, migrations
+│   ├── sources.js         Every column: provider, format, scoring, plain-English explanation
+│   ├── consensus.js       Averaging and dynasty rank-averaging, with source exclusions
 │   ├── routes/
 │   │   ├── players.js     GET /api/players, PATCH override, POST reorder
 │   │   └── refresh.js     POST /api/refresh/:source, GET /api/source-status
-│   └── scrapers/
-│       ├── sleeper.js     Sleeper public API
-│       ├── fantasypros.js FantasyPros best ball scraper
-│       ├── underdog.js    Underdog API + scraper fallback
-│       └── seed.js        Hardcoded top-30 fallback
+│   ├── scrapers/
+│   │   ├── sleeper.js     Roster, projections, Sleeper ADP by format
+│   │   ├── fantasypros.js ECR for best ball / redraft / superflex / dynasty
+│   │   ├── underdog.js    Underdog best-ball ADP (FFC fallback)
+│   │   ├── ffc.js         Fantasy Football Calculator mock-draft ADP
+│   │   ├── market.js      ESPN + Yahoo platform ADP
+│   │   ├── dynastydaddy.js KeepTradeCut + DynastySuperflex values, ages
+│   │   ├── dynastyprocess.js DynastyProcess values and ages
+│   │   ├── fantasycalc.js FantasyCalc dynasty values
+│   │   └── seed.js        Hardcoded fallback, last resort only
+│   ├── utils/
+│   │   ├── http.js        Shared HTTP client + embedded-JSON extraction
+│   │   ├── match.js       Player name matching across sources
+│   │   ├── normalize.js   Name normalisation
+│   │   └── draftsharks.js DraftSharks ADP board parser
+│   └── scripts/
+│       ├── refresh-all.js  Refresh every source from the CLI
+│       ├── validate-sources.js Assert each format contains what it claims
+│       ├── audit-matching.js  Find name-matching damage across sources
+│       ├── test-source-toggle.js Assert switching a source off changes the board
+│       ├── build-cheatsheet.js Render the standalone cheat sheet
+│       └── health-check.js Data health report
 ├── client/
 │   ├── src/
 │   │   ├── App.jsx

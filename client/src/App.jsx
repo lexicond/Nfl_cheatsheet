@@ -35,8 +35,13 @@ export default function App() {
     setFormat,
     leagueType,
     setLeagueType,
-    enabledSources,
-    setEnabledSources,
+    view,
+    excluded,
+    toggleSource,
+    enableAllSources,
+    teamSize,
+    setTeamSize,
+    sleeperBaseline,
   } = usePlayers();
 
   const [modalPlayer, setModalPlayer] = useState(null);
@@ -76,7 +81,7 @@ export default function App() {
           <span className="text-2xl">🏈</span>
           <div>
             <h1 className="text-lg font-bold tracking-tight">NFL Draft Cheatsheet</h1>
-            <p className="text-xs text-[#555875]">0.5 PPR · {formatLabel} · {leagueType} · {new Date().getFullYear()}</p>
+            <p className="text-xs text-[#555875]">0.5 PPR · {formatLabel} · {leagueType} · {teamSize}-team · {new Date().getFullYear()}</p>
           </div>
         </div>
         <div className="text-xs text-[#555875] font-mono">
@@ -95,8 +100,13 @@ export default function App() {
         setFormat={setFormat}
         leagueType={leagueType}
         setLeagueType={setLeagueType}
-        enabledSources={enabledSources}
-        setEnabledSources={setEnabledSources}
+        view={view}
+        excluded={excluded}
+        onToggleSource={toggleSource}
+        onEnableAllSources={enableAllSources}
+        formatLabel={formatLabel}
+        teamSize={teamSize}
+        setTeamSize={setTeamSize}
       />
 
       {seeding && (
@@ -117,8 +127,10 @@ export default function App() {
             onReorder={reorderPlayer}
             format={format}
             leagueType={leagueType}
-            enabledSources={enabledSources}
+            view={view}
+            excluded={excluded}
             sourceStatus={sourceStatus}
+            sleeperBaseline={sleeperBaseline}
             filterBarHeight={filterBarHeight}
           />
         </main>
@@ -130,6 +142,7 @@ export default function App() {
           onClose={closeModal}
           onUpdate={handleModalUpdate}
           sourceStatus={sourceStatus}
+          format={format}
         />
       )}
 

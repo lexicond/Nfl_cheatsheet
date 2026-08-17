@@ -2,6 +2,8 @@ import React, { useState, useRef } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
+const SEASON_YEAR = new Date().getFullYear();
+
 const TIER_BORDER = {
   1: 'border-l-2 border-l-amber-500',
   2: 'border-l-2 border-l-blue-500',
@@ -23,28 +25,37 @@ function TrendIndicator({ trend }) {
   return <span className="text-red-400 text-xs ml-1" title={`Falling ${trend.toFixed(1)} picks`}>▼{Math.abs(trend).toFixed(1)}</span>;
 }
 
-function ValueBadge({ score }) {
+// score = market position rank − projected position rank. Positive means the market
+// drafts him later than the projections rank him.
+function ValueBadge({ score, position }) {
   if (score == null) return null;
-  if (score >= 15) {
-    return <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-green-500/20 text-green-400 border border-green-500/30 font-bold">VALUE</span>;
+  if (score >= 12) {
+    return (
+      <span
+        className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-green-500/20 text-green-400 border border-green-500/30 font-bold"
+        title={`Projected ${score} spots higher at ${position} than his draft cost`}
+      >
+        VALUE
+      </span>
+    );
   }
-  if (score <= -15) {
-    return <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold">REACH</span>;
+  if (score <= -12) {
+    return (
+      <span
+        className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold"
+        title={`Drafted ${Math.abs(score)} spots higher at ${position} than his projection`}
+      >
+        REACH
+      </span>
+    );
   }
   return null;
 }
 
-function bestPosRank(player) {
-  const ranks = [
-    player.pos_rank_fantasypros,
-    player.pos_rank_underdog,
-    player.pos_rank_sleeper,
-  ].filter(r => r != null);
-  if (ranks.length === 0) return null;
-  return Math.min(...ranks);
-}
-
-export default function PlayerRow({ player, index, onUpdate, onOpenModal, columns = [], format = 'BB', leagueType = '1QB' }) {
+export default function PlayerRow({
+  player, index, onUpdate, onOpenModal, columns = [],
+  format = 'BB', leagueType = '1QB', sleeperBaseline = null,
+}) {
   const [editingRank, setEditingRank] = useState(false);
   const [rankInput, setRankInput] = useState('');
   const rankRef = useRef(null);
@@ -79,8 +90,16 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
     if (!isNaN(val) && val > 0) onUpdate(player.id, { personal_rank: val });
   };
 
-  const posRank = bestPosRank(player);
-  const posRankStr = posRank != null ? `${player.position}${posRank}` : '–';
+  // Where the Sleeper baseline is a stand-in, whole positions carry a standing offset,
+  // so the gap is read against its position's norm rather than against zero.
+  const gapNorm = (sleeperBaseline?.positional_norms?.[player.position]) ?? 0;
+  const gapVsNorm = player.sleeper_gap == null ? null : player.sleeper_gap - gapNorm;
+
+  // Position rank in the format currently on screen, not whichever source ranked
+  // him highest.
+  const posRankStr = player.pos_rank_consensus != null
+    ? `${player.position}${player.pos_rank_consensus}`
+    : '–';
 
   const rowClass = [
     'table-row-base group',
@@ -143,7 +162,7 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
           <span>{player.name}</span>
           {player.starred && <span className="text-amber-400 text-xs">⭐</span>}
           {player.flagged && <span className="text-red-400 text-xs">🚩</span>}
-          <ValueBadge score={player.value_score} />
+          <ValueBadge score={player.value_score} position={player.position} />
         </div>
         {player.nfl_team && (
           <div className="text-xs text-[#555875] font-mono">{player.nfl_team}</div>
@@ -163,63 +182,19 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
       </td>
     ),
 
-    adp_fp: (
-      <td key="adp_fp" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-        <AdpCell value={player.adp_fantasypros} />
-      </td>
-    ),
-
-    adp_fp_rd: (
-      <td key="adp_fp_rd" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-        <AdpCell value={player.adp_fp_rd} />
-      </td>
-    ),
-
-    adp_fp_sf: (
-      <td key="adp_fp_sf" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-        <AdpCell value={player.adp_fp_sf} />
-      </td>
-    ),
-
-    adp_ud: (
-      <td key="adp_ud" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-        <AdpCell value={player.adp_underdog} />
-      </td>
-    ),
-
-    adp_ffc: (
-      <td key="adp_ffc" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-        <AdpCell value={player.adp_ffc} />
-      </td>
-    ),
-
-    adp_sl_bb: (
-      <td key="adp_sl_bb" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-        <AdpCell value={player.adp_sl_bb} />
-      </td>
-    ),
-
-    adp_sl_rd: (
-      <td key="adp_sl_rd" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-        <AdpCell value={player.adp_sl_rd} />
-      </td>
-    ),
-
-    adp_sl_sf: (
-      <td key="adp_sl_sf" className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-        <AdpCell value={player.adp_sl_sf} />
-      </td>
-    ),
-
     consensus: (
       <td key="consensus" className={`${cellClass} w-20 font-mono text-[#e8eaf0] text-right`}>
         {player.adp_consensus != null ? (
           <span
-            title={`Based on ${player.adp_source_count || 1} source${(player.adp_source_count || 1) !== 1 ? 's' : ''}`}
+            title={
+              format === 'DYN'
+                ? `Mean rank across ${player.adp_source_count || 1} dynasty value source${(player.adp_source_count || 1) !== 1 ? 's' : ''}`
+                : `Mean ADP across ${player.adp_source_count || 1} source${(player.adp_source_count || 1) !== 1 ? 's' : ''}`
+            }
             className="cursor-default"
           >
             {player.adp_consensus.toFixed(1)}
-            <TrendIndicator trend={player.adp_trend} />
+            {format !== 'DYN' && <TrendIndicator trend={player.adp_trend} />}
           </span>
         ) : <span className="text-[#555875]">–</span>}
       </td>
@@ -230,7 +205,7 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
         {player.projected_pts != null ? (
           <span
             className={`pos-text-${player.position}`}
-            title={`Projected 0.5 PPR points (Sleeper 2025)`}
+            title={`Projected 0.5 PPR points — Sleeper ${SEASON_YEAR}${player.proj_pos_rank != null ? ` (${player.position}${player.proj_pos_rank})` : ''}`}
           >
             {player.projected_pts.toFixed(1)}
           </span>
@@ -244,9 +219,53 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
       </td>
     ),
 
-    fc_value: (
-      <td key="fc_value" className={`${cellClass} w-20 font-mono text-[#8b90a8] text-right`}>
-        {player.fc_value != null ? player.fc_value.toFixed(0) : <span className="text-[#555875]">–</span>}
+    round: (
+      <td key="round" className={`${cellClass} w-11 font-mono text-[#8b90a8] text-center`}>
+        {player.round != null ? player.round : '–'}
+      </td>
+    ),
+
+    // How this player sits on Sleeper against the consensus. Positive means Sleeper
+    // drafts him later, so he comes cheaper in the room you are actually drafting in.
+    sleeper_gap: (
+      <td key="sleeper_gap" className={`${cellClass} w-16 font-mono text-right`}>
+        {gapVsNorm == null || Math.abs(gapVsNorm) < 5 ? (
+          <span className="text-[#555875]">{gapVsNorm == null ? '–' : '·'}</span>
+        ) : (
+          <span
+            className={gapVsNorm > 0 ? 'text-green-400' : 'text-amber-400'}
+            title={(gapVsNorm > 0
+              ? `Sleeper drafts him ${gapVsNorm} places later than the consensus — cheaper there`
+              : `Sleeper drafts him ${Math.abs(gapVsNorm)} places earlier than the consensus — dearer there`)
+              + (gapNorm !== 0
+                ? `. Measured against the ${gapNorm > 0 ? '+' : ''}${gapNorm} that every ${player.position} carries here, because Sleeper publishes no best-ball board and this baseline is its ½PPR redraft ADP`
+                : '')}
+          >
+            {gapVsNorm > 0 ? `+${gapVsNorm}` : gapVsNorm}
+          </span>
+        )}
+      </td>
+    ),
+
+    // How far apart the selected sources are on him.
+    spread: (
+      <td key="spread" className={`${cellClass} w-16 font-mono text-right`}>
+        {player.spread == null ? (
+          <span className="text-[#555875]">–</span>
+        ) : (
+          <span
+            className={player.spread >= 24 ? 'text-orange-400' : player.spread >= 12 ? 'text-[#8b90a8]' : 'text-[#555875]'}
+            title={`Your sources are ${player.spread} places apart on him`}
+          >
+            {player.spread.toFixed(0)}
+          </span>
+        )}
+      </td>
+    ),
+
+    age: (
+      <td key="age" className={`${cellClass} w-12 font-mono text-[#8b90a8] text-center`}>
+        {player.age != null ? player.age.toFixed(0) : '–'}
       </td>
     ),
 
@@ -339,9 +358,23 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
     ),
   };
 
+  // Source columns are driven by the server's view descriptor, so anything without a
+  // bespoke renderer is a numeric source cell keyed by its field name.
+  const renderCell = (col) => {
+    if (cellRenderers[col.key]) return cellRenderers[col.key];
+    const value = player[col.key];
+    return (
+      <td key={col.key} className={`${cellClass} font-mono text-[#8b90a8] text-right`}>
+        {value == null
+          ? <span className="text-[#555875]">–</span>
+          : value >= 1000 ? value.toLocaleString() : value.toFixed(1)}
+      </td>
+    );
+  };
+
   return (
     <tr ref={setNodeRef} style={style} className={rowClass}>
-      {columns.map(col => cellRenderers[col.key] || null)}
+      {columns.map(renderCell)}
     </tr>
   );
 }

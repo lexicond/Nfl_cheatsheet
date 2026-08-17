@@ -1,118 +1,117 @@
-const axios = require('axios');
-const { db, computeConsensus } = require('../db');
+const { db } = require('../db');
+const { get, JSON_HEADERS } = require('../utils/http');
 const { normalizeName } = require('../utils/normalize');
+const { createMatcher, createClaimGuard } = require('../utils/match');
 
-const POS_MAP = { 'QB': 'QB', 'RB': 'RB', 'WR': 'WR', 'TE': 'TE', 'K': 'K', 'DST': 'DEF', 'D/ST': 'DEF' };
-function parsePosition(raw) {
-  return POS_MAP[(raw || '').toUpperCase().trim()] || null;
+const POS_ALLOW = new Set(['QB', 'RB', 'WR', 'TE']);
+const SEASON_YEAR = new Date().getFullYear();
+
+// Fantasy Football Calculator publishes real mock-draft ADP, free and unauthenticated.
+// half-ppr feeds the 1QB redraft consensus; 2qb feeds the superflex one.
+function endpointsFor(scoring, year) {
+  return `https://fantasyfootballcalculator.com/api/v1/adp/${scoring}?teams=12&year=${year}&position=all`;
 }
 
-// Fantasy Football Calculator — free public JSON API, no auth required
-// Try current year first, then fall back to prior years
-const SEASON_YEAR = new Date().getFullYear();
-const ENDPOINTS = [
-  `https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=${SEASON_YEAR}&position=all`,
-  `https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=${SEASON_YEAR - 1}&position=all`,
-  `https://fantasyfootballcalculator.com/api/v1/adp/half-ppr?teams=12&year=${SEASON_YEAR - 2}&position=all`,
+const FFC_SOURCES = [
+  { scoring: 'half-ppr', column: 'adp_ffc',    label: '½PPR', primary: true },
+  { scoring: '2qb',      column: 'adp_ffc_sf', label: '2QB' },
 ];
 
-async function fetchFFC() {
-  const getPlayer = db.prepare(`SELECT * FROM players WHERE name = ? AND position = ?`);
-  const getByNorm = db.prepare(`SELECT * FROM players WHERE name_normalized = ? AND position = ?`);
-  const updateFFC = db.prepare(`
-    UPDATE players
-    SET adp_ffc = @adp_ffc,
-        nfl_team = COALESCE(@nfl_team, nfl_team),
-        adp_consensus = @adp_consensus,
-        last_updated = @last_updated
-    WHERE id = @id
-  `);
-  const upsertPlayer = db.prepare(`
-    INSERT INTO players (name, position, nfl_team, adp_ffc, adp_consensus, last_updated)
-    VALUES (@name, @position, @nfl_team, @adp_ffc, @adp_consensus, @last_updated)
-    ON CONFLICT DO NOTHING
-  `);
-  const updateMeta = db.prepare(`
-    UPDATE source_metadata SET last_fetched = ?, player_count = ?, status = ? WHERE source = 'ffc'
-  `);
-
-  function findExisting(name, pos) {
-    return getPlayer.get(name, pos) || getByNorm.get(normalizeName(name), pos) || null;
-  }
-
-  let players = [];
-  let lastError = null;
-
-  for (const url of ENDPOINTS) {
+async function fetchOne(scoring) {
+  // Fall back a season only if the current one has not opened yet.
+  for (const year of [SEASON_YEAR, SEASON_YEAR - 1]) {
     try {
-      const res = await axios.get(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
-        timeout: 15000,
-      });
-      const data = res.data;
-      if (data && Array.isArray(data.players) && data.players.length > 0) {
-        const parsed = data.players
-          .map(p => ({
-            name: p.name,
-            position: parsePosition(p.position),
-            nfl_team: (p.team || '').toUpperCase() || null,
-            adp: parseFloat(p.adp),
-          }))
-          .filter(p => p.name && p.position && !isNaN(p.adp) && ['QB', 'RB', 'WR', 'TE'].includes(p.position));
-        if (parsed.length > 0) {
-          players = parsed;
-          console.log(`[FFC] Got ${players.length} players from ${url}`);
-          break;
-        }
+      const res = await get(endpointsFor(scoring, year), { headers: JSON_HEADERS, timeout: 20000 });
+      const rows = res.data?.players;
+      if (!Array.isArray(rows) || rows.length === 0) continue;
+      const players = rows
+        .map(p => ({
+          name: p.name,
+          position: (p.position || '').toUpperCase(),
+          nfl_team: (p.team || '').toUpperCase() || null,
+          adp: parseFloat(p.adp),
+          bye_week: Number.isFinite(Number(p.bye)) && Number(p.bye) > 0 ? Number(p.bye) : null,
+        }))
+        .filter(p => p.name && POS_ALLOW.has(p.position) && Number.isFinite(p.adp));
+      if (players.length > 0) {
+        return { players, year, drafts: res.data?.meta?.total_drafts ?? null, through: res.data?.meta?.end_date ?? null };
       }
     } catch (err) {
-      lastError = err;
-      console.warn(`[FFC] ${url} failed: ${err.message}`);
+      console.warn(`[FFC] ${scoring} ${year} failed: ${err.message}`);
     }
   }
+  return null;
+}
 
-  if (players.length === 0) {
-    const now = new Date().toISOString();
-    updateMeta.run(now, 0, 'error');
-    return {
-      success: false,
-      error: lastError?.message || 'No data from FFC',
-      source: 'ffc',
-      timestamp: now,
-    };
-  }
-
+async function fetchFFC() {
+  const findPlayer = createMatcher(db);
   const now = new Date().toISOString();
 
-  const run = db.transaction(() => {
-    let count = 0;
-    for (const p of players) {
-      const existing = findExisting(p.name, p.position);
-      const consensus = computeConsensus(
-        existing?.adp_fantasypros ?? null,
-        existing?.adp_underdog ?? null,
-        p.adp,
-      );
-      const row = {
-        nfl_team: p.nfl_team,
-        adp_ffc: p.adp,
-        adp_consensus: consensus,
-        last_updated: now,
-      };
-      if (existing) {
-        updateFFC.run({ ...row, id: existing.id });
-      } else {
-        upsertPlayer.run({ ...row, name: p.name, position: p.position });
-      }
-      count++;
-    }
-    return count;
-  });
+  const insertPlayer = db.prepare(`
+    INSERT INTO players (name, name_normalized, position, nfl_team, bye_week, adp_ffc, last_updated)
+    VALUES (@name, @name_normalized, @position, @nfl_team, @bye_week, @adp, @ts)
+  `);
+  const updateMeta = db.prepare(`
+    UPDATE source_metadata SET last_fetched = ?, player_count = ?, status = ?, notes = ? WHERE source = 'ffc'
+  `);
 
-  const count = run();
-  updateMeta.run(now, count, 'ok');
-  console.log(`[FFC] Updated ${count} players`);
-  return { success: true, players_updated: count, source: 'ffc', timestamp: now };
+  const results = await Promise.all(FFC_SOURCES.map(async src => ({ ...src, data: await fetchOne(src.scoring) })));
+
+  const notes = [];
+  let primaryCount = 0;
+
+  for (const src of results) {
+    if (!src.data) {
+      console.warn(`[FFC] No data for ${src.label}`);
+      continue;
+    }
+    const { players, year, drafts, through } = src.data;
+
+    const updateAdp = db.prepare(`
+      UPDATE players
+      SET ${src.column} = @adp,
+          nfl_team = COALESCE(@nfl_team, nfl_team),
+          bye_week = COALESCE(@bye_week, bye_week),
+          last_updated = @ts
+      WHERE id = @id
+    `);
+
+    const claim = createClaimGuard(`FFC ${src.label}`);
+    const count = db.transaction(() => {
+      let n = 0;
+      for (const p of players) {
+        let target = findPlayer(p.name, p.position, p.nfl_team);
+        if (!target && src.primary) {
+          const info = insertPlayer.run({
+            name: p.name,
+            name_normalized: normalizeName(p.name),
+            position: p.position,
+            nfl_team: p.nfl_team,
+            bye_week: p.bye_week,
+            adp: p.adp,
+            ts: now,
+          });
+          target = { id: info.lastInsertRowid };
+        }
+        if (!target || !claim(target.id, p.name)) continue;
+        updateAdp.run({ id: target.id, adp: p.adp, nfl_team: p.nfl_team, bye_week: p.bye_week, ts: now });
+        n++;
+      }
+      return n;
+    })();
+
+    if (src.primary) primaryCount = count;
+    notes.push(`${src.label} ${count} (${year}, ${drafts ?? '?'} drafts thru ${through ?? '?'})`);
+    console.log(`[FFC] ${src.label}: ${count} players → ${src.column}`);
+  }
+
+  if (notes.length === 0) {
+    updateMeta.run(now, 0, 'error', 'No FFC data for any scoring format');
+    return { success: false, error: 'No data from FFC', source: 'ffc', timestamp: now };
+  }
+
+  updateMeta.run(now, primaryCount, 'ok', notes.join('; '));
+  return { success: true, players_updated: primaryCount, formats: notes, source: 'ffc', timestamp: now };
 }
 
 module.exports = { fetchFFC };

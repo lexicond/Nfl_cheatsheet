@@ -1,5 +1,6 @@
 import React, { forwardRef, useRef, useEffect } from 'react';
 import SourceRefreshPanel from './SourceRefreshPanel';
+import SourcePanel from './SourcePanel';
 
 const POSITIONS = ['QB', 'RB', 'WR', 'TE'];
 const TIERS = [1, 2, 3, 4, 5];
@@ -9,37 +10,19 @@ const SORT_COMMON = [
   { value: 'projected_pts', label: 'Proj Pts' },
 ];
 
-function getSortOptions(format, leagueType) {
-  if (format === 'DYN') return [
-    { value: 'ktc_value', label: 'KTC Value' },
-    { value: 'fc_value', label: 'FC Value' },
-    ...SORT_COMMON,
-  ];
-  if (format === 'BB' && leagueType === '1QB') return [
-    { value: 'adp_sl_bb', label: 'Sleeper ADP' },
-    { value: 'adp_consensus', label: 'Consensus' },
-    { value: 'adp_fantasypros', label: 'FantasyPros' },
-    { value: 'adp_underdog', label: 'Underdog' },
-    ...SORT_COMMON,
-  ];
-  if (format === 'BB') return [ // SF/2QB
-    { value: 'adp_sl_sf', label: 'Sleeper SF' },
-    { value: 'adp_consensus', label: 'Consensus' },
-    { value: 'adp_fp_sf', label: 'FantasyPros SF' },
-    { value: 'adp_underdog', label: 'Underdog' },
-    ...SORT_COMMON,
-  ];
-  if (format === 'RD' && leagueType === '1QB') return [
-    { value: 'adp_sl_rd', label: 'Sleeper ADP' },
-    { value: 'adp_consensus', label: 'Consensus' },
-    { value: 'adp_fp_rd', label: 'FantasyPros' },
-    { value: 'adp_ffc', label: 'FFC ADP' },
-    ...SORT_COMMON,
-  ];
-  return [ // RD SF/2QB
-    { value: 'adp_sl_sf', label: 'Sleeper SF' },
-    { value: 'adp_consensus', label: 'Consensus' },
-    { value: 'adp_fp_sf', label: 'FantasyPros SF' },
+// Sort options are built from the sources currently switched on, so the dropdown never
+// offers a column the board is not showing.
+function getSortOptions(view, excluded, format) {
+  const consensus = { value: 'adp_consensus', label: format === 'DYN' ? 'Dynasty Rank' : 'Consensus' };
+  if (!view) return [consensus, ...SORT_COMMON];
+
+  const active = [...view.consensus, ...view.reference].filter(s => !excluded.includes(s.family));
+  return [
+    consensus,
+    ...active.map(s => ({ value: s.column, label: s.label })),
+    { value: 'sleeper_gap', label: 'Cheapest on Sleeper' },
+    { value: 'spread', label: 'Most disagreement' },
+    ...(format === 'DYN' ? [{ value: 'age', label: 'Age (youngest)' }] : []),
     ...SORT_COMMON,
   ];
 }
@@ -62,6 +45,8 @@ const LEAGUE_TYPES = [
   { value: '2QB', label: 'SF/2QB' },
 ];
 
+const TEAM_SIZES = [8, 10, 12, 14];
+
 // Position scarcity context for best ball 3WR format
 const SCARCITY = {
   WR: { format: 'BB', label: '3 starters · depth premium' },
@@ -71,7 +56,9 @@ const SCARCITY = {
 };
 
 const FilterBar = forwardRef(function FilterBar(
-  { filters, setFilter, sourceStatus, refreshing, onRefresh, format, setFormat, leagueType, setLeagueType, enabledSources, setEnabledSources },
+  { filters, setFilter, sourceStatus, refreshing, onRefresh, format, setFormat,
+    leagueType, setLeagueType, view, excluded, onToggleSource, onEnableAllSources,
+    formatLabel, teamSize, setTeamSize },
   ref
 ) {
   const searchRef = useRef(null);
@@ -95,10 +82,6 @@ const FilterBar = forwardRef(function FilterBar(
   };
 
   const toggleTier = (t) => setFilter('tier', filters.tier === t ? null : t);
-
-  const toggleSource = (src) => {
-    setEnabledSources({ ...enabledSources, [src]: !enabledSources[src] });
-  };
 
   // Scarcity hint: show when exactly one position is selected
   const singlePos = filters.positions.length === 1 ? filters.positions[0] : null;
@@ -199,7 +182,7 @@ const FilterBar = forwardRef(function FilterBar(
           className="input text-xs py-1 pr-6"
         >
           <option value="">Default</option>
-          {getSortOptions(format, leagueType).map(o => (
+          {getSortOptions(view, excluded, format).map(o => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
@@ -214,14 +197,21 @@ const FilterBar = forwardRef(function FilterBar(
           className="input text-xs py-1 w-32"
         />
 
-        {/* Source refresh panel — pushed right */}
-        <div className="ml-auto">
+        {/* Which sources feed this view, and refresh controls — pushed right */}
+        <div className="ml-auto flex items-center gap-2">
+          <SourcePanel
+            view={view}
+            excluded={excluded}
+            onToggleSource={onToggleSource}
+            onEnableAllSources={onEnableAllSources}
+            sourceStatus={sourceStatus}
+            formatLabel={formatLabel}
+            leagueType={leagueType}
+          />
           <SourceRefreshPanel
             sourceStatus={sourceStatus}
             refreshing={refreshing}
             onRefresh={onRefresh}
-            enabledSources={enabledSources}
-            onToggleSource={toggleSource}
           />
         </div>
       </div>
@@ -259,6 +249,26 @@ const FilterBar = forwardRef(function FilterBar(
               }`}
             >
               {lt.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="w-px h-4 bg-[#2e3148]" />
+
+        <span className="text-xs text-[#555875]">Teams:</span>
+        <div className="flex items-center gap-1">
+          {TEAM_SIZES.map(n => (
+            <button
+              key={n}
+              onClick={() => setTeamSize(n)}
+              className={`text-xs px-2 py-0.5 rounded border transition-colors font-medium ${
+                teamSize === n
+                  ? 'bg-green-500/20 border-green-500/50 text-green-300'
+                  : 'border-[#2e3148] text-[#555875] hover:text-[#8b90a8]'
+              }`}
+              title={`${n}-team league — sets round boundaries and tier bands`}
+            >
+              {n}
             </button>
           ))}
         </div>
