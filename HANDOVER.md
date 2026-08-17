@@ -47,18 +47,19 @@ Three decisions that are load-bearing:
 
 ## What remains
 
-**1. It has never run against a live draft.** Everything is verified against a real,
-finished, public Sleeper draft (id `650130288072040449`) and against the live API, but
-nobody has sat in a drafting room with it. The paths that only a live draft exercises are
-`status: 'drafting'` rather than `complete`, the on-the-clock readout advancing, and the
-pick timer. Worth a mock draft on Sleeper before draft day — connect to it and watch the
-board empty. `SLEEPER_DRAFT_ID=<id> node server/scripts/validate-draft-sync.js` checks a
-draft of your own without going near the UI.
+**1. It has never run against a *drafting* room.** It is verified against the owner's own
+completed Squid Best Balls draft — 180 of 180 picks matched onto the board, and the
+computed pick order agrees with every slot Sleeper recorded — plus a second real public
+draft. What only a live room exercises is `status: 'drafting'` rather than `complete`, the
+on-the-clock readout advancing, and the pick timer. Worth a mock draft on Sleeper before
+draft day. `SLEEPER_DRAFT_ID=<id> node server/scripts/validate-draft-sync.js` checks a
+draft of your own without going near the UI, and holds the computed pick order against
+every pick actually recorded.
 
-**2. Auction and third-round-reversal drafts show no "on the clock".** Neither pick order
-can be derived from what the API returns, so it reports nothing rather than guessing.
-Picks still land on the board normally in both. If you draft either format regularly, 3RR
-is derivable with some care; auctions are not.
+**2. Auctions show no "on the clock"** — there is no pick order to derive. Picks still
+land on the board normally. Snake, linear and third-round reversal are all handled:
+the owner's best-ball league runs 3RR, so the reversal maths is derived from and checked
+against its full 180 picks.
 
 **3. Only one draft at a time.** `draft_sync` is a single row by design. Following two
 boards at once would need that relaxed and the picks scoped per draft on read.

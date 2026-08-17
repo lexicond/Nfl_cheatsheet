@@ -147,19 +147,27 @@ async function fetchUserDrafts(username, season) {
 /**
  * Which draft slot owns a given overall pick.
  *
- * Returns null when the answer cannot be trusted: auctions have no pick order at all,
- * and a third-round reversal changes the direction of the snake in a way this does not
- * model. Showing nothing beats showing the wrong team on the clock.
+ * Returns null only for auctions, which have no pick order to derive at all. Showing
+ * nothing beats showing the wrong team on the clock.
+ *
+ * Third-round reversal is handled rather than declined, because it is what the owner's
+ * best-ball league actually uses. Under it the snake does not turn at the reversal
+ * round — that round repeats the previous one's order — and every round after it
+ * alternates from there. Verified against all 180 picks of a real 10-team, 18-round,
+ * reversal-round-3 draft: every slot matches what Sleeper recorded.
  */
 function slotForPick(pickNo, { type, teams, reversal_round }) {
   if (!teams || !pickNo || pickNo < 1) return null;
   if (type !== 'snake' && type !== 'linear') return null;
-  if (type === 'snake' && reversal_round) return null;
 
   const round = Math.ceil(pickNo / teams);
   const idx = pickNo - (round - 1) * teams;
   if (type === 'linear') return idx;
-  return round % 2 === 1 ? idx : teams - idx + 1;
+
+  const forward = reversal_round && round >= reversal_round
+    ? (round - reversal_round) % 2 === 1
+    : round % 2 === 1;
+  return forward ? idx : teams - idx + 1;
 }
 
 /** The next pick at or after `fromPick` belonging to `slot`. */

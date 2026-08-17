@@ -70,10 +70,17 @@ async function main() {
   assert('a linear draft does not turn',
     [1, 2, 3, 4, 5, 6, 7, 8].map(n => slotForPick(n, { ...snake, type: 'linear' })).join(',') === '1,2,3,4,1,2,3,4');
   // Guessing here would put the wrong team on the clock, which is worse than saying
-  // nothing at all.
+  // nothing at all. An auction is the one case with nothing to derive.
   assert('an auction reports no pick order', slotForPick(1, { ...snake, type: 'auction' }) === null);
-  assert('a third-round reversal reports no pick order',
-    slotForPick(1, { ...snake, reversal_round: 3 }) === null);
+
+  // Third-round reversal: the snake does not turn at round 3 — that round repeats
+  // round 2's order — and every round after alternates from there. These are the picks
+  // that actually fell to slot 2 in a real 10-team, 18-round, reversal-round-3 draft.
+  const rev = { type: 'snake', teams: 10, rounds: 18, reversal_round: 3 };
+  const slot2 = [];
+  for (let n = 1; n <= 180; n++) if (slotForPick(n, rev) === 2) slot2.push(n);
+  assert('a third-round reversal repeats round two, then alternates',
+    slot2.slice(0, 8).join(',') === '2,19,29,32,49,52,69,72', slot2.slice(0, 8).join(','));
   assert('your next pick is found from where the draft stands',
     nextPickForSlot(5, 3, snake) === 6, `got ${nextPickForSlot(5, 3, snake)}`);
   assert('being on the clock reads as zero picks away',
@@ -191,6 +198,19 @@ async function main() {
       db.prepare('DELETE FROM draft_picks').run();
       const r = draftRoutes.storePicks(mine.draft_id, myPicks);
       console.log(`        ${r.matched}/${myPicks.length} picks matched onto the board`);
+
+      // The strongest check available: every pick Sleeper recorded carries the slot that
+      // made it, so the computed pick order can be held against the real one. This is
+      // what proves the reversal maths on the format you actually draft.
+      if (myPicks.length > 0 && mine.type !== 'auction') {
+        const wrong = myPicks.filter(p => slotForPick(p.pick_no, mine) !== p.draft_slot);
+        assert('the computed pick order matches every pick Sleeper recorded',
+          wrong.length === 0,
+          wrong.length
+            ? `${wrong.length}/${myPicks.length} wrong, e.g. pick ${wrong[0].pick_no} ` +
+              `computed slot ${slotForPick(wrong[0].pick_no, mine)}, actual ${wrong[0].draft_slot}`
+            : `${myPicks.length} picks, reversal_round=${mine.reversal_round}`);
+      }
       // Half-PPR is what every number on this board is priced in.
       if (mine.scoring_type && !/half/.test(mine.scoring_type) && !/ppr/.test(mine.scoring_type)) {
         warn('the draft is not a PPR format', `${mine.scoring_type} — this board is half-PPR throughout`);

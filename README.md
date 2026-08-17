@@ -180,9 +180,9 @@ same endpoint answers for every draft Sleeper has ever hosted, in any sport or s
 connecting asserts the sport and season and prints the league, scoring, type and size for
 you to check against the room you are actually in.
 
-Auction drafts and third-round-reversal snakes are followed normally — picks land on the
-board as usual — but "on the clock" is left blank rather than guessed, because neither
-pick order can be derived from what the API gives.
+Snake, linear and third-round-reversal drafts all get a working "on the clock" and next-pick
+countdown. Auctions are followed normally — picks land on the board as usual — but have no
+pick order to derive, so that part is left blank rather than guessed.
 
 ### API
 
