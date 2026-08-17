@@ -1,6 +1,7 @@
 import React, { forwardRef, useRef, useEffect } from 'react';
 import SourceRefreshPanel from './SourceRefreshPanel';
 import SourcePanel from './SourcePanel';
+import DraftSyncPanel from './DraftSyncPanel';
 
 const POSITIONS = ['QB', 'RB', 'WR', 'TE'];
 const TIERS = [1, 2, 3, 4, 5];
@@ -58,7 +59,9 @@ const SCARCITY = {
 const FilterBar = forwardRef(function FilterBar(
   { filters, setFilter, sourceStatus, refreshing, onRefresh, format, setFormat,
     leagueType, setLeagueType, view, excluded, onToggleSource, onEnableAllSources,
-    formatLabel, teamSize, setTeamSize },
+    formatLabel, teamSize, setTeamSize,
+    draft, onConnectDraft, onDisconnectDraft, onSyncDraft, onLookupDrafts,
+    draftConnecting, draftError, onClearDraftError },
   ref
 ) {
   const searchRef = useRef(null);
@@ -199,6 +202,18 @@ const FilterBar = forwardRef(function FilterBar(
 
         {/* Which sources feed this view, and refresh controls — pushed right */}
         <div className="ml-auto flex items-center gap-2">
+          <DraftSyncPanel
+            draft={draft}
+            onConnect={onConnectDraft}
+            onDisconnect={onDisconnectDraft}
+            onSyncNow={onSyncDraft}
+            onLookup={onLookupDrafts}
+            connecting={draftConnecting}
+            error={draftError}
+            onClearError={onClearDraftError}
+            teamSize={teamSize}
+            onMatchTeamSize={setTeamSize}
+          />
           <SourcePanel
             view={view}
             excluded={excluded}

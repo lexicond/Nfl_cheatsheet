@@ -1,78 +1,80 @@
 # Handover — 17 August 2026
 
-Branch: `claude/nfl-charger-refresh-bugs-2n2v7s`, seven commits ahead of `main`.
-**Nothing has been merged and no pull request is open.** Read `CLAUDE.md` first — it holds
-the traps that will otherwise cost you hours.
+Branch: `claude/sleeper-draft-sync-owbbur`, one commit ahead of `main`. The previous
+session's work (eight live sources, six views, the source panel) is **merged** — it came
+in through PR #6 and is what `main` now holds. Read `CLAUDE.md` first; it holds the traps
+that will otherwise cost you hours.
 
 ## Where this got to
 
-The app started the session pointed at endpoints that had all moved. Every data source is
-now live against 2026 data, each format averages only sources that publish that format,
-and both the app and the standalone cheat sheet let you see and change which sources feed
-the board.
+This session added **live Sleeper draft sync**: point the board at the draft you are
+sitting in and players leave it as they are taken.
 
-Eight sources, all green:
+Paste the draft's Sleeper link into the **Draft** button in the top bar. From then on the
+app polls Sleeper every five seconds and each pick takes that player off the board, with
+the pick number and the team that made it shown on his row. The panel carries who is on
+the clock, how many picks until your turn, and the last twelve picks. Disconnecting puts
+every one of them back.
 
-| Source | Provides |
+Built on Sleeper's public draft API (`/v1/draft/<id>`, `/v1/draft/<id>/picks`,
+`/v1/league/<id>/users`, `/v1/user/<name>/drafts/nfl/<season>`) — no auth, no key. There
+is no push channel, so it polls; five seconds a client, floored at 2.5s on the server, is
+twelve calls a minute against a documented ceiling of a thousand.
+
+The parts worth knowing about:
+
+| Piece | What it does |
 |---|---|
-| Underdog (via DraftSharks) | Best-ball ADP, ½PPR 12-team |
-| FantasyPros | ECR for best ball, ½PPR redraft, ½PPR superflex, dynasty, dynasty superflex; also bye weeks |
-| Fantasy Football Calculator | Mock-draft ADP, ½PPR and 2QB |
-| Sleeper | Roster, season projections, and its own ADP for ½PPR / 2QB / dynasty / dynasty-SF |
-| ESPN + Yahoo (via DraftSharks) | Home-league platform ADP |
-| Dynasty Daddy | KeepTradeCut and DynastySuperflex values, plus player ages and cross-platform ids |
-| FantasyCalc | Dynasty trade values, 1QB and superflex |
-| DynastyProcess | Dynasty values and ages — displayed, never averaged (see `CLAUDE.md`) |
+| `server/scrapers/sleeperDraft.js` | The API client, the sport/season assertions, and the snake/linear pick maths |
+| `server/routes/draft.js` | connect · state · sync · disconnect · lookup, and the pick store |
+| `client/src/hooks/useDraftSync.js` | The poll, and the "only redraw when a pick actually landed" rule |
+| `client/src/components/DraftSyncPanel.jsx` | Connect form and the live panel |
 
-Six views (Best Ball / Redraft / Dynasty × 1QB / Superflex), each with its own consensus,
-a Sources panel with per-source explanations and toggles, sorting by any live source,
-league size 8–14, and three derived columns: **Rd**, **Δ SL** (cheaper or dearer on
-Sleeper than the consensus) and **Split** (how far apart the chosen sources are).
+Three decisions that are load-bearing:
 
-Default sources on: **FantasyPros, Sleeper, Underdog, KeepTradeCut** — the owner's call.
-Everything else ships off, one tick away.
+- **A draft id proves nothing.** `/v1/draft/<id>` answers 200 for every draft Sleeper has
+  ever hosted, any sport, any season — a 2021 draft returns forty valid picks that would
+  mark forty players taken and look entirely plausible. Connecting therefore asserts
+  `sport === 'nfl'` and the season against `/v1/state/nfl`, and prints the league, scoring,
+  type and size so a wrong room is obvious before the first pick.
+- **Live picks and the manual tick are separate columns.** `player_overrides.drafted` is
+  what you ticked; `draft_picks` is what the room did. The board shows the union, and
+  disconnecting clears only the second. Merging them would mean a disconnect wiping
+  players you had marked by hand.
+- **Picks match on Sleeper's player id**, carried on both sides, so none of the
+  name-matching traps apply. The name fallback is exact on first name and position with no
+  surname step, because a wrong match here takes the wrong man off the board mid-draft.
 
 ## What remains
 
-**1. Nothing is deployed or merged.** This is the biggest gap. The branch has never run on
-Railway. Boot adds roughly a dozen columns via `addColumnIfMissing` in `server/db.js`;
-that migration has only been exercised locally, though it is idempotent and additive. The
-owner has not asked for a PR — ask before opening one.
+**1. It has never run against a live draft.** Everything is verified against a real,
+finished, public Sleeper draft (id `650130288072040449`) and against the live API, but
+nobody has sat in a drafting room with it. The paths that only a live draft exercises are
+`status: 'drafting'` rather than `complete`, the on-the-clock readout advancing, and the
+pick timer. Worth a mock draft on Sleeper before draft day — connect to it and watch the
+board empty. `SLEEPER_DRAFT_ID=<id> node server/scripts/validate-draft-sync.js` checks a
+draft of your own without going near the UI.
 
-**2. Drag-to-reorder is untested.** Typing a rank into the "My #" cell is covered by
-`tests/browser/workflows.js`; dragging the ⠿ handle is not, because it is awkward to drive
-headlessly. The reorder endpoint itself is tested. Worth a manual pass.
+**2. Auction and third-round-reversal drafts show no "on the clock".** Neither pick order
+can be derived from what the API returns, so it reports nothing rather than guessing.
+Picks still land on the board normally in both. If you draft either format regularly, 3RR
+is derivable with some care; auctions are not.
 
-**3. DynastySuperflex's tail is compressed and the owner has not ruled on it.** Its values
-collapse — median 149 against KeepTradeCut's 2,193 for the same players, and single digits
-by the 75th percentile, so 204 players sit under 100 while KTC has them above 500. Ranking
-before averaging means the scale does no harm, but its *ordering* outside roughly the top
-150 is close to noise. It is currently off by default, so this only matters if it gets
-switched on. Three options were put to the owner and not chosen between: leave it, cap its
-influence to where it has resolution, or drop it from the average and keep it as a column.
+**3. Only one draft at a time.** `draft_sync` is a single row by design. Following two
+boards at once would need that relaxed and the picks scoped per draft on read.
 
-**4. Five validator warnings, all judgement calls, none defects.**
-- FFC's 2QB board is standard-scoring; no half-PPR 2QB is published anywhere.
-- Best ball 1QB rests on two sources correlating at 0.98 — Underdog and FantasyPros are
-  the only public best-ball markets, so there is no third to add.
-- Two dynasty pairs correlate ~0.98 (FantasyCalc against Sleeper dynasty ADP). Expected
-  for dynasty; not evidence of double-counting.
-- Josh Allen at 30 sits inside the dynasty superflex top 10. Correct, not a fault.
+**4. The standalone cheat sheet has no sync**, and cannot — it is a static file with no
+server behind it. Use the app on draft day.
 
-**5. Δ SL in best ball is a corrected proxy.** Sleeper publishes no best-ball board, so the
-baseline is its ½PPR redraft ADP. That carried a standing positional offset — quarterbacks
-at a median +13, tight ends at −9 — so each position's median is now subtracted and the
-tooltip names the offset removed. Redraft and dynasty compare against a true Sleeper board
-and need no correction. If a genuine best-ball Sleeper ADP ever appears, remove the
-correction rather than layering on it.
+**5. Deployment is unverified from here.** `main` holds the merged source work but nobody
+has confirmed Railway picked it up, and this branch has certainly never run there. Boot
+adds the two new tables via `CREATE TABLE IF NOT EXISTS`, which is additive and safe on
+the existing volume, but it is untested against the real database.
 
-**6. KeepTradeCut was never validated directly.** Its own site is client-rendered; the
-values come through Dynasty Daddy's mirror and were sanity-checked against it, not against
-keeptradecut.com.
-
-**7. No CI.** Tests are the four Node scripts and seven browser suites in `tests/`, all run
-by hand. See `tests/README.md`. Browser suites need Playwright installed separately and do
-not reset state — clear overrides first or they fail on leftovers.
+**6. Everything the last handover left open is still open**, except that the branch is now
+merged: drag-to-reorder is still untested, DynastySuperflex's compressed tail still has no
+ruling, the five validator warnings are unchanged, KeepTradeCut is still only checked
+through Dynasty Daddy's mirror, and there is still no CI.
 
 ## Before you touch the data
 
@@ -82,10 +84,11 @@ board:
 
 ```bash
 npm install && npm --prefix client install
-node server/scripts/refresh-all.js        # all eight sources, ~6 seconds
-node server/scripts/validate-sources.js   # confirm each format is what it claims
-node server/scripts/audit-matching.js     # confirm names matched cleanly
-node server/scripts/build-cheatsheet.js   # regenerate cheatsheets/draft-room-2026.html
+node server/scripts/refresh-all.js         # all eight sources, ~6 seconds
+node server/scripts/validate-sources.js    # confirm each format is what it claims
+node server/scripts/validate-draft-sync.js # confirm the draft sync still holds
+node server/scripts/audit-matching.js      # confirm names matched cleanly
+node server/scripts/build-cheatsheet.js    # regenerate cheatsheets/draft-room-2026.html
 ```
 
 ADP moves daily through August, so refresh before trusting anything and regenerate the
@@ -93,9 +96,11 @@ cheat sheet after every refresh — it is a point-in-time snapshot, not a live v
 
 ## Things the owner cares about
 
-- **Sleeper is where he drafts.** That is why Δ SL exists and why it is measured against
-  Sleeper's own board whether or not Sleeper feeds the consensus.
-- He runs **10-team leagues as well as 12**, hence the league-size control.
+- **Sleeper is where he drafts.** That is why Δ SL exists, why it is measured against
+  Sleeper's own board whether or not Sleeper feeds the consensus, and why the live sync
+  is Sleeper-only.
+- He runs **10-team leagues as well as 12**, hence the league-size control. A connected
+  draft offers to set it for you.
 - He rates **FantasyPros, Sleeper, Underdog and KeepTradeCut** above the rest.
 - He asks for evidence, not assurances. Show the numbers behind a claim, and say plainly
   when something was not checked.

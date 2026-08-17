@@ -144,8 +144,58 @@ skews a best-ball board and a 1QB ranking never skews a superflex one:
 | Cycle tier | Click the tier badge in the row |
 | Star / flag | Click ★ / ⚑ icons in the Flags column |
 | Mark as drafted | Click the "Available" / "✓ Drafted" button |
+| Follow a live Sleeper draft | **Draft** button in the top bar — see below |
 | Add notes | Click 📝 to open the slide-over panel |
 | Close slide-over | Click ✕, click the backdrop, or press **Esc** |
+
+---
+
+## Live Sleeper draft sync
+
+Point the board at the draft you are sitting in and players disappear from it as they are
+taken, without touching anything.
+
+Open the **Draft** button in the top bar and paste the draft's Sleeper link (or its id).
+Entering your Sleeper username is optional and does two extra things: it shows which picks
+are yours, and it counts down to your next one. **Find drafts** lists this season's drafts
+for a username, so a link is not strictly needed.
+
+While connected:
+
+- A player taken in the room drops off the board within about five seconds, exactly as if
+  you had ticked him. His row shows the pick that took him and the team that made it.
+- The panel shows who is on the clock, how many picks until your turn, and the last twelve
+  picks made.
+- Picks the board does not carry — kickers, defences, deep bench — are counted and shown in
+  the feed rather than silently dropped.
+- **Disconnect** puts every one of those players back. Players you ticked by hand are a
+  separate flag and are never touched.
+
+Reloading the page rejoins the same draft. Only one draft is followed at a time.
+
+Two things worth knowing. Sleeper offers no push channel for drafts, so this polls its
+public API every five seconds — well inside Sleeper's documented ceiling, and the server
+throttles further so extra tabs cost nothing. And a draft id alone proves nothing: the
+same endpoint answers for every draft Sleeper has ever hosted, in any sport or season, so
+connecting asserts the sport and season and prints the league, scoring, type and size for
+you to check against the room you are actually in.
+
+Auction drafts and third-round-reversal snakes are followed normally — picks land on the
+board as usual — but "on the clock" is left blank rather than guessed, because neither
+pick order can be derived from what the API gives.
+
+### API
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/draft/connect` | `{ ref, username? }` — `ref` is a draft URL or id. Validates and starts following |
+| `GET /api/draft/state` | Current state; polls Sleeper first unless `?sync=0` |
+| `POST /api/draft/sync` | Force a poll, ignoring the throttle |
+| `POST /api/draft/disconnect` | Stop following and clear every live pick |
+| `GET /api/draft/lookup?username=` | This season's NFL drafts for a Sleeper username |
+
+The standalone cheat sheet in `cheatsheets/` is a point-in-time snapshot with no server
+behind it, so it has no live sync — use the app on draft day.
 
 ---
 
@@ -160,9 +210,11 @@ skews a best-ball board and a 1QB ranking never skews a superflex one:
 │   ├── consensus.js       Averaging and dynasty rank-averaging, with source exclusions
 │   ├── routes/
 │   │   ├── players.js     GET /api/players, PATCH override, POST reorder
+│   │   ├── draft.js       Live Sleeper draft: connect, poll, disconnect
 │   │   └── refresh.js     POST /api/refresh/:source, GET /api/source-status
 │   ├── scrapers/
 │   │   ├── sleeper.js     Roster, projections, Sleeper ADP by format
+│   │   ├── sleeperDraft.js Sleeper draft API, with the sport/season assertions
 │   │   ├── fantasypros.js ECR for best ball / redraft / superflex / dynasty
 │   │   ├── underdog.js    Underdog best-ball ADP (FFC fallback)
 │   │   ├── ffc.js         Fantasy Football Calculator mock-draft ADP
@@ -179,6 +231,7 @@ skews a best-ball board and a 1QB ranking never skews a superflex one:
 │   └── scripts/
 │       ├── refresh-all.js  Refresh every source from the CLI
 │       ├── validate-sources.js Assert each format contains what it claims
+│       ├── validate-draft-sync.js Assert the live draft sync matches picks correctly
 │       ├── audit-matching.js  Find name-matching damage across sources
 │       ├── test-source-toggle.js Assert switching a source off changes the board
 │       ├── build-cheatsheet.js Render the standalone cheat sheet
@@ -189,12 +242,14 @@ skews a best-ball board and a 1QB ranking never skews a superflex one:
 │   │   ├── index.css      Tailwind + custom classes
 │   │   ├── main.jsx
 │   │   ├── hooks/
-│   │   │   └── usePlayers.js
+│   │   │   ├── usePlayers.js
+│   │   │   └── useDraftSync.js  Poll a live Sleeper draft
 │   │   └── components/
 │   │       ├── DraftBoard.jsx
 │   │       ├── PlayerRow.jsx
 │   │       ├── FilterBar.jsx
 │   │       ├── PlayerModal.jsx
+│   │       ├── DraftSyncPanel.jsx  Connect to and follow a live draft
 │   │       └── SourceRefreshPanel.jsx
 │   └── index.html
 ├── package.json

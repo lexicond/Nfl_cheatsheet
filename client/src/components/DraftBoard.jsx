@@ -84,11 +84,21 @@ function SkeletonRow({ colCount }) {
   );
 }
 
-function TableColgroup({ columns }) {
+// With a live draft connected, Status carries the pick and the team that made it
+// rather than a one-word toggle, and 96px truncates every team name to a stub.
+function colWidth(key, draftConnected) {
+  if (key === 'status' && draftConnected) return 148;
+  return COL_PX[key] || 68;
+}
+
+function TableColgroup({ columns, draftConnected }) {
   return (
     <colgroup>
       {columns.map(col => (
-        <col key={col.key} style={{ width: COL_PX[col.key] || 68, minWidth: COL_PX[col.key] || 68 }} />
+        <col
+          key={col.key}
+          style={{ width: colWidth(col.key, draftConnected), minWidth: colWidth(col.key, draftConnected) }}
+        />
       ))}
     </colgroup>
   );
@@ -112,14 +122,14 @@ function HeaderRow({ columns }) {
 export default function DraftBoard({
   players, loading, onUpdate, onOpenModal, onReorder,
   format = 'BB', leagueType = '1QB', view = null, excluded = [], sourceStatus = {},
-  sleeperBaseline = null, filterBarHeight = 53,
+  sleeperBaseline = null, filterBarHeight = 53, draftConnected = false,
 }) {
   const [activeId, setActiveId] = useState(null);
   const headerScrollRef = useRef(null);
   const bodyScrollRef = useRef(null);
 
   const columns = buildColumns(format, view, excluded);
-  const totalWidth = columns.reduce((sum, col) => sum + (COL_PX[col.key] || 68), 0);
+  const totalWidth = columns.reduce((sum, col) => sum + colWidth(col.key, draftConnected), 0);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -161,7 +171,7 @@ export default function DraftBoard({
     >
       <div ref={headerScrollRef} style={{ overflowX: 'hidden' }}>
         <table style={tableStyle}>
-          <TableColgroup columns={columns} />
+          <TableColgroup columns={columns} draftConnected={draftConnected} />
           <thead>
             <HeaderRow columns={columns} />
           </thead>
@@ -176,7 +186,7 @@ export default function DraftBoard({
         {stickyHeader}
         <div style={{ overflowX: 'auto' }}>
           <table style={tableStyle}>
-            <TableColgroup columns={columns} />
+            <TableColgroup columns={columns} draftConnected={draftConnected} />
             <tbody>
               {Array.from({ length: 20 }).map((_, i) => (
                 <SkeletonRow key={i} colCount={columns.length} />
@@ -209,7 +219,7 @@ export default function DraftBoard({
 
       <div ref={bodyScrollRef} style={{ overflowX: 'auto' }} onScroll={onBodyScroll}>
         <table style={tableStyle}>
-          <TableColgroup columns={columns} />
+          <TableColgroup columns={columns} draftConnected={draftConnected} />
           <SortableContext items={players.map(p => p.id)} strategy={verticalListSortingStrategy}>
             <tbody>
               {players.map((player, index) => (

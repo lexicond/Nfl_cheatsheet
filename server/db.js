@@ -55,6 +55,50 @@ db.exec(`
     player_count INTEGER,
     status TEXT
   );
+
+  -- The live Sleeper draft the board is following. One row, ever: you draft in one
+  -- room at a time, and pinning the id means a reload rejoins the same draft.
+  CREATE TABLE IF NOT EXISTS draft_sync (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    draft_id TEXT NOT NULL,
+    status TEXT,
+    type TEXT,
+    season TEXT,
+    scoring_type TEXT,
+    league_id TEXT,
+    league_name TEXT,
+    teams INTEGER,
+    rounds INTEGER,
+    reversal_round INTEGER DEFAULT 0,
+    my_user_id TEXT,
+    my_display_name TEXT,
+    my_slot INTEGER,
+    team_names TEXT,
+    draft_order TEXT,
+    connected_at TEXT,
+    last_synced TEXT,
+    last_error TEXT
+  );
+
+  -- Picks as Sleeper reported them. The pick is the record; player_id is only our
+  -- match onto it, so a pick we cannot match (a kicker, a defence, a player this
+  -- board does not carry) is still stored and still shown in the feed.
+  CREATE TABLE IF NOT EXISTS draft_picks (
+    draft_id TEXT NOT NULL,
+    pick_no INTEGER NOT NULL,
+    round INTEGER,
+    draft_slot INTEGER,
+    roster_id INTEGER,
+    picked_by TEXT,
+    is_keeper INTEGER DEFAULT 0,
+    sleeper_player_id TEXT,
+    player_id INTEGER REFERENCES players(id),
+    player_name TEXT,
+    position TEXT,
+    nfl_team TEXT,
+    seen_at TEXT,
+    PRIMARY KEY (draft_id, pick_no)
+  );
 `);
 
 // Safe migration: add column only if it doesn't exist
@@ -120,6 +164,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_players_norm_pos ON players (name_normalized, position);
   CREATE INDEX IF NOT EXISTS idx_players_sleeper_id ON players (sleeper_player_id);
   CREATE INDEX IF NOT EXISTS idx_players_pos_proj ON players (position, projected_pts);
+  CREATE INDEX IF NOT EXISTS idx_draft_picks_player ON draft_picks (player_id);
 `);
 
 const { consensusColumns } = require('./sources');

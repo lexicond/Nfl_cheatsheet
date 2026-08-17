@@ -326,18 +326,37 @@ export default function PlayerRow({
       </td>
     ),
 
+    // A player taken in a connected Sleeper draft shows the pick that took him instead
+    // of the manual toggle: the tick is not the user's to undo, and the pick number is
+    // the more useful fact anyway. Disconnecting the draft brings the toggle back.
     status: (
       <td key="status" className={`${cellClass} w-24`}>
-        <button
-          onClick={() => onUpdate(player.id, { drafted: !player.drafted })}
-          className={`text-xs px-2 py-0.5 rounded border transition-colors ${
-            player.drafted
-              ? 'bg-green-500/20 text-green-400 border-green-500/40'
-              : 'border-[#2e3148] text-[#555875] hover:border-[#555875] hover:text-[#8b90a8]'
-          }`}
-        >
-          {player.drafted ? '✓ Drafted' : 'Available'}
-        </button>
+        {player.draft_pick_no != null ? (
+          <span
+            className={`text-xs px-2 py-0.5 rounded border block truncate ${
+              player.drafted_by_me
+                ? 'bg-green-500/20 text-green-300 border-green-500/40'
+                : 'bg-[#222535] text-[#8b90a8] border-[#2e3148]'
+            }`}
+            title={`Pick ${player.draft_pick_no}`
+              + (player.draft_round ? `, round ${player.draft_round}` : '')
+              + (player.drafted_by ? ` — ${player.drafted_by}` : '')
+              + (player.drafted_by_me ? ' (yours)' : '')}
+          >
+            #{player.draft_pick_no} {player.drafted_by_me ? 'you' : player.drafted_by}
+          </span>
+        ) : (
+          <button
+            onClick={() => onUpdate(player.id, { drafted: !player.drafted })}
+            className={`text-xs px-2 py-0.5 rounded border transition-colors ${
+              player.drafted
+                ? 'bg-green-500/20 text-green-400 border-green-500/40'
+                : 'border-[#2e3148] text-[#555875] hover:border-[#555875] hover:text-[#8b90a8]'
+            }`}
+          >
+            {player.drafted ? '✓ Drafted' : 'Available'}
+          </button>
+        )}
       </td>
     ),
 

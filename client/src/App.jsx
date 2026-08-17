@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { usePlayers } from './hooks/usePlayers';
+import { useDraftSync } from './hooks/useDraftSync';
 import FilterBar from './components/FilterBar';
 import DraftBoard from './components/DraftBoard';
 import PlayerModal from './components/PlayerModal';
@@ -42,7 +43,28 @@ export default function App() {
     teamSize,
     setTeamSize,
     sleeperBaseline,
+    refetchQuiet,
+    showToast,
   } = usePlayers();
+
+  // A pick landing in the Sleeper room has to reach the board itself, not just the
+  // panel — the whole point is that the player is gone before you scroll to him.
+  const onPicks = useCallback((state, added) => {
+    refetchQuiet();
+    if (added > 0 && state.recent?.length) {
+      const p = state.recent[0];
+      showToast(
+        added === 1
+          ? `Pick ${p.pick_no}: ${p.name} — ${p.by}`
+          : `${added} picks — latest ${p.name} at ${p.pick_no}`,
+        'info',
+      );
+    }
+  }, [refetchQuiet, showToast]);
+
+  const {
+    draft, connect, disconnect, syncNow, lookup, connecting, error: draftError, setError: setDraftError,
+  } = useDraftSync({ onPicks });
 
   const [modalPlayer, setModalPlayer] = useState(null);
   const [filterBarHeight, setFilterBarHeight] = useState(53);
@@ -107,6 +129,14 @@ export default function App() {
         formatLabel={formatLabel}
         teamSize={teamSize}
         setTeamSize={setTeamSize}
+        draft={draft}
+        onConnectDraft={connect}
+        onDisconnectDraft={disconnect}
+        onSyncDraft={syncNow}
+        onLookupDrafts={lookup}
+        draftConnecting={connecting}
+        draftError={draftError}
+        onClearDraftError={() => setDraftError(null)}
       />
 
       {seeding && (
@@ -132,6 +162,7 @@ export default function App() {
             sourceStatus={sourceStatus}
             sleeperBaseline={sleeperBaseline}
             filterBarHeight={filterBarHeight}
+            draftConnected={draft.connected}
           />
         </main>
       )}

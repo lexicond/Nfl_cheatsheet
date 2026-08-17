@@ -12,7 +12,7 @@
 set -u
 cd "$(dirname "$0")"
 fails=0
-for t in workflows toggletest verify1 allviews csnew cstoggle final; do
+for t in workflows toggletest verify1 allviews csnew cstoggle final draftsync; do
   printf '%-14s ' "$t"
   if node "$t.js" > "/tmp/browser-$t.log" 2>&1; then
     echo PASS

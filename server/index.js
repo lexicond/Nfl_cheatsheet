@@ -19,10 +19,12 @@ const playersRouter = require('./routes/players');
 const refreshRouter = require('./routes/refresh');
 const { recomputeDerived } = refreshRouter;
 const healthRouter = require('./routes/health');
+const draftRouter = require('./routes/draft');
 
 app.use('/api/players', playersRouter);
 app.use('/api/refresh', refreshRouter);
 app.use('/api/health', healthRouter);
+app.use('/api/draft', draftRouter);
 
 // Which sources feed the requested view, with plain-English explanations.
 app.get('/api/sources', (req, res) => {

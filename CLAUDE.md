@@ -26,6 +26,10 @@ Concretely, this has already happened:
 - Sleeper keeps historical ADP on unrostered players — Tom Brady still carries one. A
   null `team` is how it marks them, so ADP from a teamless player is discarded.
 
+After touching the draft sync, run `node server/scripts/validate-draft-sync.js` — it
+proves the season guard still refuses a stale draft, that picks land on the player they
+name, and that an undone pick frees him again.
+
 After touching a scraper, `server/sources.js` or `server/consensus.js`, run
 `node server/scripts/validate-sources.js`. It asserts on what the numbers *imply*: a
 superflex board must open with quarterbacks, dynasty must skew younger than redraft, best
@@ -69,6 +73,28 @@ switching a source off survives flipping Superflex. Exclusions are always family
 - **Chrome will not stick a `<td>`**, and a wrapper with horizontal overflow is always a
   scroll container, so a page-level sticky header cannot live inside one. The cheat
   sheet's board scrolls in its own bounded pane for this reason.
+- **A draft id proves nothing on its own.** `/v1/draft/<id>` answers 200 for every draft
+  Sleeper has ever hosted — any sport, any season. A 2021 draft returns forty valid picks
+  that would mark forty players taken on a 2026 board, and it all looks right. So
+  `fetchDraft` asserts `sport === 'nfl'` and the season against `/v1/state/nfl`, and the
+  panel prints what the draft says it is (league, scoring, type, teams, rounds) so a
+  wrong room is obvious before the first pick.
+- **Sleeper has no push channel for drafts**, so picks are polled — five seconds in the
+  client, with a 2.5s floor on the server so extra tabs cost nothing. The documented
+  ceiling is 1000 calls a minute; one draft at this cadence is twelve.
+- **Live picks and the manual tick are separate columns.** `player_overrides.drafted` is
+  what you ticked; `draft_picks` is what the room did. The board shows the union, and
+  disconnecting a draft clears the second without touching the first. Merging them would
+  mean a disconnect silently wiping players marked by hand.
+- **Picks match on Sleeper's player id**, which both sides carry, so the name-matching
+  traps above do not apply — and the name fallback is deliberately exact on first name
+  and position, with no surname step. A wrong match here does not mis-rank a player, it
+  takes the wrong man off the board mid-draft. Names legitimately differ across an id
+  match (Kenneth vs Kenny Gainwell); `validate-draft-sync.js` polices the two paths
+  separately for this reason.
+- **The stored picks are made to equal Sleeper's, not merely appended to.** A
+  commissioner can undo a pick, and a player left marked taken never returns to the board
+  on his own.
 
 ## Conventions
 
