@@ -4,6 +4,9 @@ A personal best ball fantasy football draft board with multi-source ADP, drag-an
 
 **Stack:** Node.js + Express · React + Tailwind · SQLite (better-sqlite3) · Vite · Railway
 
+> Picking this up mid-stream? Read **[HANDOVER.md](HANDOVER.md)** for current state and open
+> work, and **[CLAUDE.md](CLAUDE.md)** for the traps in the data sources.
+
 ---
 
 ## Local Development
