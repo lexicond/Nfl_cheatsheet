@@ -153,7 +153,8 @@ skews a best-ball board and a 1QB ranking never skews a superflex one:
 ├── server/
 │   ├── index.js           Express entry point + auto-seed
 │   ├── db.js              SQLite setup, schema, migrations
-│   ├── sources.js         Every column: provider, format, scoring, consensus set
+│   ├── sources.js         Every column: provider, format, scoring, plain-English explanation
+│   ├── consensus.js       Averaging and dynasty rank-averaging, with source exclusions
 │   ├── routes/
 │   │   ├── players.js     GET /api/players, PATCH override, POST reorder
 │   │   └── refresh.js     POST /api/refresh/:source, GET /api/source-status
@@ -175,6 +176,7 @@ skews a best-ball board and a 1QB ranking never skews a superflex one:
 │   └── scripts/
 │       ├── refresh-all.js  Refresh every source from the CLI
 │       ├── validate-sources.js Assert each format contains what it claims
+│       ├── test-source-toggle.js Assert switching a source off changes the board
 │       ├── build-cheatsheet.js Render the standalone cheat sheet
 │       └── health-check.js Data health report
 ├── client/

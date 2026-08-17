@@ -1,5 +1,6 @@
 import React, { forwardRef, useRef, useEffect } from 'react';
 import SourceRefreshPanel from './SourceRefreshPanel';
+import SourcePanel from './SourcePanel';
 
 const POSITIONS = ['QB', 'RB', 'WR', 'TE'];
 const TIERS = [1, 2, 3, 4, 5];
@@ -77,7 +78,8 @@ const SCARCITY = {
 };
 
 const FilterBar = forwardRef(function FilterBar(
-  { filters, setFilter, sourceStatus, refreshing, onRefresh, format, setFormat, leagueType, setLeagueType, enabledSources, setEnabledSources },
+  { filters, setFilter, sourceStatus, refreshing, onRefresh, format, setFormat,
+    leagueType, setLeagueType, view, excluded, onToggleSource, onResetSources, formatLabel },
   ref
 ) {
   const searchRef = useRef(null);
@@ -101,10 +103,6 @@ const FilterBar = forwardRef(function FilterBar(
   };
 
   const toggleTier = (t) => setFilter('tier', filters.tier === t ? null : t);
-
-  const toggleSource = (src) => {
-    setEnabledSources({ ...enabledSources, [src]: !enabledSources[src] });
-  };
 
   // Scarcity hint: show when exactly one position is selected
   const singlePos = filters.positions.length === 1 ? filters.positions[0] : null;
@@ -220,14 +218,21 @@ const FilterBar = forwardRef(function FilterBar(
           className="input text-xs py-1 w-32"
         />
 
-        {/* Source refresh panel — pushed right */}
-        <div className="ml-auto">
+        {/* Which sources feed this view, and refresh controls — pushed right */}
+        <div className="ml-auto flex items-center gap-2">
+          <SourcePanel
+            view={view}
+            excluded={excluded}
+            onToggleSource={onToggleSource}
+            onResetSources={onResetSources}
+            sourceStatus={sourceStatus}
+            formatLabel={formatLabel}
+            leagueType={leagueType}
+          />
           <SourceRefreshPanel
             sourceStatus={sourceStatus}
             refreshing={refreshing}
             onRefresh={onRefresh}
-            enabledSources={enabledSources}
-            onToggleSource={toggleSource}
           />
         </div>
       </div>

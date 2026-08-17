@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { db, computeConsensus } = require('../db');
-const { consensusColumns } = require('../sources');
+const { db } = require('../db');
+const { viewSources } = require('../sources');
+const { applyConsensus, activeColumns, parseExcluded } = require('../consensus');
 
 const FORMATS = new Set(['BB', 'RD', 'DYN']);
 const LEAGUE_TYPES = new Set(['1QB', '2QB']);
@@ -61,6 +62,9 @@ function tierFromAdp(adp) {
 router.get('/', (req, res) => {
   try {
     const { position, tier, starred, drafted, search, sort } = req.query;
+    // Sources the user has switched off. They are dropped from the average, not just
+    // hidden, so the headline number always matches the sources shown as feeding it.
+    const excluded = parseExcluded(req.query.exclude);
     const format = FORMATS.has(req.query.format) ? req.query.format : 'BB';
     const leagueType = LEAGUE_TYPES.has(req.query.leagueType) ? req.query.leagueType : '1QB';
     const isSF = leagueType === '2QB';
@@ -81,23 +85,13 @@ router.get('/', (req, res) => {
       LEFT JOIN player_overrides o ON o.player_id = p.id
     `).all();
 
-    const sourceCols = consensusColumns(format, leagueType);
+    // Consensus is recomputed per request rather than read from the stored column,
+    // because the user's exclusions change it.
+    const withConsensus = applyConsensus(rows, format, leagueType, excluded);
 
-    const enriched = rows.map(r => {
-      // Dynasty has no ADP; its headline number is the mean rank across value sources.
-      const headline = format === 'DYN'
-        ? (isSF ? r.dyn_rank_consensus_sf : r.dyn_rank_consensus)
-        : computeConsensus(r, format, leagueType);
-
-      const sourceCount = format === 'DYN'
-        ? [
-            isSF ? r.ktc_value_sf : r.ktc_value,
-            isSF ? r.fc_value_sf : r.fc_value,
-            isSF ? r.ds_value_sf : r.ds_value,
-            isSF ? r.adp_fp_dyn_sf : r.adp_fp_dyn,
-            isSF ? r.adp_sl_dyn_sf : r.adp_sl_dyn,
-          ].filter(v => v != null).length
-        : sourceCols.filter(c => r[c] != null).length;
+    const enriched = withConsensus.map(r => {
+      const headline = r.h;
+      const sourceCount = r.sourceCount;
 
       // Trend compares against the stored best-ball baseline, the only series with
       // a saved previous value.
@@ -177,7 +171,12 @@ router.get('/', (req, res) => {
       return dir === 'desc' ? bv - av : av - bv;
     });
 
-    res.json(result.map(project));
+    res.json({
+      view: viewSources(format, leagueType),
+      excluded: [...excluded],
+      active_sources: activeColumns(format, leagueType, excluded),
+      players: result.map(project),
+    });
   } catch (err) {
     console.error('[GET /api/players]', err);
     res.status(500).json({ error: err.message });

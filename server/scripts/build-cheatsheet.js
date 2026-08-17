@@ -9,7 +9,8 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { db, computeConsensus } = require('../db');
+const { db } = require('../db');
+const { viewSources } = require('../sources');
 
 const SEASON = new Date().getFullYear();
 const OUT = process.argv[2] || path.join(__dirname, '..', '..', 'cheatsheets', `draft-room-${SEASON}.html`);
@@ -18,15 +19,46 @@ const ASSETS = path.join(__dirname, '..', 'cheatsheet');
 const FORMATS = [['BB', '1QB'], ['BB', '2QB'], ['RD', '1QB'], ['RD', '2QB'], ['DYN', '1QB'], ['DYN', '2QB']];
 const PER_FORMAT = 300;
 
-const SOURCE_COUNT = {
-  'BB:1QB': '2 best-ball sources', 'BB:2QB': '2 superflex sources',
-  'RD:1QB': '5 redraft markets', 'RD:2QB': '3 superflex sources',
-  'DYN:1QB': '5 dynasty sources', 'DYN:2QB': '5 dynasty sources',
-};
+const { adpConsensus } = require('../consensus');
 
 function headline(r, format, leagueType) {
   if (format === 'DYN') return leagueType === '2QB' ? r.dyn_rank_consensus_sf : r.dyn_rank_consensus;
-  return computeConsensus(r, format, leagueType);
+  return adpConsensus(r, format, leagueType);
+}
+
+// The embedded player rows use short keys to keep the file small, so the registry's
+// column names are mapped onto them. Anything unmapped would silently lose its
+// explanation, so the build fails loudly instead.
+const PAYLOAD_KEY = {
+  adp_underdog: 'ud', adp_fantasypros: 'fpb',
+  adp_fp_rd: 'fpr', adp_fp_sf: 'fps', adp_fp_dyn: 'fpd', adp_fp_dyn_sf: 'fpds',
+  adp_ffc: 'ffc', adp_ffc_sf: 'ffs',
+  adp_sl_rd: 'slr', adp_sl_sf: 'sls', adp_sl_dyn: 'sld', adp_sl_dyn_sf: 'slds',
+  adp_espn: 'esp', adp_yahoo: 'yah',
+  ktc_value: 'ktc', ktc_value_sf: 'kts',
+  ds_value: 'ds', ds_value_sf: 'dss',
+  fc_value: 'fc', fc_value_sf: 'fcs',
+  dp_value: 'dp', dp_value_sf: 'dps',
+};
+
+// Everything the page needs to describe and toggle its own sources, taken straight
+// from the registry so the sheet and the app always explain them the same way.
+const SOURCE_META = {};
+const REFERENCE_SOURCES = {};
+for (const [format, leagueType] of FORMATS) {
+  const view = viewSources(format, leagueType);
+  const keyOf = s => {
+    const k = PAYLOAD_KEY[s.column];
+    if (!k) throw new Error(`No payload key mapped for source column "${s.column}" — add it to PAYLOAD_KEY`);
+    return k;
+  };
+  REFERENCE_SOURCES[`${format}:${leagueType}`] = view.reference.map(s => [keyOf(s), s.short]);
+  for (const s of [...view.consensus, ...view.reference]) {
+    SOURCE_META[keyOf(s)] = {
+      label: s.label, kind: s.kind, kindLabel: s.kindLabel,
+      scoringLabel: s.scoringLabel, provider: s.provider, what: s.what,
+    };
+  }
 }
 
 // Only rostered players: Sleeper still carries historical ADP for retired names,
@@ -55,6 +87,7 @@ const players = rows.filter(r => keep.has(r.id)).map(r => ({
   ds: r.ds_value, dss: r.ds_value_sf,
   fc: int(r.fc_value), fcs: int(r.fc_value_sf),
   fpd: num(r.adp_fp_dyn), fpds: num(r.adp_fp_dyn_sf),
+  dp: r.dp_value, dps: r.dp_value_sf,
   sld: num(r.adp_sl_dyn), slds: num(r.adp_sl_dyn_sf),
   age: r.age == null ? null : Math.round(Number(r.age)),
   dy: num(r.dyn_rank_consensus), dys: num(r.dyn_rank_consensus_sf),
@@ -133,6 +166,17 @@ ${css}
     <div class="note" id="count"></div>
   </nav>
 
+  <section class="sec" id="sources-sec">
+    <div class="sec-head">
+      <h2>What this board is made of</h2>
+      <p id="src-lead"></p>
+    </div>
+    <div class="srcbar">
+      <div class="srclist" id="src-list"></div>
+      <button class="srcreset" id="src-reset" hidden>Turn all sources back on</button>
+    </div>
+  </section>
+
   <section class="sec" id="map-sec">
     <div class="sec-head">
       <h2>Where each position runs out</h2>
@@ -203,7 +247,8 @@ ${css}
 
 <script>
 const PLAYERS = ${JSON.stringify(players)};
-const SOURCE_COUNT = ${JSON.stringify(SOURCE_COUNT)};
+const SOURCE_META = ${JSON.stringify(SOURCE_META)};
+const REFERENCE_SOURCES = ${JSON.stringify(REFERENCE_SOURCES)};
 ${js}
 </script>
 </body>

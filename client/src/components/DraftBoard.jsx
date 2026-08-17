@@ -16,6 +16,7 @@ import {
 import PlayerRow from './PlayerRow';
 
 // Pixel widths for each column key — used in colgroup for both header and body tables
+// Any column not listed falls back to 68px, which suits a right-aligned ADP number.
 const COL_PX = {
   drag: 24, my_rank: 56, rank: 40, name: 200, pos: 56, bye: 40,
   adp_fp: 64, adp_ud: 64, adp_ffc: 64, adp_ffc_sf: 64,
@@ -27,16 +28,19 @@ const COL_PX = {
   tier: 56, flags: 64, status: 96, notes: 48,
 };
 
-function buildColumns(format, leagueType, enabledSources) {
-  const isSF = leagueType === '2QB';
-
+/**
+ * Columns come from the server's view descriptor rather than a copy of the source
+ * registry kept here — so the columns on screen are exactly the sources the server
+ * says feed this view, and a source switched off disappears from both.
+ */
+function buildColumns(format, view, excluded) {
   const base = [
     { label: '', key: 'drag' },
     { label: 'My #', key: 'my_rank' },
     { label: '#', key: 'rank' },
     { label: 'Name', key: 'name' },
     { label: 'Pos', key: 'pos' },
-    { label: 'Bye', key: 'bye' },
+    format === 'DYN' ? { label: 'Age', key: 'age' } : { label: 'Bye', key: 'bye' },
   ];
 
   const tail = [
@@ -46,59 +50,16 @@ function buildColumns(format, leagueType, enabledSources) {
     { label: 'Notes', key: 'notes' },
   ];
 
-  if (format === 'DYN') {
-    return [
-      ...base,
-      { label: 'Age', key: 'age' },
-      ...(enabledSources.dynastydaddy !== false
-        ? [{ label: 'KTC', key: 'ktc_value' }, { label: 'DSF', key: 'ds_value' }] : []),
-      ...(enabledSources.fantasycalc !== false ? [{ label: 'FC', key: 'fc_value' }] : []),
-      ...(enabledSources.fantasypros !== false ? [{ label: 'FP DYN', key: 'adp_fp_dyn' }] : []),
-      ...(enabledSources.sleeper !== false ? [{ label: 'SL DYN', key: 'adp_sl_dyn' }] : []),
-      // Shown but never averaged — DynastyProcess is derived from the FantasyPros ECR
-      // already in the consensus.
-      ...(enabledSources.dynastyprocess !== false ? [{ label: 'DP', key: 'dp_value' }] : []),
-      { label: 'Rank', key: 'consensus' },
-      { label: 'Proj', key: 'projected_pts' },
-      { label: 'Pos Rk', key: 'pos_rank' },
-      ...tail,
-    ];
-  }
-
-  // ADP source columns vary by format + leagueType
-  let sourceCols = [];
-  // Each format shows exactly the sources feeding its consensus, so the columns and
-  // the Consensus number always tell the same story.
-  if (format === 'BB' && !isSF) {
-    sourceCols = [
-      ...(enabledSources.underdog !== false ? [{ label: 'UD', key: 'adp_ud' }] : []),
-      ...(enabledSources.fantasypros !== false ? [{ label: 'FP BB', key: 'adp_fp' }] : []),
-    ];
-  } else if (format === 'BB' && isSF) {
-    sourceCols = [
-      ...(enabledSources.fantasypros !== false ? [{ label: 'FP SF', key: 'adp_fp_sf' }] : []),
-      ...(enabledSources.sleeper !== false ? [{ label: 'SL SF', key: 'adp_sl_sf' }] : []),
-    ];
-  } else if (format === 'RD' && !isSF) {
-    sourceCols = [
-      ...(enabledSources.ffc !== false ? [{ label: 'FFC', key: 'adp_ffc' }] : []),
-      ...(enabledSources.fantasypros !== false ? [{ label: 'FP', key: 'adp_fp_rd' }] : []),
-      ...(enabledSources.sleeper !== false ? [{ label: 'SL', key: 'adp_sl_rd' }] : []),
-      ...(enabledSources.market !== false ? [{ label: 'ESPN', key: 'adp_espn' }, { label: 'YAH', key: 'adp_yahoo' }] : []),
-    ];
-  } else {
-    // RD superflex
-    sourceCols = [
-      ...(enabledSources.ffc !== false ? [{ label: 'FFC SF', key: 'adp_ffc_sf' }] : []),
-      ...(enabledSources.fantasypros !== false ? [{ label: 'FP SF', key: 'adp_fp_sf' }] : []),
-      ...(enabledSources.sleeper !== false ? [{ label: 'SL SF', key: 'adp_sl_sf' }] : []),
-    ];
-  }
+  const sourceCols = view
+    ? [...view.consensus, ...view.reference]
+        .filter(src => !excluded.includes(src.column))
+        .map(src => ({ label: src.short, key: src.field, numeric: true }))
+    : [];
 
   return [
     ...base,
     ...sourceCols,
-    { label: 'Consensus', key: 'consensus' },
+    { label: format === 'DYN' ? 'Rank' : 'Consensus', key: 'consensus' },
     { label: 'Proj', key: 'projected_pts' },
     { label: 'Pos Rk', key: 'pos_rank' },
     ...tail,
@@ -121,7 +82,7 @@ function TableColgroup({ columns }) {
   return (
     <colgroup>
       {columns.map(col => (
-        <col key={col.key} style={{ width: COL_PX[col.key] || 64, minWidth: COL_PX[col.key] || 64 }} />
+        <col key={col.key} style={{ width: COL_PX[col.key] || 68, minWidth: COL_PX[col.key] || 68 }} />
       ))}
     </colgroup>
   );
@@ -144,15 +105,15 @@ function HeaderRow({ columns }) {
 
 export default function DraftBoard({
   players, loading, onUpdate, onOpenModal, onReorder,
-  format = 'BB', leagueType = '1QB', enabledSources = {}, sourceStatus = {},
+  format = 'BB', leagueType = '1QB', view = null, excluded = [], sourceStatus = {},
   filterBarHeight = 53,
 }) {
   const [activeId, setActiveId] = useState(null);
   const headerScrollRef = useRef(null);
   const bodyScrollRef = useRef(null);
 
-  const columns = buildColumns(format, leagueType, enabledSources);
-  const totalWidth = columns.reduce((sum, col) => sum + (COL_PX[col.key] || 64), 0);
+  const columns = buildColumns(format, view, excluded);
+  const totalWidth = columns.reduce((sum, col) => sum + (COL_PX[col.key] || 68), 0);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),

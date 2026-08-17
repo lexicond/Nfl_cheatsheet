@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { db, computeConsensus } = require('../db');
-const { dynastyInputs } = require('../sources');
+const { db } = require('../db');
+const { adpConsensus, dynastyRanks } = require('../consensus');
 const { fetchSleeper } = require('../scrapers/sleeper');
 const { fetchFantasyPros } = require('../scrapers/fantasypros');
 const { fetchUnderdog } = require('../scrapers/underdog');
@@ -104,26 +104,8 @@ function recomputeDerived() {
       FROM players
     `).all();
 
-    const dynRanks = { '1QB': new Map(), '2QB': new Map() };
-
-    for (const leagueType of ['1QB', '2QB']) {
-      const sources = dynastyInputs(leagueType);
-      const perPlayer = new Map();
-      for (const src of sources) {
-        const ranked = rows
-          .filter(r => r[src.column] != null && Number.isFinite(Number(r[src.column])))
-          .sort((a, b) => src.direction === 'desc'
-            ? Number(b[src.column]) - Number(a[src.column])
-            : Number(a[src.column]) - Number(b[src.column]));
-        ranked.forEach((r, i) => {
-          if (!perPlayer.has(r.id)) perPlayer.set(r.id, []);
-          perPlayer.get(r.id).push(i + 1);
-        });
-      }
-      for (const [id, ranks] of perPlayer) {
-        dynRanks[leagueType].set(id, Math.round((ranks.reduce((a, b) => a + b, 0) / ranks.length) * 10) / 10);
-      }
-    }
+    const dyn1qb = dynastyRanks(rows, '1QB');
+    const dynSf = dynastyRanks(rows, '2QB');
 
     const update = db.prepare(`
       UPDATE players SET adp_consensus = @consensus,
@@ -136,9 +118,10 @@ function recomputeDerived() {
       for (const r of rows) {
         update.run({
           id: r.id,
-          consensus: computeConsensus(r, 'BB', '1QB'),
-          dyn: dynRanks['1QB'].get(r.id) ?? null,
-          dynSf: dynRanks['2QB'].get(r.id) ?? null,
+          // Stored as the best-ball 1QB baseline; the trend arrows compare against it.
+          consensus: adpConsensus(r, 'BB', '1QB'),
+          dyn: dyn1qb.get(r.id) ?? null,
+          dynSf: dynSf.get(r.id) ?? null,
         });
       }
     })();

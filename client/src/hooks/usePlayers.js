@@ -9,16 +9,9 @@ const DEFAULT_FILTERS = {
   sort: '',  // empty = server picks the format's own consensus
 };
 
-const DEFAULT_ENABLED_SOURCES = {
-  fantasypros: true,
-  underdog: true,
-  ffc: true,
-  sleeper: true,
-  market: true,
-  dynastydaddy: true,
-  fantasycalc: true,
-  dynastyprocess: true,
-};
+// Columns the user has switched off, by column name. Stored per view, because
+// "no ESPN" in redraft says nothing about which dynasty markets you trust.
+const DEFAULT_EXCLUDED = {};
 
 function loadLS(key, fallback) {
   try {
@@ -41,9 +34,12 @@ export function usePlayers() {
   // Format settings — persisted in localStorage
   const [format, setFormatRaw] = useState(() => loadLS('draft_format', 'BB'));
   const [leagueType, setLeagueTypeRaw] = useState(() => loadLS('draft_league_type', '1QB'));
-  const [enabledSources, setEnabledSourcesRaw] = useState(() => loadLS('draft_enabled_sources', DEFAULT_ENABLED_SOURCES));
+  const [excludedByView, setExcludedByView] = useState(() => loadLS('draft_excluded_sources', DEFAULT_EXCLUDED));
+  const [view, setView] = useState(null);
 
   const searchDebounceRef = useRef(null);
+  const viewKey = `${format}:${leagueType}`;
+  const excluded = excludedByView[viewKey] || [];
 
   const showToast = useCallback((message, type = 'info') => {
     setToast({ message, type, id: Date.now() });
@@ -58,7 +54,12 @@ export function usePlayers() {
   }, []);
 
   // fetchPlayers must be defined before any hook that lists it as a dependency
-  const fetchPlayers = useCallback(async (currentFilters = filters, currentLeagueType = leagueType, currentFormat = format) => {
+  const fetchPlayers = useCallback(async (
+    currentFilters = filters,
+    currentLeagueType = leagueType,
+    currentFormat = format,
+    currentExcluded = null,
+  ) => {
     setLoading(true);
     setError(null);
     try {
@@ -72,38 +73,57 @@ export function usePlayers() {
       params.set('leagueType', currentLeagueType);
       params.set('format', currentFormat);
 
+      const off = currentExcluded ?? (excludedByView[`${currentFormat}:${currentLeagueType}`] || []);
+      if (off.length > 0) params.set('exclude', off.join(','));
+
       const res = await fetch(`/api/players?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      setPlayers(data);
+      setPlayers(data.players || []);
+      setView(data.view || null);
     } catch (err) {
       setError(err.message);
       showToast(`Failed to load players: ${err.message}`, 'error');
     } finally {
       setLoading(false);
     }
-  }, [filters, leagueType, format, showToast]);
+  }, [filters, leagueType, format, excludedByView, showToast]);
 
   const setFormat = useCallback((f) => {
     const nextFilters = { ...filters, sort: '' };
     setFormatRaw(f);
     setFiltersState(nextFilters);
     localStorage.setItem('draft_format', JSON.stringify(f));
-    fetchPlayers(nextFilters, leagueType, f);
-  }, [fetchPlayers, filters, leagueType]);
+    fetchPlayers(nextFilters, leagueType, f, excludedByView[`${f}:${leagueType}`] || []);
+  }, [fetchPlayers, filters, leagueType, excludedByView]);
 
   const setLeagueType = useCallback((lt) => {
     const nextFilters = { ...filters, sort: '' };
     setLeagueTypeRaw(lt);
     setFiltersState(nextFilters);
     localStorage.setItem('draft_league_type', JSON.stringify(lt));
-    fetchPlayers(nextFilters, lt, format);
+    fetchPlayers(nextFilters, lt, format, excludedByView[`${format}:${lt}`] || []);
   }, [fetchPlayers, filters, format]);
 
-  const setEnabledSources = useCallback((es) => {
-    setEnabledSourcesRaw(es);
-    localStorage.setItem('draft_enabled_sources', JSON.stringify(es));
-  }, []);
+  // Toggling a source changes the consensus, so the board is refetched rather than
+  // just re-rendered with a column hidden.
+  const toggleSource = useCallback((column) => {
+    const current = excludedByView[viewKey] || [];
+    const next = current.includes(column)
+      ? current.filter(c => c !== column)
+      : [...current, column];
+    const merged = { ...excludedByView, [viewKey]: next };
+    setExcludedByView(merged);
+    localStorage.setItem('draft_excluded_sources', JSON.stringify(merged));
+    fetchPlayers(filters, leagueType, format, next);
+  }, [excludedByView, viewKey, fetchPlayers, filters, leagueType, format]);
+
+  const resetSources = useCallback(() => {
+    const merged = { ...excludedByView, [viewKey]: [] };
+    setExcludedByView(merged);
+    localStorage.setItem('draft_excluded_sources', JSON.stringify(merged));
+    fetchPlayers(filters, leagueType, format, []);
+  }, [excludedByView, viewKey, fetchPlayers, filters, leagueType, format]);
 
   useEffect(() => {
     fetchPlayers();
@@ -207,7 +227,9 @@ export function usePlayers() {
     setFormat,
     leagueType,
     setLeagueType,
-    enabledSources,
-    setEnabledSources,
+    view,
+    excluded,
+    toggleSource,
+    resetSources,
   };
 }

@@ -35,8 +35,10 @@ export default function App() {
     setFormat,
     leagueType,
     setLeagueType,
-    enabledSources,
-    setEnabledSources,
+    view,
+    excluded,
+    toggleSource,
+    resetSources,
   } = usePlayers();
 
   const [modalPlayer, setModalPlayer] = useState(null);
@@ -95,8 +97,11 @@ export default function App() {
         setFormat={setFormat}
         leagueType={leagueType}
         setLeagueType={setLeagueType}
-        enabledSources={enabledSources}
-        setEnabledSources={setEnabledSources}
+        view={view}
+        excluded={excluded}
+        onToggleSource={toggleSource}
+        onResetSources={resetSources}
+        formatLabel={formatLabel}
       />
 
       {seeding && (
@@ -117,7 +122,8 @@ export default function App() {
             onReorder={reorderPlayer}
             format={format}
             leagueType={leagueType}
-            enabledSources={enabledSources}
+            view={view}
+            excluded={excluded}
             sourceStatus={sourceStatus}
             filterBarHeight={filterBarHeight}
           />

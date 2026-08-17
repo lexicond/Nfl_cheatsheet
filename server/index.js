@@ -24,6 +24,18 @@ app.use('/api/players', playersRouter);
 app.use('/api/refresh', refreshRouter);
 app.use('/api/health', healthRouter);
 
+// Which sources feed the requested view, with plain-English explanations.
+app.get('/api/sources', (req, res) => {
+  try {
+    const { viewSources } = require('./sources');
+    const format = ['BB', 'RD', 'DYN'].includes(req.query.format) ? req.query.format : 'BB';
+    const leagueType = req.query.leagueType === '2QB' ? '2QB' : '1QB';
+    res.json(viewSources(format, leagueType));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Source status lives on the refresh router at /status
 app.get('/api/source-status', (req, res) => {
   try {

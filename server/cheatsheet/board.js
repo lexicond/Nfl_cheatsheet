@@ -1,7 +1,22 @@
 const POS = ['QB', 'RB', 'WR', 'TE'];
 const TEAM_SIZE = 12;
 
-const state = { format: 'BB', league: '1QB', view: 'board', pos: null };
+const state = { format: 'BB', league: '1QB', view: 'board', pos: null, off: {} };
+
+// Sources switched off, per view. Persisted so a sheet reopened mid-draft keeps the
+// mix you chose.
+try {
+  const saved = JSON.parse(localStorage.getItem('draftroom_off') || '{}');
+  if (saved && typeof saved === 'object') state.off = saved;
+} catch (e) { /* private mode or corrupt value — fall back to everything on */ }
+
+const viewKey = () => `${state.format}:${state.league}`;
+const offList = () => state.off[viewKey()] || [];
+const isOff = field => offList().includes(field);
+
+function saveOff() {
+  try { localStorage.setItem('draftroom_off', JSON.stringify(state.off)); } catch (e) { /* ignore */ }
+}
 
 // Which source columns average into the headline number for each format. Mirrors
 // the app: only sources that publish a format feed that format's consensus.
@@ -14,9 +29,25 @@ const SOURCES = {
 
 const key = () => state.format + ':' + state.league;
 
+// The sources feeding the current view, minus anything switched off.
+function activeSources() {
+  const defs = state.format === 'DYN' ? DYN_SOURCES[state.league] : SOURCES[key()];
+  return defs.filter(([f]) => !isOff(f));
+}
+
 function headline(p) {
-  if (state.format === 'DYN') return state.league === '2QB' ? p.dys : p.dy;
-  const vals = SOURCES[key()].map(([f]) => p[f]).filter(v => v != null);
+  const active = activeSources();
+  if (!active.length) return null;
+
+  if (state.format === 'DYN') {
+    // Dynasty values are on different scales, so ranks are averaged, not the values.
+    const ranks = active.map(([f]) => DYN_RANKS[f]).filter(Boolean);
+    const mine = ranks.map(r => r.get(p.n)).filter(v => v != null);
+    if (!mine.length) return null;
+    return Math.round((mine.reduce((a, b) => a + b, 0) / mine.length) * 10) / 10;
+  }
+
+  const vals = active.map(([f]) => p[f]).filter(v => v != null);
   if (!vals.length) return null;
   return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
 }
@@ -28,14 +59,28 @@ const DYN_SOURCES = {
 };
 
 function sourceCount(p) {
-  if (state.format === 'DYN') {
-    return DYN_SOURCES[state.league].filter(([f]) => p[f] != null).length;
+  return activeSources().filter(([f]) => p[f] != null).length;
+}
+
+// Dynasty ranks have to be built across the whole pool before any one player can be
+// scored, so they are rebuilt whenever the active set changes.
+let DYN_RANKS = {};
+function buildDynastyRanks() {
+  DYN_RANKS = {};
+  if (state.format !== 'DYN') return;
+  for (const [field] of DYN_SOURCES[state.league]) {
+    const desc = SOURCE_META[field] && SOURCE_META[field].kind === 'value';
+    const ranked = PLAYERS.filter(p => p[field] != null)
+      .sort((a, b) => (desc ? b[field] - a[field] : a[field] - b[field]));
+    const m = new Map();
+    ranked.forEach((p, i) => m.set(p.n, i + 1));
+    DYN_RANKS[field] = m;
   }
-  return SOURCES[key()].filter(([f]) => p[f] != null).length;
 }
 
 // The ranked pool for the current format, with positional ranks attached.
 function pool() {
+  buildDynastyRanks();
   const rows = PLAYERS
     .map(p => ({ ...p, h: headline(p), sc: sourceCount(p) }))
     .filter(p => p.h != null)
@@ -113,9 +158,8 @@ function renderMap(rows) {
 
 /* ---------------- board ---------------- */
 function renderBoard(rows) {
-  const cols = state.format === 'DYN'
-    ? DYN_SOURCES[state.league].map(([f, label]) => [label, p => p[f]])
-    : SOURCES[key()].map(([f, label]) => [label, p => p[f]]);
+  const refs = (REFERENCE_SOURCES[key()] || []).filter(([f]) => !isOff(f));
+  const cols = [...activeSources(), ...refs].map(([f, label]) => [label, p => p[f]]);
 
   const head = `<thead><tr>
     <th class="l">#</th><th class="l">Player</th><th>Pos</th><th>${state.format === 'DYN' ? 'Age' : 'Bye'}</th>
@@ -193,6 +237,45 @@ function renderCalls(rows) {
     graded.slice().sort((a, b) => a.value - b.value).slice(0, 8).map(line).join('');
 }
 
+/* ---------------- sources panel ---------------- */
+function renderSources() {
+  const defs = state.format === 'DYN' ? DYN_SOURCES[state.league] : SOURCES[key()];
+  const refs = (REFERENCE_SOURCES[key()] || []);
+  const activeCount = defs.filter(([f]) => !isOff(f)).length;
+  const onlyOneLeft = activeCount <= 1;
+
+  const card = ([field, label], isRef) => {
+    const meta = SOURCE_META[field] || {};
+    const off = isOff(field);
+    const disabled = !isRef && !off && onlyOneLeft;
+    return `<label class="srccard${off ? ' off' : ''}${isRef ? ' ref' : ''}">
+      <input type="checkbox" data-src="${field}" ${off ? '' : 'checked'} ${disabled ? 'disabled' : ''}>
+      <span class="nm">${esc(label)}</span>
+      <span class="kind kind-${meta.kind || 'adp'}">${esc(meta.kindLabel || '')}</span>
+      <span class="tip">
+        <b>${esc(meta.label || label)}</b>
+        ${esc(meta.what || '')}
+        <span class="meta">
+          Scoring: ${esc(meta.scoringLabel || '—')}<br>
+          From: ${esc(meta.provider || '—')}
+          ${isRef ? '<br><span class="warn">Shown for reference — never averaged in</span>' : ''}
+          ${disabled ? '<br><span class="warn">Cannot switch off the last source</span>' : ''}
+        </span>
+      </span>
+    </label>`;
+  };
+
+  document.getElementById('src-lead').innerHTML =
+    `The <b>${state.format === 'DYN' ? 'Rank' : 'Consensus'}</b> column averages the ` +
+    `<b>${activeCount}</b> of ${defs.length} sources ticked below. Untick one to take it out ` +
+    `of the average and off the board. Hover any source to see what it is.`;
+
+  document.getElementById('src-list').innerHTML =
+    defs.map(d => card(d, false)).join('') + refs.map(d => card(d, true)).join('');
+
+  document.getElementById('src-reset').hidden = offList().length === 0;
+}
+
 /* ---------------- wiring ---------------- */
 function render() {
   const all = pool();
@@ -201,6 +284,7 @@ function render() {
   document.getElementById('board-sec').hidden = state.view !== 'board';
   document.getElementById('cols-sec').hidden = state.view !== 'tiers';
 
+  renderSources();
   renderMap(all);
   if (state.view === 'board') renderBoard(rows.slice(0, 240)); else renderCols(all);
   renderCalls(all);
@@ -209,8 +293,9 @@ function render() {
     ? 'Ordered by mean rank across the dynasty value sources, in blocks of 24.'
     : 'Grouped by the round the pick actually falls in, at 12 teams.';
 
+  const active = activeSources().length;
   document.getElementById('count').textContent =
-    `${rows.length} ranked · ${SOURCE_COUNT[key()]}`;
+    `${rows.length} ranked · ${active} source${active === 1 ? '' : 's'}`;
 
   document.querySelectorAll('[data-set]').forEach(b => {
     const [k, v] = b.dataset.set.split('=');
@@ -226,6 +311,22 @@ document.addEventListener('click', e => {
   if (!b) return;
   const [k, v] = b.dataset.set.split('=');
   state[k] = v === 'null' ? null : v;
+  render();
+});
+
+document.addEventListener('change', e => {
+  const box = e.target.closest('[data-src]');
+  if (!box) return;
+  const field = box.dataset.src;
+  const current = offList();
+  state.off[viewKey()] = box.checked ? current.filter(f => f !== field) : [...current, field];
+  saveOff();
+  render();
+});
+
+document.getElementById('src-reset').addEventListener('click', () => {
+  state.off[viewKey()] = [];
+  saveOff();
   render();
 });
 

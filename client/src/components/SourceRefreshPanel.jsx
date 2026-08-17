@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 
 // All sources with display metadata
 const SOURCE_DEFS = [
@@ -38,63 +38,25 @@ function formatAge(isoStr) {
   return `${Math.floor(hrs / 24)}d`;
 }
 
-export default function SourceRefreshPanel({ sourceStatus, refreshing, onRefresh, enabledSources = {}, onToggleSource }) {
-  const [expanded, setExpanded] = useState(false);
-
+export default function SourceRefreshPanel({ sourceStatus, refreshing, onRefresh }) {
   const anyRefreshing = SOURCE_DEFS.some(s => refreshing[s.key]) || !!refreshing.all;
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      {/* Collapsed: show compact status badges */}
-      {!expanded && SOURCE_DEFS.map(src => {
+      {SOURCE_DEFS.map(src => {
         const meta = sourceStatus[src.key] || {};
         const isRefreshing = !!refreshing[src.key] || !!refreshing.all;
-        const enabled = enabledSources[src.key] !== false;
         return (
           <div
             key={src.key}
-            className={`flex items-center gap-1 bg-[#1a1d27] border rounded px-2 py-1 transition-opacity ${
-              enabled ? 'border-[#2e3148]' : 'border-[#1e2132] opacity-50'
-            }`}
+            className="flex items-center gap-1 bg-[#1a1d27] border border-[#2e3148] rounded px-2 py-1"
+
             title={`${src.fullLabel} · ${meta.last_fetched ? new Date(meta.last_fetched).toLocaleString() : 'never fetched'}${meta.notes ? ` · ${meta.notes}` : ''}`}
           >
             {isRefreshing ? <Spinner /> : <StatusDot status={meta.status} />}
             <span className="text-xs text-[#8b90a8]">{src.label}</span>
             <span className="text-xs text-[#555875]">{formatAge(meta.last_fetched)}</span>
             {meta.status === 'error' && <span className="text-xs text-red-400">⚠</span>}
-            <button
-              onClick={() => onRefresh(src.key)}
-              disabled={isRefreshing}
-              className="text-[#555875] hover:text-blue-400 disabled:opacity-40 transition-colors text-xs"
-              title={`Refresh ${src.fullLabel}`}
-            >
-              ↻
-            </button>
-          </div>
-        );
-      })}
-
-      {/* Expanded: column visibility toggles */}
-      {expanded && SOURCE_DEFS.map(src => {
-        const meta = sourceStatus[src.key] || {};
-        const isRefreshing = !!refreshing[src.key] || !!refreshing.all;
-        const enabled = enabledSources[src.key] !== false;
-        return (
-          <div
-            key={src.key}
-            className="flex items-center gap-1.5 bg-[#1a1d27] border border-[#2e3148] rounded px-2 py-1"
-          >
-            {isRefreshing ? <Spinner /> : <StatusDot status={meta.status} />}
-            {/* Column visibility toggle */}
-            <button
-              onClick={() => onToggleSource?.(src.key)}
-              className={`text-xs font-medium transition-colors ${enabled ? 'text-[#e8eaf0]' : 'text-[#555875] line-through'}`}
-              title={enabled ? `Hide ${src.fullLabel} column` : `Show ${src.fullLabel} column`}
-            >
-              {src.fullLabel}
-            </button>
-            <span className="text-xs text-[#555875]">{formatAge(meta.last_fetched)}</span>
-            {meta.status === 'error' && <span className="text-xs text-red-400" title="Last fetch failed">⚠</span>}
             <button
               onClick={() => onRefresh(src.key)}
               disabled={isRefreshing}
@@ -121,14 +83,6 @@ export default function SourceRefreshPanel({ sourceStatus, refreshing, onRefresh
         )}
       </button>
 
-      {/* Toggle expanded/collapsed */}
-      <button
-        onClick={() => setExpanded(e => !e)}
-        className="text-xs text-[#555875] hover:text-[#8b90a8] transition-colors px-1"
-        title={expanded ? 'Collapse source panel' : 'Expand to toggle column visibility'}
-      >
-        {expanded ? '▲' : '▼'}
-      </button>
     </div>
   );
 }

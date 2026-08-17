@@ -52,23 +52,6 @@ function ValueBadge({ score, position }) {
   return null;
 }
 
-// Column key → the field on the player record it renders. Keeps one cell shape for
-// every ADP source instead of a near-identical block per site.
-const ADP_COLUMNS = [
-  ['adp_fp', 'adp_fantasypros'],
-  ['adp_ud', 'adp_underdog'],
-  ['adp_ffc', 'adp_ffc'],
-  ['adp_ffc_sf', 'adp_ffc_sf'],
-  ['adp_fp_rd', 'adp_fp_rd'],
-  ['adp_fp_sf', 'adp_fp_sf'],
-  ['adp_fp_dyn', 'adp_fp_dyn'],
-  ['adp_sl_rd', 'adp_sl_rd'],
-  ['adp_sl_sf', 'adp_sl_sf'],
-  ['adp_espn', 'adp_espn'],
-  ['adp_yahoo', 'adp_yahoo'],
-  ['adp_sl_dyn', 'adp_sl_dyn'],
-];
-
 export default function PlayerRow({ player, index, onUpdate, onOpenModal, columns = [], format = 'BB', leagueType = '1QB' }) {
   const [editingRank, setEditingRank] = useState(false);
   const [rankInput, setRankInput] = useState('');
@@ -191,15 +174,6 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
       </td>
     ),
 
-    ...Object.fromEntries(ADP_COLUMNS.map(([key, field]) => [
-      key,
-      (
-        <td key={key} className={`${cellClass} w-16 font-mono text-[#8b90a8] text-right`}>
-          <AdpCell value={player[field]} />
-        </td>
-      ),
-    ])),
-
     consensus: (
       <td key="consensus" className={`${cellClass} w-20 font-mono text-[#e8eaf0] text-right`}>
         {player.adp_consensus != null ? (
@@ -236,15 +210,6 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
         {player.ktc_value != null ? player.ktc_value.toLocaleString() : <span className="text-[#555875]">–</span>}
       </td>
     ),
-
-    ...Object.fromEntries(['fc_value', 'ds_value', 'dp_value'].map(field => [
-      field,
-      (
-        <td key={field} className={`${cellClass} w-20 font-mono text-[#8b90a8] text-right`}>
-          {player[field] != null ? player[field].toLocaleString() : <span className="text-[#555875]">–</span>}
-        </td>
-      ),
-    ])),
 
     age: (
       <td key="age" className={`${cellClass} w-12 font-mono text-[#8b90a8] text-center`}>
@@ -341,9 +306,23 @@ export default function PlayerRow({ player, index, onUpdate, onOpenModal, column
     ),
   };
 
+  // Source columns are driven by the server's view descriptor, so anything without a
+  // bespoke renderer is a numeric source cell keyed by its field name.
+  const renderCell = (col) => {
+    if (cellRenderers[col.key]) return cellRenderers[col.key];
+    const value = player[col.key];
+    return (
+      <td key={col.key} className={`${cellClass} font-mono text-[#8b90a8] text-right`}>
+        {value == null
+          ? <span className="text-[#555875]">–</span>
+          : value >= 1000 ? value.toLocaleString() : value.toFixed(1)}
+      </td>
+    );
+  };
+
   return (
     <tr ref={setNodeRef} style={style} className={rowClass}>
-      {columns.map(col => cellRenderers[col.key] || null)}
+      {columns.map(renderCell)}
     </tr>
   );
 }
