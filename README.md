@@ -38,9 +38,23 @@ On first run, the server automatically fetches player data from Sleeper. If that
 - Railway auto-detects `railway.json` and runs `npm run build` then `npm start`
 
 ### 2. Add a Volume (critical — persists your SQLite DB)
-- In the Railway dashboard: **Service → Volumes → Add Volume**
-- Mount path: `/data`
-- This keeps your personal rankings, notes, and overrides across deploys and sleep cycles
+
+Volumes are created on the **project canvas**, not in the service's Settings tab — which
+is the first place everyone looks, and they are not there.
+
+- Close the service panel to get back to the canvas
+- Press **⌘K** and search *Volume*, or **right-click the canvas**
+- Choose the service to attach it to
+- Set the mount path to **`/data`**
+
+Or from a terminal: `railway volume add`, then `railway volume list` to confirm.
+
+The mount path is not fixed — `db.js` reads `RAILWAY_VOLUME_MOUNT_PATH`, which Railway
+sets automatically, so any path works. `/data` keeps it clear of `/app`, where Railway
+puts the code. Volumes mount when the container starts rather than at build, so the
+service redeploys when you attach one.
+
+This keeps your rankings, notes, tiers and overrides across deploys and sleep cycles.
 
 **Without a volume the database lives inside the container and is destroyed on every
 deploy**, and the failure is silent: the app re-seeds players from Sleeper on boot, so the

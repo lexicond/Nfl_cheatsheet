@@ -97,9 +97,12 @@ This is the worst shape a failure can take here: the app re-seeds players from S
 boot, so a wiped database comes back looking healthy with only the irreplaceable part —
 your rankings, stars, tiers and notes — missing.
 
-**The fix is one dashboard action**: Railway → the service → **Variables/Volumes → Add
-Volume**, any mount path, then redeploy. Railway sets `RAILWAY_VOLUME_MOUNT_PATH` and
-`db.js` puts the database on it.
+**The fix is one dashboard action**, but not where you would look for it: volumes are
+created on the **project canvas** (⌘K → *Volume*, or right-click the canvas), then
+attached to the service, and only then does the mount path appear in its settings. The
+service's own Settings tab has no volume option, which is where everyone looks first.
+`railway volume add` does the same from a terminal. Any mount path works — `db.js` reads
+`RAILWAY_VOLUME_MOUNT_PATH`, which Railway sets automatically.
 
 It is no longer silent either way:
 
