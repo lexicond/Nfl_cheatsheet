@@ -122,20 +122,21 @@ throwaway container that needs the warning.
 watched picks land, and every path is verified against completed drafts, but nobody has
 taken a whole draft on it. The pick timer is the one thing entirely unexercised.
 
-**2. Three faults live in code this branch did not write.** Worth fixing before they bite:
+**2. Three faults in older code — now fixed.** Recorded because the reasoning matters:
 
-- `server/scrapers/fantasycalc.js:73` cross-fills the league types — `v1qb ?? vsf` and the
-  reverse. If the `numQbs=2` endpoint fails, every player's 1QB trade value is written into
-  `fc_value_sf` and feeds the superflex dynasty consensus, while the source still records
-  `ok`. A silent wrong answer, which is the worst kind here.
-- `server/scrapers/sleeper.js:105` is the only scraper without a claim guard. Two players
-  colliding on normalized name plus position collapse onto one row, and the second
-  overwrites the first's `sleeper_player_id`. That now matters more than it did: a wrong
-  Sleeper id takes the wrong man off the board mid-draft.
-- `client/src/components/PlayerModal.jsx:48` reads `adp_fp_dyn` for its "FantasyPros
-  (dynasty)" row, which the server aliases to the superflex column under 2QB — so a
-  superflex rank is labelled as the 1QB one. `adp_sl_dyn` is missing from the breakdown
-  entirely.
+- FantasyCalc cross-filled the league types. Each column is now written only when its own
+  endpoint answered; the other keeps its previous value, which is this repo's rule for a
+  failed source everywhere else.
+- Sleeper's roster loop had no claim guard, alone among the scrapers. It fires on the real
+  roster: **Frank Gore and Frank Gore Jr.**, both running backs listed at Buffalo, were
+  collapsing onto one row and one was overwriting the other's `sleeper_player_id` — the id
+  live draft picks match on. They now hold separate rows, and no two players share an id.
+  `audit-matching` treats distinct Sleeper ids as proof of two different men, so the pair
+  is not reported as a duplicate.
+- The player panel labelled a superflex dynasty rank as the 1QB one, because
+  `adp_fp_dyn` is aliased by the server under 2QB. The dynasty rows now take their names
+  from the league type on screen, and Sleeper's dynasty ADP — fetched all along, never
+  shown — is in the breakdown.
 
 **3. Auctions show no "on the clock"** — there is no pick order to derive. Picks still land
 on the board normally.
@@ -168,8 +169,8 @@ next thing worth building if the paste step still grates.
   has been left alone.
 - **Dynasty has the same overlap**: FantasyCalc against Sleeper dynasty at rho 0.975, and
   0.984 in superflex.
-- `fantasycalc.js:73`, `sleeper.js:105` and `PlayerModal.jsx:48` — see the three faults
-  listed above.
+- The three faults above are fixed; what remains in this list is a matter of judgement,
+  not correctness.
 
 *Insurance:*
 
