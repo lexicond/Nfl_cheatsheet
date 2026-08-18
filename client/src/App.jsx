@@ -204,6 +204,7 @@ export default function App() {
           onUpdate={handleModalUpdate}
           sourceStatus={sourceStatus}
           format={format}
+          leagueType={leagueType}
         />
       )}
 

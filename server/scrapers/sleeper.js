@@ -1,6 +1,7 @@
 const { db } = require('../db');
 const { get, JSON_HEADERS } = require('../utils/http');
 const { normalizeName } = require('../utils/normalize');
+const { createClaimGuard } = require('../utils/match');
 
 const POSITIONS = new Set(['QB', 'RB', 'WR', 'TE']);
 const SEASON_YEAR = new Date().getFullYear();
@@ -94,6 +95,15 @@ async function fetchSleeper() {
       p && p.active && POSITIONS.has(p.position) && p.search_rank && p.search_rank < 9999
     );
 
+    // Sleeper owns the roster rows, so this is the one loop that can fuse two real
+    // players into one. Two different players who normalise to the same name and play
+    // the same position — and neither yet carrying a Sleeper id — both resolve to the
+    // first row, and the second overwrites the first's sleeper_player_id. That id is
+    // what the live draft matches picks on, so the damage is not a mis-ranking: it takes
+    // the wrong man off the board mid-draft. A claimed row sends the second player to a
+    // row of his own instead.
+    const claim = createClaimGuard('Sleeper');
+
     rosterCount = db.transaction(() => {
       let count = 0;
       for (const p of skill) {
@@ -102,7 +112,8 @@ async function fetchSleeper() {
         const sid = p.player_id ? String(p.player_id) : null;
         const team = p.team ? String(p.team).toUpperCase() : null;
 
-        const existing = (sid && bySleeperId.get(sid)) || byNorm.get(normalizeName(name), p.position);
+        const found = (sid && bySleeperId.get(sid)) || byNorm.get(normalizeName(name), p.position);
+        const existing = found && claim(found.id, name) ? found : null;
         if (existing) {
           linkSleeperId.run({ id: existing.id, sid, team, ts: now });
         } else {
