@@ -371,6 +371,10 @@ footer .fine { color: var(--faint); line-height: 1.7; }
   box-shadow: var(--shadow);
   font-size: 11.5px;
 }
+/* display:flex on a class outranks the user-agent's [hidden] rule, so without this the
+   bar shows as an empty box before the first poll — and stays there, looking like a
+   broken page, anywhere the script does not run at all. */
+.livebar[hidden] { display: none; }
 .livebar .lv-left, .livebar .lv-right {
   display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
 }

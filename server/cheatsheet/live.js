@@ -95,17 +95,6 @@ async function livePoll() {
       } catch (e) { /* a bad username costs the countdown, not the sync */ }
     }
 
-    // Open on the board that matches the room. Done once, on the first successful poll,
-    // so it never yanks the view out from under someone who has since changed it.
-    if (!LIVE_STATE.tuned) {
-      LIVE_STATE.tuned = true;
-      const sc = LIVE_STATE.meta.scoring || '';
-      if (/dynasty/.test(sc)) state.format = 'DYN';
-      else if (LIVE.format) state.format = LIVE.format;
-      if (/2qb|superflex/.test(sc)) state.league = '2QB';
-      if ([8, 10, 12, 14].indexOf(LIVE_STATE.meta.teams) >= 0) state.teams = LIVE_STATE.meta.teams;
-    }
-
     // Rebuilt rather than appended to, so a pick undone by the commissioner puts the
     // player back on the board instead of stranding him as taken.
     for (const k of Object.keys(TAKEN)) delete TAKEN[k];

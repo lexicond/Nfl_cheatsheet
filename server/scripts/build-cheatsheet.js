@@ -145,11 +145,42 @@ if (draftRef && !draftId) {
 const liveFormat = ['BB', 'RD'].includes((flag('format') || '').toUpperCase())
   ? flag('format').toUpperCase()
   : 'RD';
-const LIVE = draftId
-  ? { draftId, username: flag('user'), slot: null, season: String(SEASON), format: liveFormat }
-  : null;
+// Resolved here rather than in the page, so the sheet opens on the right board on the
+// very first paint — before any poll has answered, and still correctly if none ever does
+// because the draft room's wifi is gone. fetchDraft asserts the sport and season, so a
+// wrong id fails at build time rather than halfway through a draft.
+async function resolveLive() {
+  if (!draftId) return null;
+  const { fetchDraft, fetchUser } = require('../scrapers/sleeperDraft');
+  const meta = await fetchDraft(draftId);
+  const sc = meta.scoring_type || '';
+  let slot = null;
+  const username = flag('user');
+  if (username && meta.draft_order) {
+    try {
+      const u = await fetchUser(username);
+      slot = meta.draft_order[u.user_id] ?? null;
+      if (slot == null) console.warn(`[live] ${username} is not in this draft — no pick countdown`);
+    } catch (err) {
+      console.warn(`[live] could not resolve ${username}: ${err.message}`);
+    }
+  }
+  return {
+    draftId,
+    username: username || null,
+    slot,
+    season: meta.season,
+    name: meta.league_name,
+    teams: [8, 10, 12, 14].includes(meta.teams) ? meta.teams : null,
+    // Dynasty and superflex are legible in the scoring type; best ball and redraft are
+    // not, since Sleeper calls both half_ppr.
+    format: /dynasty/.test(sc) ? 'DYN' : liveFormat,
+    league: /2qb|superflex/.test(sc) ? '2QB' : '1QB',
+  };
+}
 const builtAt = new Date().toUTCString().replace(/^\w+, /, '').replace(/:\d\d GMT$/, ' UTC');
 
+function build(LIVE) {
 const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -328,4 +359,11 @@ startLive();
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, html);
-console.log(`Wrote ${OUT} — ${players.length} players, ${(html.length / 1024).toFixed(0)} KB`);
+console.log(`Wrote ${OUT} — ${players.length} players, ${(html.length / 1024).toFixed(0)} KB`
+  + (LIVE ? ` — following ${LIVE.name || 'draft ' + LIVE.draftId}`
+      + (LIVE.slot ? `, you at slot ${LIVE.slot}` : '') : ''));
+}
+
+resolveLive()
+  .then(build)
+  .catch(err => { console.error(err.message); process.exit(1); });

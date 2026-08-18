@@ -21,6 +21,15 @@ try {
 } catch (e) { /* private mode or corrupt value — fall back to the defaults */ }
 if (state.off === null) state.off = DEFAULT_OFF.slice();
 
+// A sheet built for one specific draft opens on that draft's board — set here, before
+// the first render, so it is right on the first paint and stays right even if the room
+// has no signal and no poll ever answers.
+if (typeof LIVE !== 'undefined' && LIVE) {
+  if (LIVE.format) state.format = LIVE.format;
+  if (LIVE.league) state.league = LIVE.league;
+  if (LIVE.teams) state.teams = LIVE.teams;
+}
+
 const isOff = field => state.off.includes(FAMILY_OF[field]);
 
 // data-set carries strings; the state they drive is not all strings.
