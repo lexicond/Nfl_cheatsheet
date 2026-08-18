@@ -22,8 +22,11 @@ const flag = (name) => {
   const i = argv.indexOf(`--${name}`);
   return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null;
 };
+// Which flags consume the argument after them. Assuming they all do meant --no-poll
+// swallowed the output path and the build silently overwrote the committed sheet.
+const VALUE_FLAGS = new Set(['--draft', '--user', '--format']);
 const positional = argv.filter((a, i) =>
-  !a.startsWith('--') && !(i > 0 && argv[i - 1].startsWith('--')));
+  !a.startsWith('--') && !(i > 0 && VALUE_FLAGS.has(argv[i - 1])));
 
 const OUT = positional[0] || path.join(__dirname, '..', '..', 'cheatsheets', `draft-room-${SEASON}.html`);
 const ASSETS = path.join(__dirname, '..', 'cheatsheet');

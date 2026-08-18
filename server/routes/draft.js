@@ -129,10 +129,31 @@ async function syncDraft(session, { force = false } = {}) {
     const picks = await fetchPicks(session.draft_id);
     storePicks(session.draft_id, picks);
 
+    // A draft sitting in pre_draft has no order yet — Sleeper fills it in when the
+    // commissioner randomises, which is usually after you have the board open. Connect
+    // before that and the order, the team names and your own slot are all still empty,
+    // so they are re-read on every poll rather than only at connect. Without this there
+    // is no countdown and no team names for the whole draft, and no way back short of
+    // disconnecting and reconnecting.
+    const order = meta.draft_order || {};
+    let mySlot = session.my_slot;
+    if (mySlot == null && session.my_user_id && order[session.my_user_id] != null) {
+      mySlot = order[session.my_user_id];
+    }
+
+    // Team names come from the league, which a mock draft does not have. Only worth
+    // re-fetching while we have none.
+    let teamNames = session.team_names;
+    if (meta.league_id && (!teamNames || teamNames === '{}')) {
+      const fetched = await fetchLeagueUsers(meta.league_id);
+      if (Object.keys(fetched).length > 0) teamNames = JSON.stringify(fetched);
+    }
+
     db.prepare(`
       UPDATE draft_sync
       SET status = @status, type = @type, teams = @teams, rounds = @rounds,
           reversal_round = @reversal_round, league_name = COALESCE(@league_name, league_name),
+          draft_order = @draft_order, my_slot = @my_slot, team_names = @team_names,
           last_synced = @now, last_error = NULL
       WHERE id = 1
     `).run({
@@ -142,6 +163,9 @@ async function syncDraft(session, { force = false } = {}) {
       rounds: meta.rounds,
       reversal_round: meta.reversal_round,
       league_name: meta.league_name,
+      draft_order: Object.keys(order).length > 0 ? JSON.stringify(order) : session.draft_order,
+      my_slot: mySlot,
+      team_names: teamNames,
       now: new Date().toISOString(),
     });
   } catch (err) {

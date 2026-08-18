@@ -83,16 +83,21 @@ async function livePoll() {
     LIVE_STATE.status = draft.status;
     LIVE_STATE.order = draft.draft_order || {};
 
-    // Your slot is resolved from your username once, here rather than at build time, so
-    // the file stays correct if it is reused against another draft.
-    if (LIVE.slot == null && LIVE.username && !LIVE_STATE.slotTried) {
-      LIVE_STATE.slotTried = true;
+    // Your slot, resolved from your username. A draft in pre_draft has no order yet, so
+    // this waits for one rather than spending its one attempt on an empty object and
+    // never producing a countdown. The user id is looked up once and kept.
+    if (LIVE.slot == null && LIVE.username && Object.keys(LIVE_STATE.order).length > 0) {
       try {
-        const user = await liveFetch('https://api.sleeper.app/v1/user/' + encodeURIComponent(LIVE.username));
-        if (user && user.user_id && LIVE_STATE.order[user.user_id] != null) {
-          LIVE.slot = LIVE_STATE.order[user.user_id];
+        if (!LIVE_STATE.userId) {
+          const user = await liveFetch('https://api.sleeper.app/v1/user/' + encodeURIComponent(LIVE.username));
+          LIVE_STATE.userId = user && user.user_id ? user.user_id : null;
+          // A username that does not resolve never will; stop asking.
+          if (!LIVE_STATE.userId) LIVE.username = null;
         }
-      } catch (e) { /* a bad username costs the countdown, not the sync */ }
+        if (LIVE_STATE.userId && LIVE_STATE.order[LIVE_STATE.userId] != null) {
+          LIVE.slot = LIVE_STATE.order[LIVE_STATE.userId];
+        }
+      } catch (e) { /* a failed lookup costs the countdown, not the sync */ }
     }
 
     // Rebuilt rather than appended to, so a pick undone by the commissioner puts the
@@ -117,6 +122,7 @@ async function livePoll() {
   }
   renderLiveBar();
   render();
+  stopLiveWhenDone();
 }
 
 function renderLiveBar() {
@@ -190,8 +196,22 @@ function startLive() {
   // A sheet built to be read somewhere without network never pretends otherwise.
   if (LIVE.poll === false) return;
   livePoll();
-  setInterval(livePoll, POLL_MS);
+  LIVE_STATE.timer = setInterval(livePoll, POLL_MS);
   // The board is the reason you are looking at the page; keep the clock honest between
   // polls so "3 away" does not sit there looking fresh while the room moves.
-  setInterval(renderLiveBar, 1000);
+  LIVE_STATE.clock = setInterval(renderLiveBar, 1000);
+}
+
+/* Once the last pick is in there is nothing left to ask Sleeper about, and a sheet left
+ * open on a phone would otherwise keep calling twice every five seconds until the tab
+ * closed. */
+function stopLiveWhenDone() {
+  const m = LIVE_STATE.meta || {};
+  const total = m.teams && m.rounds ? m.teams * m.rounds : null;
+  const done = LIVE_STATE.status === 'complete' || (total && LIVE_STATE.picks >= total);
+  if (!done) return;
+  clearInterval(LIVE_STATE.timer);
+  clearInterval(LIVE_STATE.clock);
+  LIVE_STATE.timer = null;
+  LIVE_STATE.clock = null;
 }

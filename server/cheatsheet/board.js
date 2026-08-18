@@ -133,12 +133,8 @@ function pool() {
     .filter(p => p.h != null)
     .sort((a, b) => a.h - b.h);
 
-  // Positional ranks are counted over everyone, taken or not, so hiding drafted players
-  // never silently renumbers the ones left. Only the display is filtered, below.
-  const posN = {}, projN0 = {};
+  const posN = {};
   rows.forEach(p => { posN[p.p] = (posN[p.p] || 0) + 1; p.pr_pos = posN[p.p]; });
-
-  if (state.hideTaken) rows = rows.filter(p => !p.taken);
 
   // Projection rank within position, over the same pool.
   POS.forEach(pos => {
@@ -181,7 +177,11 @@ function pool() {
     p.slGapAdj = p.slGap == null ? null : p.slGap - p.slNorm;
   });
 
-  return rows;
+  // Drafted players come out only at the very end. Every rank above — positional rank,
+  // projection rank, the Sleeper gap and its positional norms — is counted over the
+  // whole pool, so a player being taken elsewhere in the room never renumbers anyone
+  // still on the board. Filtering earlier made all of them drift as the draft went on.
+  return state.hideTaken ? rows.filter(p => !p.taken) : rows;
 }
 
 // Tier breaks fall where the market itself leaves a gap, not on round numbers.
