@@ -134,8 +134,9 @@ function renderLiveBar() {
   const myNext = done || !mySlot ? null : liveNextPickForSlot(nextPick, mySlot, m);
   const away = myNext == null ? null : myNext - nextPick;
 
+  const frozen = LIVE.poll === false;
   const staleSecs = LIVE_STATE.lastSync ? Math.floor((Date.now() - LIVE_STATE.lastSync) / 1000) : null;
-  const stale = staleSecs != null && staleSecs > 20;
+  const stale = !frozen && staleSecs != null && staleSecs > 20;
 
   let turn = '';
   if (done) {
@@ -149,21 +150,45 @@ function renderLiveBar() {
     turn = '<span class="lv-turn">Slot ' + onSlot + ' on the clock</span>';
   }
 
+  const ageMins = staleSecs == null ? null : Math.floor(staleSecs / 60);
   host.innerHTML =
     '<div class="lv-left">' +
-      '<span class="lv-dot' + (stale || LIVE_STATE.error ? ' bad' : '') + '"></span>' +
+      '<span class="lv-dot' + (frozen || stale || LIVE_STATE.error ? ' bad' : '') + '"></span>' +
       '<span class="lv-name">' + (m.name || 'Live draft') + '</span>' +
       '<span class="lv-count"><b>' + LIVE_STATE.picks + '</b>' + (total ? '/' + total : '') + ' picks</span>' +
     '</div>' +
     '<div class="lv-right">' + turn +
-      (LIVE_STATE.error
-        ? '<span class="lv-warn" title="Retrying every few seconds">offline &middot; ' + esc(LIVE_STATE.error) + '</span>'
-        : stale ? '<span class="lv-warn">last sync ' + staleSecs + 's ago</span>' : '') +
+      (frozen
+        ? '<span class="lv-warn">snapshot &middot; not updating' +
+          (ageMins ? ' &middot; ' + ageMins + 'm old' : '') + '</span>'
+        : LIVE_STATE.error
+          ? '<span class="lv-warn" title="Retrying every few seconds">offline &middot; ' + esc(LIVE_STATE.error) + '</span>'
+          : stale ? '<span class="lv-warn">last sync ' + staleSecs + 's ago</span>' : '') +
     '</div>';
+}
+
+/* Seed from what the build baked in, before anything is fetched. The sheet then opens
+ * already correct — the drafted players gone, the count right — instead of showing a
+ * full board for a second, or forever where Sleeper cannot be reached. */
+function seedLive() {
+  if (!LIVE || !LIVE.draftId) return;
+  Object.assign(TAKEN, LIVE.taken || {});
+  LIVE_STATE.picks = LIVE.pickCount || 0;
+  LIVE_STATE.status = LIVE.status || null;
+  LIVE_STATE.meta = {
+    type: LIVE.draftType, teams: LIVE.teams, rounds: LIVE.rounds,
+    reversal: LIVE.reversal || 0, name: LIVE.name, scoring: null,
+  };
+  LIVE_STATE.lastSync = LIVE.builtAt ? Date.parse(LIVE.builtAt) : null;
 }
 
 function startLive() {
   if (!LIVE || !LIVE.draftId) return;
+  seedLive();
+  renderLiveBar();
+  render();
+  // A sheet built to be read somewhere without network never pretends otherwise.
+  if (LIVE.poll === false) return;
   livePoll();
   setInterval(livePoll, POLL_MS);
   // The board is the reason you are looking at the page; keep the clock honest between

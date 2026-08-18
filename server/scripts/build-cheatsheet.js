@@ -151,7 +151,7 @@ const liveFormat = ['BB', 'RD'].includes((flag('format') || '').toUpperCase())
 // wrong id fails at build time rather than halfway through a draft.
 async function resolveLive() {
   if (!draftId) return null;
-  const { fetchDraft, fetchUser } = require('../scrapers/sleeperDraft');
+  const { fetchDraft, fetchUser, fetchPicks } = require('../scrapers/sleeperDraft');
   const meta = await fetchDraft(draftId);
   const sc = meta.scoring_type || '';
   let slot = null;
@@ -165,6 +165,18 @@ async function resolveLive() {
       console.warn(`[live] could not resolve ${username}: ${err.message}`);
     }
   }
+  // The picks so far are baked in too, so the sheet is already correct the moment it
+  // opens — before any poll answers, and at all in a viewer that cannot reach Sleeper.
+  const picks = await fetchPicks(draftId);
+  const taken = {};
+  for (const p of picks) {
+    if (p.player_id == null) continue;
+    taken[String(p.player_id)] = {
+      pick: p.pick_no, round: p.round, slot: p.draft_slot,
+      mine: slot != null && p.draft_slot === slot,
+    };
+  }
+
   return {
     draftId,
     username: username || null,
@@ -176,6 +188,17 @@ async function resolveLive() {
     // not, since Sleeper calls both half_ppr.
     format: /dynasty/.test(sc) ? 'DYN' : liveFormat,
     league: /2qb|superflex/.test(sc) ? '2QB' : '1QB',
+    // Everything the bar needs before its first poll.
+    draftType: meta.type,
+    rounds: meta.rounds,
+    reversal: meta.reversal_round,
+    status: meta.status,
+    taken,
+    pickCount: picks.length,
+    builtAt: new Date().toISOString(),
+    // --no-poll is for somewhere the page cannot reach Sleeper at all: it then presents
+    // itself honestly as a snapshot rather than sitting there claiming to be live.
+    poll: !argv.includes('--no-poll'),
   };
 }
 const builtAt = new Date().toUTCString().replace(/^\w+, /, '').replace(/:\d\d GMT$/, ' UTC');
