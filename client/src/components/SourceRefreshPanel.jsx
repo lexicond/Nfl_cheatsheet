@@ -43,6 +43,10 @@ export default function SourceRefreshPanel({ sourceStatus, refreshing, onRefresh
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
+      {/* Eight per-source chips turn into an eight-row column on a phone and push the
+          board off the screen. Refresh All still does the job there; the individual
+          chips are a desk thing. */}
+      <div className="hidden sm:flex items-center gap-2 flex-wrap">
       {SOURCE_DEFS.map(src => {
         const meta = sourceStatus[src.key] || {};
         const isRefreshing = !!refreshing[src.key] || !!refreshing.all;
@@ -68,6 +72,7 @@ export default function SourceRefreshPanel({ sourceStatus, refreshing, onRefresh
           </div>
         );
       })}
+      </div>
 
       {/* Refresh All */}
       <button

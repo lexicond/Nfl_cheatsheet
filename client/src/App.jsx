@@ -98,15 +98,17 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0f1117] text-[#e8eaf0]">
       {/* Top header */}
-      <header className="bg-[#0f1117] border-b border-[#1e2132] px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="text-2xl">🏈</span>
-          <div>
-            <h1 className="text-lg font-bold tracking-tight">NFL Draft Cheatsheet</h1>
-            <p className="text-xs text-[#555875]">0.5 PPR · {formatLabel} · {leagueType} · {teamSize}-team · {new Date().getFullYear()}</p>
+      <header className="bg-[#0f1117] border-b border-[#1e2132] px-3 sm:px-6 py-2 sm:py-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <span className="text-xl sm:text-2xl">🏈</span>
+          <div className="min-w-0">
+            <h1 className="text-base sm:text-lg font-bold tracking-tight truncate">NFL Draft Cheatsheet</h1>
+            <p className="text-[11px] sm:text-xs text-[#555875] truncate">
+              0.5 PPR · {formatLabel} · {leagueType} · {teamSize}-team · {new Date().getFullYear()}
+            </p>
           </div>
         </div>
-        <div className="text-xs text-[#555875] font-mono">
+        <div className="text-xs text-[#555875] font-mono whitespace-nowrap flex-none">
           {!loading && `${players.length} players`}
         </div>
       </header>

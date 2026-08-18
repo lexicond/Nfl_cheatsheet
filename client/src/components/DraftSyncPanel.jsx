@@ -317,8 +317,12 @@ export default function DraftSyncPanel({
           : <span className="text-[#555875]">off</span>}
       </button>
 
+      {/* Anchored under the button on a desktop. On a phone that put a 320px panel off
+          the left edge, so there it becomes a bottom sheet instead — readable, and
+          already where a thumb is. */}
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-80 bg-[#1a1d27] border border-[#2e3148] rounded-lg shadow-xl p-3 z-50">
+        <div className="fixed inset-x-3 bottom-3 max-h-[78vh] overflow-y-auto z-50 bg-[#1a1d27] border border-[#2e3148] rounded-lg shadow-xl p-3
+                        sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-full sm:mt-1 sm:w-80 sm:max-h-none sm:overflow-visible">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-xs font-semibold text-[#e8eaf0]">Live Sleeper draft</h3>
             <button onClick={() => setOpen(false)} className="text-[#555875] hover:text-[#8b90a8] text-xs">✕</button>

@@ -116,7 +116,12 @@ function clearDraft() {
     const panel = await page.locator('text=Live Sleeper draft').first().isVisible();
     check('panel opens', panel);
 
-    const panelText = await page.locator('div.absolute').first().innerText();
+    // Selected via its heading rather than a positioning class: the panel is a popover
+    // on a desktop and a bottom sheet on a phone, so the class differs by breakpoint.
+    const panelText = await page.evaluate(() => {
+      const h = [...document.querySelectorAll('h3')].find(x => x.textContent.includes('Live Sleeper draft'));
+      return h.closest('div.fixed, div.absolute').innerText;
+    });
     check('panel names the league', panelText.includes(seeded.meta.league_name));
     check('panel shows the latest pick', panelText.includes('Latest picks'));
     check('panel shows who is on the clock', /on the clock/i.test(panelText));
@@ -171,6 +176,37 @@ function clearDraft() {
     check('draft pill reads off', (await pill.innerText()).toLowerCase().includes('off'));
 
     check('no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 2).join(' | '));
+
+    // --- The same board on a phone -------------------------------------------
+    // This is where it is actually used on draft day, and where it first went wrong:
+    // the panel was anchored to the right of a button near the left edge, so it opened
+    // off the side of the screen entirely.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('table tbody tr', { timeout: 20000 });
+    await page.waitForTimeout(600);
+
+    check('the page never scrolls sideways on a phone',
+      !(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)));
+
+    // The headline number is the reason to look at the board at all.
+    const consensusX = await page.evaluate(() => {
+      const th = [...document.querySelectorAll('thead th')].find(t => /^(cons|rank)/i.test(t.textContent.trim()));
+      return th ? Math.round(th.getBoundingClientRect().left) : null;
+    });
+    check('the headline number is on screen without scrolling sideways',
+      consensusX != null && consensusX < 390, `starts at ${consensusX}px of 390`);
+
+    await page.locator('button', { hasText: 'Draft' }).first().click();
+    await page.waitForTimeout(500);
+    const box = await page.evaluate(() => {
+      const h = [...document.querySelectorAll('h3')].find(x => x.textContent.includes('Live Sleeper draft'));
+      const r = h.closest('div.fixed, div.absolute').getBoundingClientRect();
+      return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+    });
+    check('the draft panel opens fully on screen on a phone',
+      box.x >= 0 && box.x + box.w <= 390 && box.y >= 0 && box.y + box.h <= 844,
+      JSON.stringify(box));
   } catch (err) {
     check('suite ran to completion', false, err.message);
   } finally {

@@ -92,8 +92,13 @@ const FilterBar = forwardRef(function FilterBar(
     ? SCARCITY[singlePos].label
     : null;
 
+  // The bar sticks on a desktop but scrolls away on a phone, where it would otherwise
+  // hold a third of the screen for the whole draft. backdrop-blur only applies at that
+  // desktop breakpoint too: it establishes a containing block, which traps the panels'
+  // fixed positioning inside this bar, and on a phone that let a tall panel run off the
+  // top of the screen.
   return (
-    <div ref={ref} className="sticky top-0 z-30 bg-[#0f1117]/95 backdrop-blur border-b border-[#1e2132] px-4 py-2">
+    <div ref={ref} className="relative sm:sticky sm:top-0 z-30 bg-[#0f1117]/95 sm:backdrop-blur border-b border-[#1e2132] px-3 sm:px-4 py-2">
       {/* Row 1: positions, tiers, toggles, sort, search, sources */}
       <div className="flex flex-wrap items-center gap-2">
         {/* Position pills */}
@@ -130,7 +135,7 @@ const FilterBar = forwardRef(function FilterBar(
 
         {/* Tier filter */}
         <div className="flex items-center gap-1">
-          <span className="text-xs text-[#555875] mr-0.5">Tier:</span>
+          <span className="hidden sm:inline text-xs text-[#555875] mr-0.5">Tier:</span>
           <button
             onClick={() => setFilter('tier', null)}
             className={`text-xs px-2 py-1 rounded border font-medium transition-colors ${
@@ -201,7 +206,7 @@ const FilterBar = forwardRef(function FilterBar(
         />
 
         {/* Which sources feed this view, and refresh controls — pushed right */}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           <DraftSyncPanel
             draft={draft}
             onConnect={onConnectDraft}
@@ -232,8 +237,8 @@ const FilterBar = forwardRef(function FilterBar(
       </div>
 
       {/* Row 2: Format + League type switcher */}
-      <div className="flex items-center gap-2 mt-1.5">
-        <span className="text-xs text-[#555875]">Format:</span>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 mt-1.5">
+        <span className="hidden sm:inline text-xs text-[#555875]">Format:</span>
         <div className="flex items-center gap-1">
           {FORMATS.map(f => (
             <button
@@ -270,7 +275,7 @@ const FilterBar = forwardRef(function FilterBar(
 
         <div className="w-px h-4 bg-[#2e3148]" />
 
-        <span className="text-xs text-[#555875]">Teams:</span>
+        <span className="hidden sm:inline text-xs text-[#555875]">Teams:</span>
         <div className="flex items-center gap-1">
           {TEAM_SIZES.map(n => (
             <button
@@ -288,7 +293,7 @@ const FilterBar = forwardRef(function FilterBar(
           ))}
         </div>
 
-        <span className="text-xs text-[#555875] ml-1">· always 0.5 PPR</span>
+        <span className="hidden sm:inline text-xs text-[#555875] ml-1">· always 0.5 PPR</span>
       </div>
     </div>
   );
