@@ -95,6 +95,13 @@ export default function PlayerRow({
   const gapNorm = (sleeperBaseline?.positional_norms?.[player.position]) ?? 0;
   const gapVsNorm = player.sleeper_gap == null ? null : player.sleeper_gap - gapNorm;
 
+  // FantasyPros publishes real expert tiers. They sit on their own scale (theirs run
+  // well past five) so they do not drive the badge, but they are worth naming where the
+  // badge explains itself.
+  const fpTierNote = player.fp_tier != null
+    ? ` · FantasyPros put him in their tier ${player.fp_tier}`
+    : '';
+
   // Position rank in the format currently on screen, not whichever source ranked
   // him highest.
   const posRankStr = player.pos_rank_consensus != null
@@ -230,7 +237,16 @@ export default function PlayerRow({
     sleeper_gap: (
       <td key="sleeper_gap" className={`${cellClass} w-16 font-mono text-right`}>
         {gapVsNorm == null || Math.abs(gapVsNorm) < 5 ? (
-          <span className="text-[#555875]">{gapVsNorm == null ? '–' : '·'}</span>
+          <span
+            className="text-[#555875]"
+            title={gapVsNorm == null
+              ? 'Sleeper publishes no ranking for him in this format'
+              : `Sleeper and your consensus are within ${Math.abs(gapVsNorm)} places of each `
+                + 'other on him, so there is no edge either way. Only gaps of 5 places or '
+                + 'more get a number.'}
+          >
+            {gapVsNorm == null ? '–' : '·'}
+          </span>
         ) : (
           <span
             className={gapVsNorm > 0 ? 'text-green-400' : 'text-amber-400'}
@@ -281,7 +297,7 @@ export default function PlayerRow({
           <button
             onClick={cycleTier}
             className={`tier-badge w-7 h-7 text-xs tier-${player.tier}`}
-            title="Click to cycle tier"
+            title={`Your own tier ${player.tier}${fpTierNote} · click to cycle`}
           >
             T{player.tier}
           </button>
@@ -289,7 +305,7 @@ export default function PlayerRow({
           <button
             onClick={cycleTier}
             className="tier-badge w-7 h-7 text-xs border-dashed border-[#2e3148] text-[#555875] hover:text-[#8b90a8] opacity-50"
-            title={`Auto-tier T${player.tier_auto} (ADP-based) · click to set`}
+            title={`Tier ${player.tier_auto}, drawn from where his consensus number falls: the bands are the first half round, then rounds 1½, 3 and 6 at this league size. Not anyone’s expert tiers${fpTierNote}. Dashed because it is automatic — click to set your own.`}
           >
             T{player.tier_auto}
           </button>

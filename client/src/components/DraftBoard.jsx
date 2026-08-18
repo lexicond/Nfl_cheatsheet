@@ -103,7 +103,7 @@ function buildColumns(format, view, excluded, narrow) {
 
 // A phone gets tighter columns for the few that matter, so name, position and the
 // headline number all land inside 390px.
-const COL_PX_NARROW = { rank: 30, name: 150, pos: 44, consensus: 74, bye: 34 };
+const COL_PX_NARROW = { rank: 30, name: 146, pos: 50, consensus: 74, bye: 42 };
 
 function SkeletonRow({ colCount }) {
   return (

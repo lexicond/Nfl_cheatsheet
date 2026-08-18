@@ -181,7 +181,10 @@ export function usePlayers() {
       return next.filter(p => {
         if (filters.hideDrafted && p.drafted) return false;
         if (filters.starred && !p.starred) return false;
-        if (filters.tier != null && p.tier !== filters.tier) return false;
+        // The same effective tier the server filters on, and the same one the badge
+        // shows: yours if you set one, otherwise the automatic one. Comparing only
+        // hand-set tiers dropped every row the moment a tier filter was active.
+        if (filters.tier != null && (p.tier ?? p.tier_auto) !== filters.tier) return false;
         return true;
       });
     });

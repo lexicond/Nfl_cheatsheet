@@ -247,7 +247,12 @@ router.get('/', (req, res) => {
 
     const result = relevant.filter(p => {
       if (positions.length > 0 && !positions.includes(p.position)) return false;
-      if (tierFilter != null && Number.isFinite(tierFilter) && p.tier !== tierFilter) return false;
+      // Filter on the tier the board actually shows him in: yours if you set one,
+      // otherwise the automatic one. Matching only hand-set tiers meant the T1-T5
+      // buttons emptied the board for anyone who had never set one by hand — which is
+      // everyone, by default, while every row displays an automatic tier badge.
+      if (tierFilter != null && Number.isFinite(tierFilter)
+        && (p.tier ?? p.tier_auto) !== tierFilter) return false;
       if (starred === '1' && !p.starred) return false;
       if (drafted !== '1' && p.drafted) return false;
       if (needle && !p.name.toLowerCase().includes(needle)) return false;

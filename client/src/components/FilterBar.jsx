@@ -131,7 +131,7 @@ const FilterBar = forwardRef(function FilterBar(
           )}
         </div>
 
-        <div className="w-px h-5 bg-[#2e3148]" />
+        <div className="hidden sm:block w-px h-5 bg-[#2e3148]" />
 
         {/* Tier filter */}
         <div className="flex items-center gap-1">
@@ -159,7 +159,7 @@ const FilterBar = forwardRef(function FilterBar(
           ))}
         </div>
 
-        <div className="w-px h-5 bg-[#2e3148]" />
+        <div className="hidden sm:block w-px h-5 bg-[#2e3148]" />
 
         {/* Toggles */}
         <label className="flex items-center gap-1.5 cursor-pointer text-xs text-[#8b90a8]">
@@ -181,7 +181,7 @@ const FilterBar = forwardRef(function FilterBar(
           ⭐ Starred
         </label>
 
-        <div className="w-px h-5 bg-[#2e3148]" />
+        <div className="hidden sm:block w-px h-5 bg-[#2e3148]" />
 
         {/* Sort */}
         <select
@@ -255,7 +255,7 @@ const FilterBar = forwardRef(function FilterBar(
           ))}
         </div>
 
-        <div className="w-px h-4 bg-[#2e3148]" />
+        <div className="hidden sm:block w-px h-4 bg-[#2e3148]" />
 
         <div className="flex items-center gap-1">
           {LEAGUE_TYPES.map(lt => (
@@ -273,7 +273,7 @@ const FilterBar = forwardRef(function FilterBar(
           ))}
         </div>
 
-        <div className="w-px h-4 bg-[#2e3148]" />
+        <div className="hidden sm:block w-px h-4 bg-[#2e3148]" />
 
         <span className="hidden sm:inline text-xs text-[#555875]">Teams:</span>
         <div className="flex items-center gap-1">
