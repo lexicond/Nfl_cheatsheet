@@ -127,7 +127,15 @@ const sameePlayer = [];
 for (const g of clashes) {
   for (let i = 0; i < g.length; i++) {
     for (let j = i + 1; j < g.length; j++) {
-      if (firstNamesCompatible(firstOf(g[i]), firstOf(g[j]))) sameePlayer.push([g[i], g[j]]);
+      // Distinct Sleeper ids settle it: two ids are two men, however alike the names.
+      // Without this, Frank Gore and Frank Gore Jr. — same surname, same position, same
+      // roster, compatible first names — read as one player split in two, and the check
+      // fails forever on a pair that is correct.
+      const distinctIds = g[i].sleeper_player_id && g[j].sleeper_player_id
+        && g[i].sleeper_player_id !== g[j].sleeper_player_id;
+      if (!distinctIds && firstNamesCompatible(firstOf(g[i]), firstOf(g[j]))) {
+        sameePlayer.push([g[i], g[j]]);
+      }
     }
   }
 }
