@@ -154,6 +154,26 @@ const COLUMNS = {
     family: 'dynastyprocess',
     provider: 'DynastyProcess superflex dynasty values (FantasyPros-derived)',
   },
+  // The Fantasy Footballers publish the three hosts' statistical projections rather than
+  // a ranking; the rank here is computed from them on this board's scoring. It is a
+  // position-by-position rank, not a pick number, so it can be read and sorted but never
+  // averaged into an ADP consensus — the two are not the same kind of number.
+  ff_pos_rank: {
+    label: 'Fantasy Footballers', short: 'FFB', source: 'footballers',
+    format: 'BB', league: '1QB', scoring: 'half', kind: 'posrank', consensus: false,
+    excludedReason: 'A rank within a position, not a pick number — averaging it with ADP would be meaningless',
+    what: 'The Fantasy Footballers rank by position rather than overall. This is their three hosts\' projections — Andy, Jason and Mike — averaged and ranked within each position on half-PPR with four-point passing touchdowns, which is what this board scores.',
+    family: 'footballers',
+    provider: 'The Fantasy Footballers, three-analyst projections',
+  },
+  ff_pos_rank_rd: {
+    label: 'Fantasy Footballers', short: 'FFB', source: 'footballers',
+    format: 'RD', league: '1QB', scoring: 'half', kind: 'posrank', consensus: false,
+    excludedReason: 'A rank within a position, not a pick number — averaging it with ADP would be meaningless',
+    what: 'The same Fantasy Footballers positional rank, shown on the redraft board.',
+    family: 'footballers',
+    provider: 'The Fantasy Footballers, three-analyst projections',
+  },
   fc_value: {
     label: 'FantasyCalc', short: 'FC', source: 'fantasycalc',
     format: 'DYN', league: '1QB', scoring: 'half', kind: 'value',
@@ -232,12 +252,14 @@ const KIND_LABEL = {
   adp: 'Real draft data',
   ecr: 'Expert rankings',
   value: 'Trade values',
+  posrank: 'Projection rank, by position',
 };
 
 // Superflex dynasty columns are sent to the client under their base name, because a
 // board only ever shows one league type at a time. This maps a column to the key the
 // player payload actually carries.
 const FIELD_ALIAS = {
+  ff_pos_rank_rd: 'ff_pos_rank',
   ktc_value_sf: 'ktc_value',
   fc_value_sf: 'fc_value',
   ds_value_sf: 'ds_value',
@@ -277,7 +299,7 @@ function viewSources(format, leagueType) {
       defaultOn: !DEFAULT_OFF_FAMILIES.includes(c.family),
       // Set on the few columns that exist but must never be averaged.
       excludedReason: c.consensus === false
-        ? 'Derived from FantasyPros, which is already averaged in'
+        ? (c.excludedReason || 'Derived from FantasyPros, which is already averaged in')
         : null,
     };
   };

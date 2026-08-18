@@ -147,6 +147,7 @@ Plus the players whose projected positional rank disagrees most with what they c
 | **Dynasty Daddy** | KeepTradeCut and DynastySuperflex values, 1QB and superflex; player ages and cross-platform ids | `dynasty-daddy.com/api/v1/player` — markets 0 and 3 |
 | **FantasyCalc** | Dynasty trade values, 1QB and superflex | FantasyCalc public API |
 | **DynastyProcess** | Dynasty values and player ages. Displayed but **not** averaged — see below | DynastyProcess daily CSV |
+| **The Fantasy Footballers** | Andy, Jason and Mike's statistical projections, averaged and ranked within each position. Displayed but **not** averaged — a positional rank is not a pick number | `window.udk.data` embedded in their free positional rankings pages |
 
 If a source fails, existing data for that source is preserved — only a successful fetch updates the values.
 

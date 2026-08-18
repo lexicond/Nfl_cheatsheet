@@ -47,7 +47,12 @@ if (!fs.existsSync(dbDir)) {
 const db = new Database(DB_PATH);
 
 db.pragma('journal_mode = WAL');
-db.pragma('synchronous = NORMAL');
+// FULL rather than NORMAL: with NORMAL, WAL only fsyncs at a checkpoint, so a container
+// killed outright can lose the last few commits — the stars and notes you just tapped in.
+// That was a free trade while the whole database was thrown away on every deploy; on a
+// volume it is not. Writes here are occasional taps and bulk refreshes that run in one
+// transaction each, so the extra fsync costs nothing measurable.
+db.pragma('synchronous = FULL');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS players (
@@ -172,6 +177,8 @@ addColumnIfMissing('players', 'dp_value_sf', 'INTEGER');
 addColumnIfMissing('players', 'ds_value', 'INTEGER');
 addColumnIfMissing('players', 'ds_value_sf', 'INTEGER');
 addColumnIfMissing('players', 'fp_tier', 'INTEGER');
+addColumnIfMissing('players', 'ff_pos_rank', 'INTEGER');
+addColumnIfMissing('players', 'ff_points', 'REAL');
 
 // Populate name_normalized for any rows missing it
 (function populateNameNormalized() {
@@ -189,7 +196,7 @@ addColumnIfMissing('players', 'fp_tier', 'INTEGER');
 const initSource = db.prepare(`
   INSERT OR IGNORE INTO source_metadata (source, status) VALUES (?, 'never')
 `);
-['fantasypros', 'underdog', 'sleeper', 'ffc', 'market', 'dynastyprocess', 'dynastydaddy', 'fantasycalc'].forEach(s => initSource.run(s));
+['fantasypros', 'underdog', 'sleeper', 'ffc', 'market', 'dynastyprocess', 'dynastydaddy', 'fantasycalc', 'footballers'].forEach(s => initSource.run(s));
 
 // Lookup indexes for the matcher and the projection-rank subquery.
 db.exec(`

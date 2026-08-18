@@ -54,6 +54,7 @@ const PAYLOAD_KEY = {
   ds_value: 'ds', ds_value_sf: 'dss',
   fc_value: 'fc', fc_value_sf: 'fcs',
   dp_value: 'dp', dp_value_sf: 'dps',
+  ff_pos_rank: 'ffb', ff_pos_rank_rd: 'ffb',
 };
 
 // Everything the page needs to describe and toggle its own sources, taken straight
@@ -113,6 +114,7 @@ const players = rows.filter(r => keep.has(r.id)).map(r => ({
   fc: int(r.fc_value), fcs: int(r.fc_value_sf),
   fpd: num(r.adp_fp_dyn), fpds: num(r.adp_fp_dyn_sf),
   dp: r.dp_value, dps: r.dp_value_sf,
+  ffb: r.ff_pos_rank,
   sld: num(r.adp_sl_dyn), slds: num(r.adp_sl_dyn_sf),
   age: r.age == null ? null : Math.round(Number(r.age)),
   dy: num(r.dyn_rank_consensus), dys: num(r.dyn_rank_consensus_sf),
@@ -354,6 +356,7 @@ ${css}
       <li><b>ESPN and Yahoo</b> — home-league platform ADP, via DraftSharks · ${fetchedAt('market')}</li>
       <li><b>KeepTradeCut and DynastySuperflex</b> — two independent dynasty markets, 1QB and superflex, via Dynasty Daddy · ${fetchedAt('dynastydaddy')}</li>
       <li><b>FantasyCalc</b> — dynasty trade values, 1QB and superflex · ${fetchedAt('fantasycalc')}</li>
+      <li><b>The Fantasy Footballers</b> — Andy, Jason and Mike's projections, averaged and ranked within each position on this board's scoring · ${fetchedAt('footballers')}</li>
       <li><b>DynastyProcess</b> — dynasty values and player ages; shown but not averaged, being FantasyPros-derived · ${fetchedAt('dynastyprocess')}</li>
     </ul>
     <p class="fine">

@@ -310,6 +310,7 @@ const RESPONSE_FIELDS = [
   'projected_pts', 'proj_pos_rank', 'pos_rank_consensus', 'value_score',
   'ktc_value', 'fc_value', 'ds_value', 'dp_value', 'adp_fp_dyn', 'adp_sl_dyn',
   'age', 'fp_tier', 'tier_auto', 'round', 'spread', 'sleeper_gap',
+  'ff_pos_rank', 'ff_points',
   'personal_rank', 'tier', 'starred', 'flagged', 'drafted', 'drafted_manual',
   'draft_pick_no', 'draft_round', 'drafted_by', 'drafted_by_me',
   'note_upside', 'note_downside', 'note_sources', 'note_personal',

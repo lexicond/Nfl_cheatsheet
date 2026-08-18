@@ -73,6 +73,18 @@ switching a source off survives flipping Superflex. Exclusions are always family
 - **Chrome will not stick a `<td>`**, and a wrapper with horizontal overflow is always a
   scroll container, so a page-level sticky header cannot live inside one. The cheat
   sheet's board scrolls in its own bounded pane for this reason.
+- **The Fantasy Footballers publish projections, not a ranking.** Their rankings pages
+  render in the browser from `window.udk.data` — the three hosts' stat projections — under
+  whichever scoring the reader picked. `scrapers/footballers.js` therefore computes the
+  rank itself, from those projections, on *this board's* scoring: half-PPR with four-point
+  passing touchdowns. Their own default is **HALF (6pt QB)**, so lifting their on-screen
+  order would import a quarterback ranking built for scoring this league does not use.
+  One fetch of any position page carries every position. `tiers` in that payload is empty
+  for anonymous readers — it belongs to the paid Ultimate Draft Kit, so it is not taken.
+- **A positional rank is not an ADP and is never averaged into one.** `ff_pos_rank` is
+  displayed and sortable but sits outside the consensus, because averaging "RB4" with a
+  pick number would be meaningless. It is registered twice in `sources.js` — once per
+  season-long format — aliased onto one column, since a column declares a single format.
 - **A draft id proves nothing on its own.** `/v1/draft/<id>` answers 200 for every draft
   Sleeper has ever hosted — any sport, any season. A 2021 draft returns forty valid picks
   that would mark forty players taken on a 2026 board, and it all looks right. So

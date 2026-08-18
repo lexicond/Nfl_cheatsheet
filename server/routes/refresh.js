@@ -9,6 +9,7 @@ const { fetchFFC } = require('../scrapers/ffc');
 const { fetchDynastyProcess } = require('../scrapers/dynastyprocess');
 const { fetchDynastyDaddy } = require('../scrapers/dynastydaddy');
 const { fetchFantasyCalc } = require('../scrapers/fantasycalc');
+const { fetchFootballers } = require('../scrapers/footballers');
 const { fetchMarket } = require('../scrapers/market');
 
 // Sleeper runs first on a full refresh: it owns the roster rows and the Sleeper
@@ -22,6 +23,7 @@ const SCRAPERS = {
   dynastyprocess: fetchDynastyProcess,
   dynastydaddy: fetchDynastyDaddy,
   fantasycalc: fetchFantasyCalc,
+  footballers: fetchFootballers,
 };
 
 // POST /api/refresh/:source
