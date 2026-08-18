@@ -73,6 +73,8 @@ Against the owner's own drafts, not fixtures:
   poll — the live path end to end, no mock.
 - Recovery from connecting **before the draft order exists**: slot comes back on the next
   sync.
+- The Fantasy Footballers: **313 of 314** players matched, three analysts, ranked on this
+  board's own scoring rather than their 6pt-QB default.
 - Eight browser suites and five command-line validators pass.
 
 ```bash
@@ -148,7 +150,44 @@ answer. A **draft queue** — a shortlist in your own order, with anyone taken d
 so your pick is decided before your turn arrives — was offered and not taken up; it is the
 next thing worth building if the paste step still grates.
 
-**6. Everything the last handover left open is still open**: drag-to-reorder untested,
+**6. Findings from an improvement sweep, in the order they are worth doing.**
+
+*Data correctness — these change what the board tells you:*
+
+- **The best-ball consensus is effectively one opinion.** Underdog and FantasyPros
+  best-ball correlate at **rho 0.981**, and they are its only two inputs. The headline
+  number on the owner's primary format is two near-identical sources averaged together,
+  which reads as agreement and is not. The Fantasy Footballers column now gives a
+  genuinely independent third view, but it is positional and cannot join the average.
+  Worth hunting a real second best-ball market.
+- **FFC's superflex board is not half-PPR.** `adp_ffc_sf` feeds the RD:2QB consensus and
+  FFC publishes that board in one flavour only — `meta.type` is "2 QB" with no half-PPR
+  variant. The validator has been warning about it. It is a genuine superflex board (it
+  opens with Josh Allen), so only the scoring is wrong. Either drop it from that consensus
+  and leave FantasyPros SF + Sleeper 2QB, or keep it knowingly. The owner's call, so it
+  has been left alone.
+- **Dynasty has the same overlap**: FantasyCalc against Sleeper dynasty at rho 0.975, and
+  0.984 in superflex.
+- `fantasycalc.js:73`, `sleeper.js:105` and `PlayerModal.jsx:48` — see the three faults
+  listed above.
+
+*Insurance:*
+
+- **Nothing runs the validators automatically.** Five command-line validators and eight
+  browser suites exist and all pass, and nothing runs them on a push. A GitHub Action
+  running the node validators would catch a source changing shape without anyone opening
+  the board.
+- **No export of your own work.** The volume protects it from deploys, not from a
+  mis-click or a bad migration. `GET /api/backup` returning the overrides as JSON, and a
+  restore, would give a file the owner controls.
+
+*Draft day:*
+
+- **A draft queue** — a shortlist in your own order, anyone taken dropping out, so the
+  pick is decided before the turn arrives. Offered and not taken up; it is the natural
+  next step now that the ↗ handles execution.
+
+**7. Everything the last handover left open is still open**: drag-to-reorder untested,
 DynastySuperflex's compressed tail unruled-on, the five validator warnings unchanged,
 KeepTradeCut still only checked through Dynasty Daddy's mirror, and no CI.
 
