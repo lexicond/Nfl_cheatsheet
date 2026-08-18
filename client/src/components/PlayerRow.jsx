@@ -54,8 +54,9 @@ function ValueBadge({ score, position }) {
 
 export default function PlayerRow({
   player, index, onUpdate, onOpenModal, columns = [],
-  format = 'BB', leagueType = '1QB', sleeperBaseline = null,
+  format = 'BB', leagueType = '1QB', sleeperBaseline = null, draftUrl = null,
 }) {
+  const [copied, setCopied] = useState(false);
   const [editingRank, setEditingRank] = useState(false);
   const [rankInput, setRankInput] = useState('');
   const rankRef = useRef(null);
@@ -373,6 +374,29 @@ export default function PlayerRow({
             {player.drafted ? '✓ Drafted' : 'Available'}
           </button>
         )}
+      </td>
+    ),
+
+    // Sleeper takes no picks from outside its own app, so this does the next best thing:
+    // copies the name and opens the draft room, leaving a paste into its search box.
+    // Copying is best-effort — an older browser or an insecure origin just gets the link.
+    go: (
+      <td key="go" className={`${cellClass} w-9 text-center`}>
+        <a
+          href={draftUrl || 'https://sleeper.com'}
+          target="_blank"
+          rel="noreferrer"
+          onClick={() => {
+            navigator.clipboard?.writeText(player.name).then(
+              () => { setCopied(true); setTimeout(() => setCopied(false), 2000); },
+              () => {},
+            );
+          }}
+          className={`text-sm transition-colors ${copied ? 'text-green-400' : 'text-[#2e3148] hover:text-blue-400'}`}
+          title={`Copy "${player.name}" and open the draft room on Sleeper — paste it into the search box there`}
+        >
+          {copied ? '✓' : '↗'}
+        </a>
       </td>
     ),
 

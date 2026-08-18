@@ -26,7 +26,7 @@ const COL_PX = {
   consensus: 100, projected_pts: 64, pos_rank: 64, age: 48,
   round: 44, sleeper_gap: 60, spread: 58,
   ktc_value: 80, fc_value: 80, ds_value: 80, dp_value: 80,
-  tier: 56, flags: 64, status: 96, notes: 48,
+  tier: 56, flags: 64, status: 96, notes: 48, go: 36,
 };
 
 // True on a phone-width screen. Watched rather than read once, so rotating the handset
@@ -52,7 +52,7 @@ function useNarrow() {
  * On a phone the drag handle and My # go: neither can be used without a pointer, and
  * together they cost 80px that Consensus needs to be on screen at all.
  */
-function buildColumns(format, view, excluded, narrow) {
+function buildColumns(format, view, excluded, narrow, draftConnected) {
   const base = [
     ...(narrow ? [] : [{ label: '', key: 'drag' }, { label: 'My #', key: 'my_rank' }]),
     { label: '#', key: 'rank' },
@@ -82,6 +82,12 @@ function buildColumns(format, view, excluded, narrow) {
     label: format === 'DYN' ? 'Rank' : (narrow ? 'Cons' : 'Consensus'),
     key: 'consensus',
   };
+
+  // Sleeper's API is read-only, so the pick itself has to be made in their app. This is
+  // the shortest path to it: copy the name, open the room, paste, confirm. It sits ahead
+  // of the numbers so it stays on screen on a phone, and only exists while a draft is
+  // connected, because otherwise there is nowhere to go.
+  const go = draftConnected ? [{ label: '', key: 'go' }] : [];
   const middle = [
     ...(format === 'DYN' ? [] : [{ label: 'Rd', key: 'round' }]),
     { label: 'Δ SL', key: 'sleeper_gap' },
@@ -95,15 +101,15 @@ function buildColumns(format, view, excluded, narrow) {
   // what the board is actually ranking by. Nothing is dropped — the sources and the
   // rest still follow, they are just no longer in front of the answer.
   if (narrow) {
-    return [...base, consensus, ...sourceCols, ...middle, ...tail];
+    return [...base, ...go, consensus, ...sourceCols, ...middle, ...tail];
   }
 
-  return [...base, ...sourceCols, consensus, ...middle, ...tail];
+  return [...base, ...go, ...sourceCols, consensus, ...middle, ...tail];
 }
 
 // A phone gets tighter columns for the few that matter, so name, position and the
 // headline number all land inside 390px.
-const COL_PX_NARROW = { rank: 30, name: 146, pos: 50, consensus: 74, bye: 42 };
+const COL_PX_NARROW = { rank: 30, name: 146, pos: 50, consensus: 74, bye: 42, go: 34 };
 
 function SkeletonRow({ colCount }) {
   return (
@@ -154,14 +160,14 @@ function HeaderRow({ columns }) {
 export default function DraftBoard({
   players, loading, onUpdate, onOpenModal, onReorder,
   format = 'BB', leagueType = '1QB', view = null, excluded = [], sourceStatus = {},
-  sleeperBaseline = null, filterBarHeight = 53, draftConnected = false,
+  sleeperBaseline = null, filterBarHeight = 53, draftConnected = false, draftUrl = null,
 }) {
   const [activeId, setActiveId] = useState(null);
   const headerScrollRef = useRef(null);
   const bodyScrollRef = useRef(null);
 
   const narrow = useNarrow();
-  const columns = buildColumns(format, view, excluded, narrow);
+  const columns = buildColumns(format, view, excluded, narrow, draftConnected);
   const totalWidth = columns.reduce((sum, col) => sum + colWidth(col.key, draftConnected, narrow), 0);
 
   const sensors = useSensors(
@@ -263,6 +269,7 @@ export default function DraftBoard({
                   onUpdate={onUpdate}
                   onOpenModal={onOpenModal}
                   columns={columns}
+                  draftUrl={draftUrl}
                   format={format}
                   leagueType={leagueType}
                   sleeperBaseline={sleeperBaseline}

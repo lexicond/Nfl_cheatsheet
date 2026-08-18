@@ -157,6 +157,16 @@ function clearDraft() {
     check('players taken since leave the board without a reload', lingering.length === 0,
       lingering.length ? `still showing: ${lingering.slice(0, 3).map(p => p.name).join(', ')}` : `${later.length} left the board`);
 
+    // --- The one-tap route into Sleeper --------------------------------------
+    // Sleeper accepts no picks from outside, so the row's job is to get you there with
+    // the name already copied.
+    const goLink = page.locator('tbody tr').first().locator('a[title*="Copy"]');
+    check('an available player offers a route into the draft room',
+      await goLink.count() === 1);
+    check('it points at the connected draft',
+      (await goLink.getAttribute('href') || '').includes(seeded.meta.draft_id),
+      await goLink.getAttribute('href'));
+
     // --- Taken players, shown with the pick that took them --------------------
     await page.locator('input[type="checkbox"]').first().uncheck();   // Hide Drafted off
     await page.waitForTimeout(800);

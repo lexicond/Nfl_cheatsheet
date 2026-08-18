@@ -165,6 +165,7 @@ export default function App() {
             sleeperBaseline={sleeperBaseline}
             filterBarHeight={filterBarHeight}
             draftConnected={draft.connected}
+            draftUrl={draft.draft?.url || null}
           />
         </main>
       )}
