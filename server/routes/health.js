@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { db } = require('../db');
+const { db, storageInfo } = require('../db');
 const { consensusColumns } = require('../sources');
 
 const STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -59,6 +59,10 @@ router.get('/', (req, res) => {
 
     res.json({
       status: overallStatus,
+      // Whether anything saved here survives the next deploy. Reported because the
+      // failure is otherwise invisible: the app re-seeds players on boot, so a wiped
+      // database comes back looking healthy with all your own work gone.
+      storage: storageInfo(),
       player_count: playerCount,
       name_normalized_coverage: playerCount > 0 ? (normCount / playerCount).toFixed(2) : '0.00',
       projected_pts_coverage: playerCount > 0 ? (projCount / playerCount).toFixed(2) : '0.00',

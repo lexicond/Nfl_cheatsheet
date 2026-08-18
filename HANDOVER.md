@@ -84,6 +84,33 @@ bash tests/browser/run-all.sh                       # needs a server and a built
 `validate-draft-sync.js` rewrites the pick tables, so it refuses to run while a draft is
 connected — pass `--force` if you mean it.
 
+## Storage on Railway — check this first
+
+At the time of writing the deployed app **had no volume attached**, so its database lived
+inside the container and was destroyed on every deploy. Diagnosed from outside: only
+`sleeper` and `underdog` had ever been fetched, both stamped within half a second of each
+other, which is the boot self-seed — and it only runs when the players table is empty.
+Nothing personal had been lost because none had been entered yet, but any prep would have
+gone on the next push.
+
+This is the worst shape a failure can take here: the app re-seeds players from Sleeper on
+boot, so a wiped database comes back looking healthy with only the irreplaceable part —
+your rankings, stars, tiers and notes — missing.
+
+**The fix is one dashboard action**: Railway → the service → **Variables/Volumes → Add
+Volume**, any mount path, then redeploy. Railway sets `RAILWAY_VOLUME_MOUNT_PATH` and
+`db.js` puts the database on it.
+
+It is no longer silent either way:
+
+- `GET /api/health` reports a `storage` block — `db_path`, `volume_mount`, `persistent`,
+  and how many rows carry your own data.
+- The header shows an amber **⚠ Not saved** chip whenever storage will not survive.
+- The boot log says the same.
+
+`persistent` is true off Railway too, since a laptop keeps its files; it is only the
+throwaway container that needs the warning.
+
 ## Open work
 
 **1. It has never run a full draft end to end.** It has been connected to a live mock and

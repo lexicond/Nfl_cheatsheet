@@ -42,6 +42,29 @@ On first run, the server automatically fetches player data from Sleeper. If that
 - Mount path: `/data`
 - This keeps your personal rankings, notes, and overrides across deploys and sleep cycles
 
+**Without a volume the database lives inside the container and is destroyed on every
+deploy**, and the failure is silent: the app re-seeds players from Sleeper on boot, so the
+board comes back looking perfectly healthy with every ranking, star, tier and note gone.
+
+Check which you have:
+
+```bash
+curl -s https://<your-app>.up.railway.app/api/health | python3 -m json.tool | head -12
+```
+
+```jsonc
+"storage": {
+  "db_path": "/data/draft.db",
+  "volume_mount": "/data",
+  "persistent": true,        // false means the next deploy wipes it
+  "rows_with_your_data": 42
+}
+```
+
+The app says the same thing itself: an amber **⚠ Not saved** chip appears in the header
+whenever it is running on storage that will not survive, and the boot log carries the same
+warning. Both disappear once a volume is attached.
+
 ### 3. Environment variables (optional)
 | Variable | Default | Description |
 |---|---|---|

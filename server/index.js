@@ -103,5 +103,19 @@ async function autoSeed() {
 
 app.listen(PORT, async () => {
   console.log(`NFL Cheatsheet running on port ${PORT}`);
+
+  const { storageInfo } = require('./db');
+  const storage = storageInfo();
+  if (storage.persistent) {
+    console.log(`[Storage] ${storage.db_path} — persists across deploys`);
+  } else {
+    console.warn(
+      `[Storage] WARNING: ${storage.db_path} is inside the container and will be DESTROYED\n` +
+      '           on the next deploy, taking every ranking, star, tier and note with it.\n' +
+      '           Attach a Volume to this Railway service (any mount path) and redeploy —\n' +
+      '           Railway then sets RAILWAY_VOLUME_MOUNT_PATH and the database moves onto it.'
+    );
+  }
+
   await autoSeed();
 });

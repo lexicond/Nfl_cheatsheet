@@ -66,6 +66,15 @@ export default function App() {
     draft, connect, disconnect, syncNow, lookup, connecting, error: draftError, setError: setDraftError,
   } = useDraftSync({ onPicks });
 
+  // Storage durability, read once at load.
+  const [storage, setStorage] = useState(null);
+  useEffect(() => {
+    fetch('/api/health')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d && d.storage) setStorage(d.storage); })
+      .catch(() => {});
+  }, []);
+
   const [modalPlayer, setModalPlayer] = useState(null);
   const [filterBarHeight, setFilterBarHeight] = useState(53);
   const filterBarRef = useRef(null);
@@ -108,8 +117,26 @@ export default function App() {
             </p>
           </div>
         </div>
-        <div className="text-xs text-[#555875] font-mono whitespace-nowrap flex-none">
-          {!loading && `${players.length} players`}
+        <div className="flex items-center gap-2 flex-none">
+          {/* Silent data loss is the worst kind, so it is said out loud where the board
+              is actually looked at, not only in a health endpoint. */}
+          {storage && !storage.persistent && (
+            <a
+              href="https://docs.railway.com/reference/volumes"
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs px-2 py-0.5 rounded border border-amber-500/50 bg-amber-500/10 text-amber-300 whitespace-nowrap"
+              title={`This board is running from ${storage.db_path}, inside the container. `
+                + 'It is destroyed on the next deploy and your rankings, stars, tiers and notes go '
+                + 'with it — the player list re-seeds itself, so nothing will look wrong. '
+                + 'Attach a Volume to the Railway service and redeploy to fix it.'}
+            >
+              ⚠ Not saved
+            </a>
+          )}
+          <span className="text-xs text-[#555875] font-mono whitespace-nowrap">
+            {!loading && `${players.length} players`}
+          </span>
         </div>
       </header>
 

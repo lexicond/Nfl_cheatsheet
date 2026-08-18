@@ -3,9 +3,41 @@ const path = require('path');
 const fs = require('fs');
 const { normalizeName } = require('./utils/normalize');
 
-const DB_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH
-  ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'draft.db')
+// Railway sets RAILWAY_VOLUME_MOUNT_PATH only when a volume is actually attached. With
+// no volume the database lands inside the container, which is destroyed on every deploy
+// — and because the app self-seeds players from Sleeper on boot, the board comes back
+// looking perfectly healthy while every ranking, star, tier and note is gone. That is
+// the whole reason this is reported rather than left to be noticed.
+const VOLUME = process.env.RAILWAY_VOLUME_MOUNT_PATH || null;
+const DB_PATH = VOLUME
+  ? path.join(VOLUME, 'draft.db')
   : path.join(__dirname, '..', 'draft.db');
+
+// Ephemeral only matters where the container is thrown away. A laptop keeps its files.
+const ON_RAILWAY = !!(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID
+  || process.env.RAILWAY_SERVICE_ID);
+
+function storageInfo() {
+  let bytes = null;
+  try {
+    bytes = fs.statSync(DB_PATH).size;
+  } catch { /* not written yet */ }
+  const userData = db.prepare(`
+    SELECT COUNT(*) AS c FROM player_overrides
+    WHERE personal_rank IS NOT NULL OR tier IS NOT NULL OR starred = 1 OR flagged = 1
+       OR drafted = 1 OR note_personal IS NOT NULL OR note_upside IS NOT NULL
+       OR note_downside IS NOT NULL
+  `).get().c;
+  return {
+    db_path: DB_PATH,
+    volume_mount: VOLUME,
+    on_railway: ON_RAILWAY,
+    // The one that matters: will this survive the next deploy?
+    persistent: !ON_RAILWAY || !!VOLUME,
+    size_bytes: bytes,
+    rows_with_your_data: userData,
+  };
+}
 
 const dbDir = path.dirname(DB_PATH);
 if (!fs.existsSync(dbDir)) {
@@ -182,4 +214,4 @@ function computeConsensus(row, format, leagueType) {
   return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
 }
 
-module.exports = { db, computeConsensus, DB_PATH };
+module.exports = { db, computeConsensus, DB_PATH, storageInfo };
