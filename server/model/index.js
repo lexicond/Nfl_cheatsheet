@@ -79,6 +79,21 @@ const TUNING = {
   // the same as two — and scaling it with distance is the obvious next thing to try.
   maxAnchorBack: 2,
   staleDiscount: 0.55,
+  // How sharply a team's quarterback games are assumed to belong to one man. 1 shares
+  // them in proportion to each man's claim; higher powers bet harder on the incumbent.
+  // Selected across two seasons rather than one: on a single season a hard bet looked
+  // best and then failed to generalise, because who actually wins a quarterback job is
+  // not something last season's snap count reliably predicts. Hedging is worth more than
+  // being right about the starter more often. Without conservation at all the QB margin
+  // against the benchmark averaged -0.063 across the selection seasons; at power 1 it is
+  // +0.059.
+  qbClaimPower: 2,
+  // Whose job is it? 'peak' takes the most a quarterback ever carried in the window,
+  // 'anchor' only his latest season. Peak is better and the reason is Joe Burrow: his
+  // 2025 was eight games, so on the latest season alone Joe Flacco outranked him and the
+  // allocation handed Flacco the larger share of Cincinnati's year. A starter who missed
+  // half a season still has the stronger claim on the job.
+  qbClaimBasis: 'peak',
   // Only the most recent season the player actually has carries weight. This was the
   // surprise of the tuning run and it is worth stating plainly: blending three seasons
   // of usage — which is what the architecture suggests and what the first version did —
@@ -266,7 +281,7 @@ async function runModel({
 
   // --- Per player --------------------------------------------------------------
   const projections = [];
-  const gated = { noLastSeason: 0, thinRole: 0, noTeam: 0 };
+  const gated = { noLastSeason: 0, thinRole: 0, noTeam: 0, noEnvironment: 0 };
 
   for (const [gsis, allSeasons] of fullHistory) {
     // Priors use the recent window only; the deeper history exists for stability.
@@ -310,8 +325,11 @@ async function runModel({
     // 2024 season and projected 207 points. There is also no team environment to place a
     // free agent in, so the environment layer silently falls back to a league baseline
     // for exactly the players it can say least about.
+    // Already normalised onto nflverse's abbreviations by the crosswalk loader, so this
+    // is only the "is he on a team at all" test.
     const currentTeam = idEntry?.team;
-    if (!currentTeam || currentTeam === 'NA' || currentTeam === 'FA') { gated.noTeam++; continue; }
+    if (!currentTeam) { gated.noTeam++; continue; }
+    if (!environment.table.has(currentTeam)) { gated.noEnvironment++; continue; }
     // The team he is on NOW, from the crosswalk, not the one he finished last season
     // with. A player who changed teams in the offseason is projected into his new
     // offence, which is the whole point of having an environment layer. A backtest
@@ -369,6 +387,10 @@ async function runModel({
         fpoe: Math.round(fpoe * 1000) / 1000,
         talent_multiplier: efficiency.talent_multiplier,
         role_opportunity: roleOpportunity,
+        // The most he ever carried in the window, which is a better read on whose job it
+        // is than the latest season alone: a starter who missed half of last year still
+        // has the stronger claim on it.
+        peak_opportunity: Math.max(...usable.map(opportunityOf)),
         anchored_back: anchoredBack,
         seasons_used: usable.map(s => s.season),
         // Which season actually set the level of the projection, as opposed to which
@@ -379,6 +401,76 @@ async function runModel({
       },
     });
   }
+
+  // --- Conservation: a team only has one quarterback job ---------------------------
+  //
+  // Every player is projected independently, which is right for positions that genuinely
+  // share the field. It is wrong for quarterback, where one man takes essentially every
+  // snap. Unconstrained, the model handed 66 quarterbacks an average of 13.2 expected
+  // games across 31 teams — 871 games where 527 exist — and the Jets alone were projected
+  // for 1,253 pass attempts against a real team's 545. Summed to the team, pass attempts
+  // came out 49% high and passing touchdowns 40% high, while targets, carries and rushing
+  // touchdowns all reconciled to within 3%. The whole discrepancy was this.
+  //
+  // So the quarterback games on a team are allocated rather than assumed: whoever has the
+  // strongest claim to the job takes what he is projected for, and the next man gets only
+  // what is left. This deliberately does not touch the other positions — two backs really
+  // do play the same game, and their totals already reconcile.
+  const QB_GAMES_PER_TEAM = 17.5;   // 17 games, plus a little for mid-game changes
+
+  const qbsByTeam = new Map();
+  for (const p of projections) {
+    if (p.position !== 'QB') continue;
+    if (!qbsByTeam.has(p.team)) qbsByTeam.set(p.team, []);
+    qbsByTeam.get(p.team).push(p);
+  }
+
+  let qbGamesReclaimed = 0;
+  for (const qbs of qbsByTeam.values()) {
+    // Claim on the job is last season's own workload first — that is the evidence of who
+    // actually held it — and the projection only breaks a tie.
+    qbs.sort((a, b) =>
+      (b.components.role_opportunity ?? 0) - (a.components.role_opportunity ?? 0)
+      || b.ppg - a.ppg);
+
+    // How sharply the job is assumed to belong to one man. Allocating greedily — the
+    // strongest claim takes everything he is projected for and the next takes what is
+    // left — reconciles the team perfectly but is a hard bet on who starts, and in a
+    // backtest that bet is wrong often enough to cost more at quarterback than the
+    // reconciliation gains. Sharing the games out in proportion to each man's claim,
+    // raised to a power, hedges it: the power decides how sharp the bet is, and it was
+    // chosen on one season and checked on another.
+    const claimBasis = (tuning.qbClaimBasis ?? TUNING.qbClaimBasis) === 'peak'
+      ? (p => p.components.peak_opportunity ?? p.components.role_opportunity ?? 0)
+      : (p => p.components.role_opportunity ?? 0);
+    const claim = qbs.map(p => Math.pow(Math.max(claimBasis(p), 1), tuning.qbClaimPower ?? TUNING.qbClaimPower));
+    const claimTotal = claim.reduce((a, b) => a + b, 0) || 1;
+
+    for (let i = 0; i < qbs.length; i++) {
+      const p = qbs[i];
+      const share = claim[i] / claimTotal;
+      const allowed = Math.max(0, Math.min(p.games, QB_GAMES_PER_TEAM * share));
+      if (allowed >= p.games - 0.01) continue;      // he already fitted
+
+      qbGamesReclaimed += p.games - allowed;
+      p.games = Math.round(allowed * 10) / 10;
+      p.components.games_capped = true;
+
+      if (p.games < 1) {
+        // No share of the job left. Zeroing the projection would be a claim of its own,
+        // so he is dropped instead and the board shows a dash.
+        p.drop = true;
+        continue;
+      }
+      const sim = simulateSeason(p.ppg, p.games, p.volatility, { iterations, seed: p.gsis_id });
+      p.points = sim ? Math.round(sim.mean * 10) / 10 : Math.round(p.ppg * p.games * 10) / 10;
+      p.floor = sim ? Math.round(sim.floor * 10) / 10 : null;
+      p.ceiling = sim ? Math.round(sim.ceiling * 10) / 10 : null;
+      p.best_ball = sim ? Math.round(sim.best_ball * 10) / 10 : null;
+    }
+  }
+  const dropped = projections.filter(p => p.drop).length;
+  for (let i = projections.length - 1; i >= 0; i--) if (projections[i].drop) projections.splice(i, 1);
 
   // --- Draft-capital projections -------------------------------------------------
   // True rookies have no history at all. Second-year players who failed the role gate
@@ -456,6 +548,10 @@ async function runModel({
         league_mean_scoring: environment.league_mean_scoring,
       },
       stability_measured: stability.measured.length,
+      qb_conservation: {
+        games_reclaimed: Math.round(qbGamesReclaimed * 10) / 10,
+        dropped: dropped,
+      },
       // Players the role gate refused. Reported rather than silently dropped: a
       // projection that is absent is a claim too, and it should be a visible one.
       gated,

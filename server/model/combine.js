@@ -75,6 +75,13 @@ function expectedPointsPerGame(volume, efficiency, envScalar) {
       rush_yards_pg: Math.round(rushYards * scalar * 10) / 10,
       pass_yards_pg: Math.round(passYards * scalar * 10) / 10,
       receptions_pg: Math.round(receptions * 100) / 100,
+      // Touchdowns split by phase, not just totalled. A passing touchdown and the
+      // receiving touchdown that scores it are the same event, so anything reconciling
+      // a team's projected scoring has to be able to tell them apart — summing the
+      // total would count every passing score twice.
+      pass_tds_pg: Math.round(passTds * 1000) / 1000,
+      rush_tds_pg: Math.round(rushTds * 1000) / 1000,
+      rec_tds_pg: Math.round(recTds * 1000) / 1000,
       total_tds_pg: Math.round((recTds + rushTds + passTds) * 1000) / 1000,
     },
   };

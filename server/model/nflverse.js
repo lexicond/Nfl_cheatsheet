@@ -237,6 +237,30 @@ async function loadSeasonStats(season) {
 }
 
 /**
+ * Team abbreviations, normalised onto the ones nflverse's schedule file uses.
+ *
+ * The DynastyProcess crosswalk spells nine current teams differently — SFO for SF, GBP
+ * for GB, NOS for NO, LAR for LA — and nothing about the mismatch announces itself: the
+ * lookup into the environment table simply misses, the player falls back to a
+ * league-average scalar, and the projection comes out looking entirely reasonable. It
+ * cost 138 of 475 projections their team environment before anyone noticed, which is
+ * every player on nine teams. The dead franchises are here too because the crosswalk
+ * still carries players whose last team was one of them.
+ */
+const TEAM_ALIASES = {
+  GBP: 'GB', JAC: 'JAX', KCC: 'KC', LAR: 'LA', LVR: 'LV',
+  NEP: 'NE', NOS: 'NO', SFO: 'SF', TBB: 'TB',
+  OAK: 'LV', SDC: 'LAC', STL: 'LA', RAM: 'LA', ARZ: 'ARI', BLT: 'BAL',
+  CLV: 'CLE', HST: 'HOU', WSH: 'WAS',
+};
+
+function normaliseTeam(team) {
+  if (!team || team === 'NA' || team === 'FA' || team === 'FA*') return null;
+  const t = String(team).toUpperCase();
+  return TEAM_ALIASES[t] || t;
+}
+
+/**
  * The gsis_id ↔ sleeper_id crosswalk.
  *
  * This is the whole reason the model can be trusted to land on the right player. The
@@ -258,7 +282,7 @@ async function loadCrosswalk() {
       sleeper_id: sleeper,
       name: r.name,
       position: r.position,
-      team: r.team,
+      team: normaliseTeam(r.team),
       draft_year: num(r.draft_year),
       draft_ovr: num(r.draft_ovr),
       draft_round: num(r.draft_round),
@@ -293,7 +317,7 @@ async function loadSchedules() {
 }
 
 module.exports = {
-  SOURCES, REQUIRED, CACHE_DIR, POSITIONS,
+  SOURCES, REQUIRED, CACHE_DIR, POSITIONS, TEAM_ALIASES, normaliseTeam,
   parseCsv, assertColumns, num, num0,
   fetchCsv, availableSeasons, loadSeasonStats, loadCrosswalk, loadSchedules,
 };

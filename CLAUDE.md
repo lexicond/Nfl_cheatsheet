@@ -211,6 +211,33 @@ it was never given and fails if it does not beat "repeat last season".
   actually gets drafted — beyond that a deep ADP comes off a single ECR list that keeps
   ordering players long after anyone is picking them, and every "biggest buy" was a player
   both sides agreed to ignore.
+- **The crosswalk and nflverse spell nine teams differently.** DynastyProcess says `SFO`,
+  `GBP`, `NOS`, `LAR`, `KCC`, `TBB`, `NEP`, `LVR`, `JAC`; the schedule file says `SF`, `GB`,
+  `NO`, `LA`, `KC`, `TB`, `NE`, `LV`, `JAX`. The environment lookup simply missed for all of
+  them, so 138 of 475 projections — every player on nine teams — silently fell back to a
+  league-average scalar while the run still reported all 32 teams priced by the market.
+  `normaliseTeam` in `model/nflverse.js` maps them, and the validator now asserts that every
+  projection resolved an environment. Fixing it moved agreement with the posted spread from
+  rho 0.64 to 0.74.
+- **Nothing conserves playing time unless you make it.** Players are projected one at a time,
+  which is right for positions that share the field and wrong for quarterback, where one man
+  takes every snap. Unconstrained, 66 quarterbacks got 13.2 expected games each across 31
+  teams — 871 where 527 exist — and team pass attempts came out 49% high with passing
+  touchdowns 40% high, while targets and carries reconciled to within 3%. Games are now
+  shared out per team in proportion to each man's strongest recent claim on the job.
+- **Allocate the job by his best recent season, not his last one.** Joe Burrow's 2025 was
+  eight games, so on last season alone Joe Flacco outranked him and took the larger share of
+  Cincinnati. `qbClaimBasis: 'peak'` fixes it, and it also beat `'anchor'` in the backtest.
+- **Hedge the allocation; do not bet on a starter.** Giving the strongest claim everything he
+  is projected for reconciles the team perfectly and ranked quarterbacks *worse* than doing
+  nothing, because who wins a job is not something last season's snap count reliably predicts.
+  Sharing games in proportion to claim (`qbClaimPower`) is worth more than being right more
+  often about the starter.
+- **Three identities must hold and nothing in the model enforces them**: a team's targets
+  equal its pass attempts, its receiving yards equal its passing yards, and its receiving
+  touchdowns equal its passing touchdowns. Each side is built from different players'
+  histories, so they are the sharpest test that the parts fit together —
+  `validate-projections.js` asserts all three.
 - **The expected-points column is never averaged into anything.** It is this board's own
   model; folding it into a market consensus would let the board vote on itself, on top of
   the existing rule that a points projection is not a pick number. `consensus: false`, and

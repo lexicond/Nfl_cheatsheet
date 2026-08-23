@@ -61,6 +61,63 @@ exposes itself. Everything below is fixed, and each has a check that fails if it
 The model is **better** after the audit, not worse: on the harder pool it beats the
 benchmark by 0.031 rather than 0.013, and now wins at every position.
 
+## A second audit: does it add up as a team?
+
+The first audit checked the columns' extremes. This one checked whether the numbers are
+*possible* — a projection built one player at a time has nothing forcing a team's totals to
+be reachable. Three more faults, all fixed.
+
+6. **Nine teams had no team environment at all.** The crosswalk spells them `SFO`, `GBP`,
+   `NOS`, `LAR`, `KCC`, `TBB`, `NEP`, `LVR`, `JAC`; nflverse's schedule says `SF`, `GB`, `NO`,
+   `LA`… The lookup missed, and **138 of 475 projections** — every player on nine teams —
+   quietly used a league-average scalar instead of their team's market-implied total, while
+   the run still reported all 32 teams priced. Fixing it moved agreement with the posted
+   spread from rho 0.64 to **0.74**.
+7. **Quarterback playing time was not conserved.** 66 quarterbacks were given 13.2 expected
+   games each across 31 teams — 871 games where 527 exist. The Jets alone were projected for
+   1,253 pass attempts against a real team's 545. League-wide, pass attempts came out **49%
+   high** and passing touchdowns **40% high**, while targets, carries and rushing touchdowns
+   all reconciled to within 3% — the whole discrepancy was this.
+8. **The job was allocated on the wrong evidence.** Ranking claim by last season's attempts
+   handed Cincinnati to Joe Flacco over Joe Burrow, whose 2025 was eight games. Claim is now
+   each man's best recent season.
+
+### What reconciles now
+
+| Identity — must hold by definition | Before | After |
+|---|---|---|
+| Targets per pass attempt | 0.57 | **0.98** |
+| Receiving yards per passing yard | — | **1.04** |
+| Receiving TDs per passing TD | 0.63 | **0.99** |
+
+| Per team, league average | Model | Actual 2025 |
+|---|---|---|
+| Pass attempts | 497 | 545 |
+| Targets | 513 | 515 |
+| Carries | 436 | 455 |
+| Passing yards | 3,576 | 3,824 |
+
+Everything now lands within about 9% of a real NFL season, consistently a little light —
+because the players the role gate refuses still score, and because kicking and defensive
+scores are not modelled at all.
+
+### Propagated through the fixtures
+
+Summing the players back into team scoring and running all 272 games gives spreads that
+correlate **0.737** with the ones books have actually posted, a mean absolute error of
+**2.56 points** a game, and the same favourite in **89 of 112** priced games.
+
+**Read that as partly circular.** The model already scales every projection by the market's
+implied team total, so the *ordering* of teams is inherited from the prices it is being
+checked against. The *level* is not: the points are built bottom-up from projected
+touchdowns, and they come in at 20.8 a game against the market's 23.0. A real sportsbook win
+total would be a better yardstick; no clean free source carries one, and season-long player
+props would have to be scraped.
+
+**Where it is visibly wrong:** Miami projects 3.5 wins because no Miami quarterback clears
+the role gate, so the team is hollow rather than bad. Any team whose new starter was gated
+looks far worse than it is.
+
 ## Is it any good? — the evidence
 
 Backtested on **2025**, a season the model was never given, training only on 2024 and
@@ -70,18 +127,19 @@ the one the crosswalk knows he joined later.
 
 | | model | naive "repeat last season" |
 |---|---|---|
-| **Value over replacement** | **0.7249** | 0.6941 |
-| QB | **0.703** | 0.688 |
+| **Value over replacement** | **0.7101** | 0.6941 |
+| QB | **0.686** | 0.688 |
 | RB | **0.726** | 0.685 |
-| WR | **0.729** | 0.719 |
+| WR | **0.728** | 0.719 |
 | TE | **0.732** | 0.670 |
-| raw pooled points | 0.691 | **0.713** |
+| **raw pooled points** | **0.731** | 0.713 |
 
 Spearman rank correlation, n=323. The pool is every player with a real season in either of the two years before the test — including the bounce-backs, which an earlier version excluded and which are the hardest cases in it.
 
-**Read that last row carefully, because it is the most important thing in this handover.**
-The model loses on one pooled ranking by raw points while beating the benchmark at every
-individual position. That is Simpson's paradox, not a finding: pooling every position into
+**That last row used to be the model's weak spot and no longer is.** It lost on pooled raw
+points until quarterback playing time was conserved — most of the "positional scale bias"
+was simply too many quarterbacks. The reasoning below still matters for how to read the
+metric, but the model now wins on both. That is Simpson's paradox, not a finding: pooling every position into
 one raw-points ranking is dominated by the fact that quarterbacks out-score everyone, so it
 mostly measures whether a model reproduces that positional offset. It is a question of
 scale, not of ordering, and no draft decision turns on it. On VOR — which removes the offset

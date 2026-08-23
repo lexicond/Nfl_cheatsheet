@@ -288,6 +288,99 @@ function rmse(pairs) {
     else warn(`RB yards per carry r=${rbYpc.toFixed(3)} — higher than published work suggests, check the sample`);
   }
 
+  /* ------------------------------------------------- team-level reconciliation */
+  section('Adds up as a team — conservation identities');
+
+  const teamAgg = new Map();
+  for (const p of P) {
+    const c = p.components || {};
+    if (!p.team || c.basis) continue;
+    if (!teamAgg.has(p.team)) {
+      teamAgg.set(p.team, { att: 0, tgt: 0, car: 0, passTd: 0, recTd: 0, passYd: 0, recYd: 0 });
+    }
+    const g = p.games || 0;
+    const t = teamAgg.get(p.team);
+    t.att += (c.attempts_pg || 0) * g;   t.tgt += (c.targets_pg || 0) * g;
+    t.car += (c.carries_pg || 0) * g;
+    t.passTd += (c.pass_tds_pg || 0) * g; t.recTd += (c.rec_tds_pg || 0) * g;
+    t.passYd += (c.pass_yards_pg || 0) * g; t.recYd += (c.rec_yards_pg || 0) * g;
+  }
+  const teams = [...teamAgg.values()];
+  const avg = k => teams.reduce((a, t) => a + t[k], 0) / teams.length;
+  // The floor is per-identity: a denominator of 200 is right for attempts and yards and
+  // silently excluded every team from the touchdown test, where the denominator is ~23.
+  const medianRatio = (a, b, floor) => {
+    const r = teams.filter(t => t[b] > floor).map(t => t[a] / t[b]).sort((x, y) => x - y);
+    return r.length ? r[Math.floor(r.length / 2)] : null;
+  };
+
+  console.log(`  per team: ${avg('att').toFixed(0)} pass attempts, ${avg('tgt').toFixed(0)} targets, ` +
+    `${avg('car').toFixed(0)} carries, ${avg('passYd').toFixed(0)} passing yards`);
+
+  // These are identities, not estimates. Every pass attempt is a target, every passing
+  // yard is a receiving yard, every passing touchdown is a receiving touchdown. Nothing
+  // in the model enforces them — the two sides are projected from different players'
+  // histories — so they are the sharpest available test that the parts fit together.
+  const identities = [
+    ['targets per pass attempt', 'tgt', 'att', 0.94, 0.18, 200],
+    ['receiving yards per passing yard', 'recYd', 'passYd', 1.0, 0.18, 1500],
+    ['receiving TDs per passing TD', 'recTd', 'passTd', 1.0, 0.20, 8],
+  ];
+  for (const [label, a, b, target, tol, floor] of identities) {
+    const m = medianRatio(a, b, floor);
+    if (m == null) { warn(`${label}: not enough teams to test`); continue; }
+    const text = `${label}: median ${m.toFixed(2)} (should be about ${target})`;
+    if (Math.abs(m - target) <= tol) ok(text);
+    else bad(`${text} — the two sides of the identity disagree; team totals do not add up`);
+  }
+
+  // And the totals have to be a plausible NFL season, not merely self-consistent.
+  const plausible = [
+    ['pass attempts', 'att', 440, 660],
+    ['carries', 'car', 340, 520],
+    ['passing yards', 'passYd', 2900, 4600],
+  ];
+  for (const [label, k, lo, hi] of plausible) {
+    const v = avg(k);
+    if (v >= lo && v <= hi) ok(`mean team ${label} ${v.toFixed(0)} is inside the plausible range ${lo}–${hi}`);
+    else bad(`mean team ${label} ${v.toFixed(0)} is outside ${lo}–${hi} for a real NFL team`);
+  }
+
+  // Module C has to actually reach the players. It is keyed on nflverse's team codes and
+  // the crosswalk spells nine current teams differently — SFO for SF, GBP for GB, NOS for
+  // NO — so before those were normalised, every player on nine teams silently fell back
+  // to a league-average scalar. Nothing in the output said so: the environment table
+  // itself still reported 32 teams priced by the market.
+  const noEnv = P.filter(p => !p.components?.basis && p.components?.env_total == null);
+  const teamsSeen = new Set(P.filter(p => !p.components?.basis).map(p => p.team));
+  if (noEnv.length === 0 && teamsSeen.size >= 32) {
+    ok(`every projection resolved a team environment, across all ${teamsSeen.size} teams`);
+  } else {
+    bad(`${noEnv.length} projection(s) across ${teamsSeen.size} teams have no team environment — ` +
+      `the crosswalk's team codes are not reaching the schedule's`);
+  }
+  const offMarket = P.filter(p => !p.components?.basis && p.components?.env_source !== 'market');
+  if (offMarket.length === 0) ok('every team environment came from priced games, not a fallback baseline');
+  else warn(`${offMarket.length} projection(s) are on a fallback team environment, not market prices`);
+
+  // Quarterback playing time is the one thing that must be conserved outright: a team
+  // has 17 games of it and one man takes nearly every snap. Unconstrained the model gave
+  // 66 quarterbacks 13.2 expected games each across 31 teams.
+  const qbGames = new Map();
+  for (const p of P) {
+    if (p.position !== 'QB' || !p.team || p.components?.basis) continue;
+    qbGames.set(p.team, (qbGames.get(p.team) || 0) + (p.games || 0));
+  }
+  const worst = [...qbGames.entries()].sort((a, b) => b[1] - a[1])[0];
+  if (worst && worst[1] <= 19) {
+    ok(`no team is projected more than ${worst[1].toFixed(1)} quarterback games (${worst[0]}); a season has 17`);
+  } else if (worst) {
+    bad(`${worst[0]} is projected ${worst[1].toFixed(1)} quarterback games from a 17-game season — ` +
+      'playing time is not being conserved');
+  }
+  console.log(`  reclaimed ${live.meta.qb_conservation.games_reclaimed} QB games, ` +
+    `dropped ${live.meta.qb_conservation.dropped} with no share of the job left`);
+
   /* ------------------------------------------------------------- board reach */
   section('Board coverage — can the projection actually land on rows?');
   let db = null;
