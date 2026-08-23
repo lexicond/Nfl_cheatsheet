@@ -3,6 +3,7 @@ const router = express.Router();
 const { db } = require('../db');
 const { viewSources, sleeperBaseline, COLUMNS, FIELD_ALIAS } = require('../sources');
 const { applyConsensus, activeColumns, parseExcluded } = require('../consensus');
+const { replacementLevels } = require('../model/combine');
 
 const FORMATS = new Set(['BB', 'RD', 'DYN']);
 const LEAGUE_TYPES = new Set(['1QB', '2QB']);
@@ -17,6 +18,10 @@ const DERIVED_SORTS = {
   personal_rank: { get: r => r.personal_rank, dir: 'asc' },
   adp_consensus: { get: r => r.adp_consensus, dir: 'asc' },
   projected_pts: { get: r => r.projected_pts, dir: 'desc' },
+  xfp_points:    { get: r => r.xfp_points, dir: 'desc' },
+  xfp_vor:       { get: r => r.xfp_vor, dir: 'desc' },
+  xfp_ceiling:   { get: r => r.xfp_ceiling, dir: 'desc' },
+  xfp_edge:      { get: r => r.xfp_edge, dir: 'desc' },
   age:           { get: r => r.age, dir: 'asc' },
   spread:        { get: r => r.spread, dir: 'desc' },
   sleeper_gap:   { get: r => r.sleeper_gap, dir: 'desc' },
@@ -50,7 +55,7 @@ const SIGNAL_COLUMNS = [
   'adp_espn', 'adp_yahoo',
   'ktc_value', 'ktc_value_sf', 'fc_value', 'fc_value_sf',
   'ds_value', 'ds_value_sf', 'dp_value', 'dp_value_sf',
-  'projected_pts',
+  'projected_pts', 'xfp_points',
 ];
 
 // Tier boundaries in rounds rather than picks, so they follow the league size.
@@ -228,6 +233,51 @@ router.get('/', (req, res) => {
         : null;
     }
 
+    // The expected-points model's outputs that depend on the league rather than on the
+    // player. Value over replacement cannot be stored alongside the projection because
+    // it moves with league size and with superflex: the last startable quarterback in a
+    // 12-team superflex league is a far worse player than in a 1QB league, so every
+    // quarterback is worth more there. Recomputing it per request is what makes the
+    // Superflex switch mean something for this column.
+    rankWithin(enriched, p => p.xfp_points, 'desc', 'xfp_pos_rank');
+
+    const xfpLevels = replacementLevels(
+      enriched.filter(p => p.xfp_points != null).map(p => ({ position: p.position, points: p.xfp_points })),
+      { teams: teamSize, leagueType },
+    );
+    for (const p of enriched) {
+      p.xfp_vor = p.xfp_points != null
+        ? Math.round((p.xfp_points - (xfpLevels[p.position] ?? 0)) * 10) / 10
+        : null;
+    }
+
+    // ADP arbitrage, cross-position. value_score compares a player against his own
+    // position; this compares where value over replacement puts him on the whole board
+    // against where the market is drafting him — which is the question a pick actually
+    // poses, since a pick is spent across positions, not within one.
+    if (format !== 'DYN') {
+      const vorRank = new Map();
+      enriched
+        .filter(p => p.xfp_vor != null)
+        .sort((a, b) => b.xfp_vor - a.xfp_vor)
+        .forEach((p, i) => vorRank.set(p.id, i + 1));
+
+      const marketRank = new Map();
+      enriched
+        .filter(p => p.adp_consensus != null)
+        .sort((a, b) => a.adp_consensus - b.adp_consensus)
+        .forEach((p, i) => marketRank.set(p.id, i + 1));
+
+      for (const p of enriched) {
+        const v = vorRank.get(p.id);
+        const m = marketRank.get(p.id);
+        // Positive means the model ranks him higher than the market drafts him.
+        p.xfp_edge = v != null && m != null ? m - v : null;
+      }
+    } else {
+      for (const p of enriched) p.xfp_edge = null;
+    }
+
     // Rows with no market, projection or dynasty signal and no user data are noise —
     // roughly a thousand deep-bench names that only lengthen the payload. The test
     // deliberately spans every source, not just the current format's, so switching
@@ -291,6 +341,9 @@ router.get('/', (req, res) => {
       // What the board was actually ordered by, so the client can correct a stale choice.
       sort: effectiveSort,
       sleeper_baseline: baseline ? { ...baseline, positional_norms: sleeperNorms } : null,
+      // What each position's value-over-replacement is measured against, so the board
+      // can explain a VOR number rather than just printing it.
+      xfp_replacement: xfpLevels,
       players: result.map(project),
     });
   } catch (err) {
@@ -308,6 +361,8 @@ const RESPONSE_FIELDS = [
   'adp_sl_rd', 'adp_sl_sf', 'adp_espn', 'adp_yahoo',
   'adp_consensus', 'adp_source_count', 'adp_trend',
   'projected_pts', 'proj_pos_rank', 'pos_rank_consensus', 'value_score',
+  'xfp_points', 'xfp_ppg', 'xfp_games', 'xfp_floor', 'xfp_ceiling', 'xfp_best_ball',
+  'xfp_confidence', 'xfp_components', 'xfp_pos_rank', 'xfp_vor', 'xfp_edge',
   'ktc_value', 'fc_value', 'ds_value', 'dp_value', 'adp_fp_dyn', 'adp_sl_dyn',
   'age', 'fp_tier', 'tier_auto', 'round', 'spread', 'sleeper_gap',
   'ff_pos_rank', 'ff_points',

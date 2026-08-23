@@ -24,6 +24,7 @@ const COL_PX = {
   adp_sl_rd: 64, adp_sl_sf: 64,
   adp_espn: 64, adp_yahoo: 64,
   consensus: 100, projected_pts: 64, pos_rank: 64, age: 48,
+  xfp_points: 64, xfp_vor: 62, xfp_ceiling: 64, xfp_edge: 58,
   round: 44, sleeper_gap: 60, spread: 58,
   ktc_value: 80, fc_value: 80, ds_value: 80, dp_value: 80,
   tier: 56, flags: 64, status: 96, notes: 48, go: 36,
@@ -88,10 +89,24 @@ function buildColumns(format, view, excluded, narrow, draftConnected) {
   // of the numbers so it stays on screen on a phone, and only exists while a draft is
   // connected, because otherwise there is nowhere to go.
   const go = draftConnected ? [{ label: '', key: 'go' }] : [];
+  // The model's derived columns. They are not source columns — value over replacement
+  // and the ceiling are computed per request from the projection — but they belong to
+  // the same family, so switching the model off in the Sources panel takes all of them
+  // away together rather than leaving orphaned numbers with nothing behind them.
+  // Dynasty gets none of them: a one-season projection cannot speak to a keep-forever
+  // league, and showing it there would invite exactly that reading.
+  const modelOn = !excluded.includes('expectedpoints') && format !== 'DYN';
+  const modelCols = modelOn ? [
+    { label: 'VOR', key: 'xfp_vor' },
+    { label: 'Ceil', key: 'xfp_ceiling' },
+    { label: 'Edge', key: 'xfp_edge' },
+  ] : [];
+
   const middle = [
     ...(format === 'DYN' ? [] : [{ label: 'Rd', key: 'round' }]),
     { label: 'Δ SL', key: 'sleeper_gap' },
     { label: 'Split', key: 'spread' },
+    ...modelCols,
     { label: 'Proj', key: 'projected_pts' },
     { label: 'Pos Rk', key: 'pos_rank' },
   ];
@@ -161,6 +176,7 @@ export default function DraftBoard({
   players, loading, onUpdate, onOpenModal, onReorder,
   format = 'BB', leagueType = '1QB', view = null, excluded = [], sourceStatus = {},
   sleeperBaseline = null, filterBarHeight = 53, draftConnected = false, draftUrl = null,
+  xfpReplacement = null,
 }) {
   const [activeId, setActiveId] = useState(null);
   const headerScrollRef = useRef(null);
@@ -273,6 +289,7 @@ export default function DraftBoard({
                   format={format}
                   leagueType={leagueType}
                   sleeperBaseline={sleeperBaseline}
+                  replacement={xfpReplacement}
                 />
               ))}
             </tbody>

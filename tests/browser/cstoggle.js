@@ -1,5 +1,6 @@
 const { chromium } = require('playwright');
 const path = require('path');
+const { viewSources } = require('../../server/sources');
 
 // PLAYWRIGHT_CHROMIUM points at a prebuilt browser where one exists; otherwise
 // Playwright's own download is used. APP_URL overrides the server address.
@@ -36,8 +37,19 @@ const check = (n, c, d = '') => { console.log(`  ${c ? '✓' : '✗'} ${n}${d ? 
   };
 
   console.log('\nBest ball 1QB');
-  check('source cards rendered', await p.locator('.srccard').count() === 2, `${await p.locator('.srccard').count()} cards`);
-  check('lead text mentions the count', /\b2 of 2\b/.test(await p.locator('#src-lead').innerText()),
+  // Counted from the registry rather than hardcoded. These numbers moved when the
+  // expected-points model was added as a source, and a literal here means every new
+  // column breaks this suite for a reason that has nothing to do with toggling.
+  const cardCount = (format, leagueType) => {
+    const v = viewSources(format, leagueType);
+    return v.consensus.length + v.reference.length;
+  };
+  const bbCards = cardCount('BB', '1QB');
+  const bbConsensus = viewSources('BB', '1QB').consensus.length;
+  check('source cards rendered', await p.locator('.srccard').count() === bbCards,
+    `${await p.locator('.srccard').count()} cards, registry says ${bbCards}`);
+  check('lead text mentions the count',
+    new RegExp(`\\b${bbConsensus} of ${bbConsensus}\\b`).test(await p.locator('#src-lead').innerText()),
     (await p.locator('#src-lead').innerText()).slice(0, 60));
   const c0 = await firstCons();
 
@@ -50,7 +62,8 @@ const check = (n, c, d = '') => { console.log(`  ${c ? '✓' : '✗'} ${n}${d ? 
 
   console.log('\nRedraft 1QB — toggling');
   await p.click('button:text-is("Redraft")'); await p.waitForTimeout(400);
-  check('5 source cards', await p.locator('.srccard').count() === 5);
+  check('redraft source cards', await p.locator('.srccard').count() === cardCount('RD', '1QB'),
+    `${await p.locator('.srccard').count()} cards, registry says ${cardCount('RD', '1QB')}`);
   check('ESPN is off by default', !(await heads()).includes('ESPN'), (await heads()).join(','));
   await p.click('input[data-src="esp"]'); await p.waitForTimeout(500);
   const rd0 = await firstCons(); const heads0 = await heads();

@@ -1,3 +1,137 @@
+# Handover — 23 August 2026
+
+Branch: `claude/expected-points-predictor-uuj2z3`. Read `CLAUDE.md` first; it holds the
+traps that will otherwise cost you hours. The previous handover, covering the live
+Sleeper draft sync, is below this section and still current.
+
+## What this branch adds
+
+**The board now has its own projection.** Every other column is somebody else's opinion
+or somebody else's draft data. This one is computed here, from what players actually did
+and what the betting market expects their offences to score — the
+"opportunity × efficiency × environment" decomposition, built as separate modules so each
+can be argued with on its own.
+
+Four new things on the board, all season-long formats, none in dynasty:
+
+| Column | What it is |
+|---|---|
+| **xFP** | Projected half-PPR points for the season |
+| **VOR** | Points above the last startable player at his position — moves with league size and superflex |
+| **Ceil** | 85th-percentile season from simulating the year week by week |
+| **Edge** | Where the model and the market disagree, across the whole board |
+
+VOR is the one to draft on. Raw points are not comparable across positions: at four-point
+passing touchdowns a quarterback out-scores every running back and is still not the better
+pick. Edge is the arbitrage number — positive means the model would take him earlier than
+the room is.
+
+The standalone cheat sheet carries all of it too, deriving VOR on the page so the league-size
+and superflex switches keep working offline.
+
+## Is it any good? — the evidence
+
+Backtested on **2025**, a season the model was never given, training only on 2024 and
+earlier, with team environment priced off the first six weeks only (roughly what a book
+had posted by draft day) and each player placed on the team he last played for rather than
+the one the crosswalk knows he joined later.
+
+| | model | naive "repeat last season" |
+|---|---|---|
+| **Value over replacement** | **0.7031** | 0.6902 |
+| QB | **0.620** | 0.608 |
+| RB | **0.721** | 0.693 |
+| WR | **0.728** | 0.718 |
+| TE | **0.744** | 0.709 |
+| raw pooled points | 0.680 | **0.706** |
+
+Spearman rank correlation, n=375.
+
+**Read that last row carefully, because it is the most important thing in this handover.**
+The model loses on one pooled ranking by raw points while beating the benchmark at every
+individual position. That is Simpson's paradox, not a finding: pooling every position into
+one raw-points ranking is dominated by the fact that quarterbacks out-score everyone, so it
+mostly measures whether a model reproduces that positional offset. It is a question of
+scale, not of ordering, and no draft decision turns on it. On VOR — which removes the offset
+by construction and is what the board actually shows — the model wins. Both numbers are
+printed by the validator; only the ones that bear on a pick are assertions. If you change
+the model, do not "fix" the raw-pooled number by recalibrating positions against each other;
+you would be fitting to a metric nobody uses.
+
+Also verified:
+
+- **Measured stability reproduces the published research** without being told it. WR target
+  share repeats at 0.77 year to year, air-yards share at 0.74, aDOT at 0.67; RB yards per
+  carry at 0.18 and receiving touchdown rate at 0.13–0.16. Sharp puts RB YPC near 0.30,
+  FantasyLife puts TE receiving TDs at 0.28. Those figures are used only as a sanity check —
+  the shrinkage weights come from what is measured here.
+- **860 of 955 projections land on board rows**, and 391 of 396 drafted-relevant players
+  have one (98.7%), all joined on Sleeper's id through the crosswalk. Three were skipped on
+  a position disagreement rather than written to a doubtful row.
+- **All 32 teams got a real market environment** — 112 of 272 games priced in late August,
+  which is enough for every team to clear the four-game threshold.
+- Eight browser suites and five command-line validators pass.
+
+```bash
+node server/scripts/validate-projections.js   # backtest + structural checks
+node server/scripts/tune-projections.js       # re-select hyperparameters, out of sample
+npm run validate                              # sources + draft sync + projections
+```
+
+## Decisions that are load-bearing
+
+- **The projection is never averaged into anything.** It is this board's own model; folding
+  it into a market consensus would let the board vote on itself, on top of the existing rule
+  that a points projection is not a pick number. It is `consensus: false` and absent from
+  dynasty entirely — a one-season projection cannot speak to a keep-forever league.
+- **VOR is derived per request, not stored.** It moves with league size and with superflex,
+  so storing it would freeze one league's answer. Only the projection itself is stored.
+- **Only the most recent season sets the level.** Blending three seasons of usage ranked
+  *worse* than using the latest one alone, at every setting tried. Older seasons still feed
+  the stability measurement and the talent prior. See `TUNING` in `server/model/index.js`.
+- **Hyperparameters were selected on 2024 and validated on 2025.** Never picked by eye on
+  the season quoted.
+- **Expected fantasy points is an input, not an output.** The FPOE residual — how much a
+  player has out-scored what his opportunities implied — is a shrunk, hard-capped talent
+  multiplier on yardage rates. It is never the projection itself.
+- **Nobody is projected for 17 games.** Availability is sampled inside the simulation, which
+  is where a fragile player's ceiling gets capped and where best ball and redraft diverge.
+- **The simulation is seeded per player, not from `Math.random`.** Two refreshes over
+  identical data return identical projections. A column that drifts when nothing changed
+  reads as a model that cannot make its mind up, and this is the one column with no second
+  source to check it against.
+
+## Open work
+
+**1. Age is only modelled for running backs.** A 36-year-old tight end coming off a good
+season still projects on that season. The board rarely carries such players (it is seeded
+from Sleeper's active roster) but the model will happily rank one if it does.
+
+**2. Season-long player props are not wired in.** The architecture calls them the single
+best public forecast, and it is right, but no clean API exposes two-sided per-player season
+over/unders — they have to be scraped from RotoWire, BettingPros or OddsTrader. Anytime-TD
+props are the higher-value target: touchdown rate is the noisiest input in the whole model
+and a de-vigged market number would replace the weakest estimate it makes.
+
+**3. No correlation in the simulation.** Each player's weeks are drawn independently, so a
+quarterback and his WR1 are uncorrelated when in reality they run about +0.5 together. That
+understates the ceiling of a stack and means the Ceil column cannot yet be used to build
+correlated best-ball rosters.
+
+**4. Efficiency shrinkage counts a wider sample than the level it shrinks.** Deliberate and
+documented in `efficiency.js` — a player's career volume is real evidence about his true
+efficiency even when his current form is best read off last season — but it does mean the
+shrinkage is lighter than a strict single-season treatment. It was tuned alongside the 0.5
+multiplier, so change the two together and re-tune.
+
+**5. The nflverse cache is not shared across deploys unless a volume is attached.** It lands
+beside the database, so the same volume that protects your rankings protects it. Without one
+the first refresh after a deploy re-downloads about 40MB.
+
+**6. Everything the previous handover left open is still open** — see below.
+
+---
+
 # Handover — 18 August 2026
 
 Branch: `claude/sleeper-draft-sync-owbbur`, ten commits ahead of `origin/main`, deployed to

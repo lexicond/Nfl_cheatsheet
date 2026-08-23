@@ -55,6 +55,8 @@ const PAYLOAD_KEY = {
   fc_value: 'fc', fc_value_sf: 'fcs',
   dp_value: 'dp', dp_value_sf: 'dps',
   ff_pos_rank: 'ffb', ff_pos_rank_rd: 'ffb',
+  xfp_points: 'xfp', xfp_points_bb_sf: 'xfp',
+  xfp_points_rd: 'xfp', xfp_points_rd_sf: 'xfp',
 };
 
 // Everything the page needs to describe and toggle its own sources, taken straight
@@ -115,6 +117,11 @@ const players = rows.filter(r => keep.has(r.id)).map(r => ({
   fpd: num(r.adp_fp_dyn), fpds: num(r.adp_fp_dyn_sf),
   dp: r.dp_value, dps: r.dp_value_sf,
   ffb: r.ff_pos_rank,
+  // The board's own expected-points model. `xfp` is the projection; the sheet derives
+  // value over replacement from it for whatever league size the reader picks, exactly
+  // as the app does per request. `xc` is the simulated ceiling, which is what best ball
+  // actually pays for.
+  xfp: num(r.xfp_points), xc: num(r.xfp_ceiling), xcf: r.xfp_confidence || null,
   sld: num(r.adp_sl_dyn), slds: num(r.adp_sl_dyn_sf),
   age: r.age == null ? null : Math.round(Number(r.age)),
   dy: num(r.dyn_rank_consensus), dys: num(r.dyn_rank_consensus_sf),

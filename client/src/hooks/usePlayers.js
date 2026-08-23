@@ -39,6 +39,7 @@ export function usePlayers() {
   const [teamSize, setTeamSizeRaw] = useState(() => loadLS('draft_team_size', 12));
   const [view, setView] = useState(null);
   const [sleeperBaseline, setSleeperBaseline] = useState(null);
+  const [xfpReplacement, setXfpReplacement] = useState(null);
 
   const searchDebounceRef = useRef(null);
 
@@ -91,6 +92,7 @@ export function usePlayers() {
       setPlayers(data.players || []);
       setView(data.view || null);
       setSleeperBaseline(data.sleeper_baseline || null);
+      setXfpReplacement(data.xfp_replacement || null);
       // First load has no stored choice, so adopt whatever the server switched on.
       if (excluded === null && Array.isArray(data.excluded)) setExcludedRaw(data.excluded);
       // The server refuses to sort by a source that is switched off. Adopt what it
@@ -275,5 +277,6 @@ export function usePlayers() {
     teamSize,
     setTeamSize,
     sleeperBaseline,
+    xfpReplacement,
   };
 }

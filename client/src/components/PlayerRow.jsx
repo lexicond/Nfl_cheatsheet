@@ -25,6 +25,38 @@ function TrendIndicator({ trend }) {
   return <span className="text-red-400 text-xs ml-1" title={`Falling ${trend.toFixed(1)} picks`}>▼{Math.abs(trend).toFixed(1)}</span>;
 }
 
+/**
+ * What the model's projection is actually made of, for the cell tooltip. The breakdown
+ * is stored as JSON on the row, so a number nobody can interrogate never appears on the
+ * board — this is the board's own model, with no second source to check it against.
+ */
+function xfpTitle(player) {
+  let parts = [`Model projection: ${player.xfp_points?.toFixed(0)} half-PPR points`];
+  if (player.xfp_pos_rank != null) parts[0] += ` (${player.position}${player.xfp_pos_rank})`;
+  if (player.xfp_games != null) parts.push(`over ${player.xfp_games.toFixed(1)} expected games`);
+
+  let c = null;
+  try {
+    c = player.xfp_components ? JSON.parse(player.xfp_components) : null;
+  } catch { /* a malformed breakdown must not take the tooltip down */ }
+
+  if (c) {
+    if (c.basis) parts.push(c.basis + (c.draft_ovr ? ` (pick ${c.draft_ovr})` : ''));
+    else {
+      const bits = [];
+      if (c.targets_pg) bits.push(`${c.targets_pg.toFixed(1)} targets/g`);
+      if (c.carries_pg) bits.push(`${c.carries_pg.toFixed(1)} carries/g`);
+      if (c.attempts_pg) bits.push(`${c.attempts_pg.toFixed(1)} pass att/g`);
+      if (bits.length) parts.push(bits.join(', '));
+    }
+    if (c.env_total != null) {
+      parts.push(`${c.env_team} priced for ${c.env_total} points a game${c.env_source === 'market' ? '' : ` (${c.env_source})`}`);
+    }
+  }
+  if (player.xfp_confidence === 'low') parts.push('low confidence — thin or no recent usage');
+  return parts.join(' · ');
+}
+
 // score = market position rank − projected position rank. Positive means the market
 // drafts him later than the projections rank him.
 function ValueBadge({ score, position }) {
@@ -55,6 +87,7 @@ function ValueBadge({ score, position }) {
 export default function PlayerRow({
   player, index, onUpdate, onOpenModal, columns = [],
   format = 'BB', leagueType = '1QB', sleeperBaseline = null, draftUrl = null,
+  replacement = null,
 }) {
   const [copied, setCopied] = useState(false);
   const [editingRank, setEditingRank] = useState(false);
@@ -218,6 +251,98 @@ export default function PlayerRow({
             {player.projected_pts.toFixed(1)}
           </span>
         ) : <span className="text-[#555875]">–</span>}
+      </td>
+    ),
+
+    // The model's own projection. Coloured by how much of it rests on real evidence:
+    // a rookie priced off draft capital alone should not read the same as a starter
+    // with three seasons of usage behind him.
+    xfp_points: (
+      <td key="xfp_points" className={`${cellClass} w-16 font-mono text-right`}>
+        {player.xfp_points != null ? (
+          <span
+            className={player.xfp_confidence === 'low' ? 'text-[#8b90a8] italic' : `pos-text-${player.position}`}
+            title={xfpTitle(player)}
+          >
+            {player.xfp_points.toFixed(0)}
+          </span>
+        ) : <span className="text-[#555875]">–</span>}
+      </td>
+    ),
+
+    // Value over replacement — the model's cross-position number, and the one worth
+    // drafting on. Raw points cannot be compared across positions at all: a quarterback
+    // out-scores every running back and is still not the better pick.
+    xfp_vor: (
+      <td key="xfp_vor" className={`${cellClass} w-16 font-mono text-right`}>
+        {player.xfp_vor == null ? (
+          <span className="text-[#555875]">–</span>
+        ) : (
+          <span
+            className={player.xfp_vor > 0 ? 'text-[#e8eaf0]' : 'text-[#555875]'}
+            title={
+              `${player.xfp_vor.toFixed(0)} points more than a replacement ${player.position} over the season`
+              + (replacement?.[player.position] != null
+                ? ` — the last ${player.position} worth starting in this league projects ${replacement[player.position].toFixed(0)}`
+                : '')
+              + '. This is the number to compare across positions; raw points are not comparable.'
+            }
+          >
+            {player.xfp_vor.toFixed(0)}
+          </span>
+        )}
+      </td>
+    ),
+
+    // Best-ball ceiling. Best ball starts your best players each week automatically, so
+    // a spike week is worth more than a steady one and the ceiling is closer to what you
+    // are actually buying than the mean is.
+    xfp_ceiling: (
+      <td key="xfp_ceiling" className={`${cellClass} w-16 font-mono text-right`}>
+        {player.xfp_ceiling != null ? (
+          <span
+            className="text-[#8b90a8]"
+            title={
+              `85th-percentile season: ${player.xfp_ceiling.toFixed(0)} points, against a projection of `
+              + `${player.xfp_points != null ? player.xfp_points.toFixed(0) : '?'} and a floor of `
+              + `${player.xfp_floor != null ? player.xfp_floor.toFixed(0) : '?'}`
+              + (player.xfp_best_ball != null
+                ? `. Counting only his best weeks, as best ball does: ${player.xfp_best_ball.toFixed(0)}`
+                : '')
+              + '. From simulating the season week by week, including the games he is likely to miss.'
+            }
+          >
+            {player.xfp_ceiling.toFixed(0)}
+          </span>
+        ) : <span className="text-[#555875]">–</span>}
+      </td>
+    ),
+
+    // Where the model and the market disagree, across the whole board rather than
+    // within a position. This is the arbitrage number: positive means the model would
+    // draft him earlier than the room is.
+    xfp_edge: (
+      <td key="xfp_edge" className={`${cellClass} w-14 font-mono text-right`}>
+        {player.xfp_edge == null || Math.abs(player.xfp_edge) < 8 ? (
+          <span
+            className="text-[#555875]"
+            title={player.xfp_edge == null
+              ? 'Not enough to compare — he needs both a projection and a consensus number'
+              : `The model and the market are within ${Math.abs(player.xfp_edge)} places of each other on him. `
+                + 'Only gaps of 8 places or more get a number.'}
+          >
+            {player.xfp_edge == null ? '–' : '·'}
+          </span>
+        ) : (
+          <span
+            className={player.xfp_edge > 0 ? 'text-green-400' : 'text-amber-400'}
+            title={player.xfp_edge > 0
+              ? `The model ranks him ${player.xfp_edge} places higher than the market is drafting him — a buy, if you believe the projection`
+              : `The market is drafting him ${Math.abs(player.xfp_edge)} places higher than the model ranks him — a fade`}
+          >
+            {player.xfp_edge > 0 ? `+${player.xfp_edge}` : player.xfp_edge}
+          </span>
+        )}
       </td>
     ),
 

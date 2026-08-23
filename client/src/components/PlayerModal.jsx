@@ -62,6 +62,90 @@ function sourceRows(leagueType) {
   ];
 }
 
+/**
+ * The expected-points breakdown: opportunity, what the market expects of his offence,
+ * and the spread of the simulated season. Deliberately plain-language — the point is
+ * that a number can be argued with, not that it looks authoritative.
+ */
+function ModelBreakdown({ player }) {
+  if (player.xfp_points == null) return null;
+
+  let c = null;
+  try {
+    c = player.xfp_components ? JSON.parse(player.xfp_components) : null;
+  } catch {
+    c = null;   // a malformed breakdown must not blank the whole panel
+  }
+
+  const Row = ({ label, value, note }) => (
+    <div className="flex items-baseline justify-between gap-3 py-1 border-b border-[#1e2132] last:border-0">
+      <span className="text-xs text-[#8b90a8]">{label}</span>
+      <span className="text-xs font-mono text-[#e8eaf0] text-right">
+        {value}
+        {note && <span className="text-[#555875] font-normal"> {note}</span>}
+      </span>
+    </div>
+  );
+
+  const opportunity = c && !c.basis ? [
+    c.targets_pg ? `${c.targets_pg.toFixed(1)} targets` : null,
+    c.carries_pg ? `${c.carries_pg.toFixed(1)} carries` : null,
+    c.attempts_pg ? `${c.attempts_pg.toFixed(1)} pass attempts` : null,
+  ].filter(Boolean).join(' · ') : null;
+
+  return (
+    <div>
+      <h3 className="text-xs font-semibold text-[#555875] uppercase tracking-wider mb-2">
+        Expected Points — how the model got there
+      </h3>
+      <div className="rounded border border-[#2e3148] bg-[#141721] px-3 py-2">
+        <Row
+          label="Projection"
+          value={`${player.xfp_points.toFixed(0)} pts`}
+          note={player.xfp_games != null ? `over ${player.xfp_games.toFixed(1)} games` : null}
+        />
+        {player.xfp_vor != null && (
+          <Row label="Value over replacement" value={`${player.xfp_vor.toFixed(0)} pts`}
+               note="vs the last startable player at his position" />
+        )}
+        {(player.xfp_floor != null || player.xfp_ceiling != null) && (
+          <Row
+            label="Simulated season"
+            value={`${player.xfp_floor != null ? player.xfp_floor.toFixed(0) : '?'} – ${player.xfp_ceiling != null ? player.xfp_ceiling.toFixed(0) : '?'}`}
+            note="floor to ceiling, 15th–85th percentile"
+          />
+        )}
+        {player.xfp_best_ball != null && (
+          <Row label="Best-ball score" value={`${player.xfp_best_ball.toFixed(0)} pts`}
+               note="counting only his best weeks" />
+        )}
+        {opportunity && <Row label="Opportunity per game" value={opportunity} />}
+        {c?.basis && <Row label="Basis" value={c.basis} note={c.draft_ovr ? `pick ${c.draft_ovr}` : null} />}
+        {c?.env_total != null && (
+          <Row
+            label="Team environment"
+            value={`${c.env_team} · ${c.env_total} pts/game`}
+            note={c.env_source === 'market' ? 'betting market' : `${c.env_source} estimate`}
+          />
+        )}
+        {c?.level_season && (
+          <Row label="Role taken from" value={String(c.level_season)}
+               note="his most recent season" />
+        )}
+        {c?.seasons_used && c.seasons_used.length > 1 && (
+          <Row label="Efficiency weighed over" value={c.seasons_used.join(', ')}
+               note={c.opportunities ? `${c.opportunities} opportunities` : null} />
+        )}
+      </div>
+      <div className="text-xs text-[#555875] mt-1.5 italic">
+        {player.xfp_confidence === 'low'
+          ? 'Low confidence: little or no recent NFL usage behind this, so it leans on positional baselines and draft capital.'
+          : 'This is the board\u2019s own model, not a published projection. It is never averaged into the consensus.'}
+      </div>
+    </div>
+  );
+}
+
 export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = {}, format = 'BB', leagueType = '1QB' }) {
   const [draft, setDraft] = useState(null);
   const [saved, setSaved] = useState(false);
@@ -185,6 +269,21 @@ export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = 
                     </td>
                   </tr>
                 )}
+                {player.xfp_points != null && (
+                  <tr className="border-b border-[#1e2132]">
+                    <td className="py-1.5 pr-4 text-xs text-[#8b90a8]">Expected Points (model)</td>
+                    <td className={`py-1.5 pr-4 text-xs font-mono font-bold ${POS_COLORS[player.position] || 'text-[#e8eaf0]'}`}>
+                      {player.xfp_points.toFixed(0)}
+                      {player.xfp_vor != null && (
+                        <span className="text-[#8b90a8] font-normal"> · {player.xfp_vor.toFixed(0)} VOR</span>
+                      )}
+                    </td>
+                    <td className="py-1.5 text-xs text-[#555875]">
+                      {player.xfp_pos_rank != null ? `${player.position}${player.xfp_pos_rank}` : ''}
+                      {player.xfp_confidence === 'low' ? ' · low confidence' : ''}
+                    </td>
+                  </tr>
+                )}
                 {player.adp_trend != null && Math.abs(player.adp_trend) >= 1.5 && (
                   <tr>
                     <td className="py-1.5 pr-4 text-xs text-[#8b90a8]">ADP Trend</td>
@@ -197,6 +296,11 @@ export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = 
               </tbody>
             </table>
           </div>
+
+          {/* How the model got there. This column is the board's own work rather than
+              somebody else's published number, so there is no second source to check it
+              against — the parts have to be visible instead. */}
+          <ModelBreakdown player={player} />
 
           {/* Quick toggles */}
           <div className="flex flex-wrap gap-2">

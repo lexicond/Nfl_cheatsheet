@@ -25,6 +25,13 @@ Concretely, this has already happened:
   empty. The live one is the season endpoint used in `scrapers/sleeper.js`.
 - Sleeper keeps historical ADP on unrostered players — Tom Brady still carries one. A
   null `team` is how it marks them, so ADP from a teamless player is discarded.
+- **nflverse's `player_stats` release is the archive; `stats_player` is the live one.**
+  Both answer 200, both parse, and both carry a file called `stats_player_week_2024.csv`
+  — at 6.8MB and 8.5MB respectively, because the archived cut has 114 columns and the
+  live one 150. The archive also simply stops: it has no 2025 at all. Pull the wrong tag
+  and the model projects a season on data a year out of date, with nothing in the
+  response to say so. `server/model/nflverse.js` pins `stats_player` and asserts the
+  columns it needs are present.
 
 After touching the draft sync, run `node server/scripts/validate-draft-sync.js` — it
 proves the season guard still refuses a stale draft, that picks land on the player they
@@ -50,6 +57,30 @@ and the per-request board call it, so they cannot drift.
 
 **Families, not columns.** A market's 1QB and Superflex boards share a family, so
 switching a source off survives flipping Superflex. Exclusions are always family names.
+
+`server/model/` is the expected-points model — the only column on this board that is
+computed here rather than fetched from somebody. It follows the decomposition the
+architecture doc asks for, one file per stage:
+
+| File | Stage |
+|---|---|
+| `nflverse.js` | Layer 0: weekly stats, schedules, and the gsis↔sleeper crosswalk |
+| `scoring.js` | The league's scoring, in one place |
+| `usage.js` | The per-player, per-season table Modules A and B share |
+| `stability.js` | Year-over-year reliability, **measured**, → shrinkage constants |
+| `volume.js` | Module A — opportunity |
+| `efficiency.js` | Module B — points per opportunity, regressed |
+| `environment.js` | Module C — implied team totals from betting lines |
+| `combine.js` | E[FP], availability, Monte Carlo, replacement levels |
+| `index.js` | Orchestration, rookies, and the tuned hyperparameters |
+
+It reaches the board through `scrapers/expectedpoints.js`, which is a source wrapper
+rather than a scraper, and it joins on **Sleeper's player id via the crosswalk** — so
+none of the name-matching traps below apply to it.
+
+After touching anything under `server/model/`, run
+`node server/scripts/validate-projections.js`. It backtests the model against a season
+it was never given and fails if it does not beat "repeat last season".
 
 ## Traps worth knowing
 
@@ -104,6 +135,47 @@ switching a source off survives flipping Superflex. Exclusions are always family
   takes the wrong man off the board mid-draft. Names legitimately differ across an id
   match (Kenneth vs Kenny Gainwell); `validate-draft-sync.js` polices the two paths
   separately for this reason.
+- **A naive CSV split silently destroys the model.** nflverse's `headshot_url` is a
+  quoted field containing a comma, so `line.split(',')` shifts every column after it by
+  one and `targets` starts reading somebody's air yards. Nothing throws; the numbers just
+  become confidently wrong. `parseCsv` in `model/nflverse.js` is quote-aware, and the
+  required columns are asserted before any of it is believed.
+- **`github.com/<org>/<repo>/raw/...` answers 403 through the egress proxy.**
+  `raw.githubusercontent.com` works. That is how the DynastyProcess crosswalk is fetched.
+- **Judge the model on VOR, never on one pooled ranking by raw points.** At four-point
+  passing touchdowns quarterbacks out-score everyone, so ranking every position together
+  by raw points mostly measures whether a model reproduces that offset — a question of
+  scale, not of ordering. Measured that way this model *loses* to "repeat last season"
+  (0.680 vs 0.706) while *beating* it at every single position. That is Simpson's paradox,
+  not a result. On value over replacement, which removes the offset by construction and
+  is what the board shows, it wins (0.703 vs 0.690). Both numbers are printed by the
+  validator; only the meaningful ones are assertions.
+- **Superflex LOWERS the replacement quarterback, and that is what makes quarterbacks
+  worth more.** When nearly every team starts two, the last startable QB is a far worse
+  player, so the bar each QB is measured against drops and value over it rises. Asserting
+  it the other way round looks obviously right and is wrong; there is a check for it in
+  `validate-projections.js` because the mistake was made.
+- **A rookie curve fitted only on rookies who played is fitted on the hits.** The busts
+  are exactly the players who never appear in a stats file. `buildRookieCurve` starts from
+  the draft and scores a drafted player with no rookie season as zero, and the projection
+  is then bounded by the picks the curve was actually fitted on and capped at the 95th
+  percentile of what rookies at that position really score. Without both, a pick-three
+  back projected above every veteran at his position.
+- **Favourites run, underdogs throw.** `mean_spread` is positive for a favourite, so the
+  pass lean derived from it is negated. Getting this backwards is invisible in the output
+  — it just quietly moves value from the right backfields to the wrong ones.
+- **Blending three seasons of usage ranked worse than using the latest one.** This was
+  the surprise of the tuning run and it is why `TUNING.recency` is `[1, 0, 0]`. Roles turn
+  over fast enough that a season two years back is mostly noise about this one, and the
+  shrinkage step already handles a thin recent sample. Older seasons still feed the
+  stability measurement and the FPOE talent prior. Re-run
+  `node server/scripts/tune-projections.js` before changing it — it selects on one season
+  and validates on a later one it never saw.
+- **The expected-points column is never averaged into anything.** It is this board's own
+  model; folding it into a market consensus would let the board vote on itself, on top of
+  the existing rule that a points projection is not a pick number. `consensus: false`, and
+  it is absent from dynasty entirely because a one-season projection cannot speak to a
+  keep-forever league.
 - **The stored picks are made to equal Sleeper's, not merely appended to.** A
   commissioner can undo a pick, and a player left marked taken never returns to the board
   on his own.

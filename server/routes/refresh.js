@@ -11,6 +11,7 @@ const { fetchDynastyDaddy } = require('../scrapers/dynastydaddy');
 const { fetchFantasyCalc } = require('../scrapers/fantasycalc');
 const { fetchFootballers } = require('../scrapers/footballers');
 const { fetchMarket } = require('../scrapers/market');
+const { fetchExpectedPoints } = require('../scrapers/expectedpoints');
 
 // Sleeper runs first on a full refresh: it owns the roster rows and the Sleeper
 // ids the other sources match against.
@@ -24,6 +25,10 @@ const SCRAPERS = {
   dynastydaddy: fetchDynastyDaddy,
   fantasycalc: fetchFantasyCalc,
   footballers: fetchFootballers,
+  // Last on a full refresh: it reads nothing the other sources write, but it is the
+  // slowest by an order of magnitude (six seasons of nflverse, a few seconds) and
+  // running it last means a failure here still leaves every market column refreshed.
+  expectedpoints: fetchExpectedPoints,
 };
 
 // POST /api/refresh/:source
@@ -134,3 +139,6 @@ function recomputeDerived() {
 
 module.exports = router;
 module.exports.recomputeDerived = recomputeDerived;
+// Exported so scripts/refresh-all.js runs exactly the sources the API does. It used to
+// keep its own copy of this list, and the copy silently fell a source behind.
+module.exports.SCRAPERS = SCRAPERS;

@@ -86,6 +86,25 @@ db.exec(`
     updated_at TEXT DEFAULT (datetime('now'))
   );
 
+  -- What each expected-points run was actually built from. The projection is the only
+  -- column on this board nobody else publishes, so there is no second opinion to catch
+  -- it being wrong — the provenance has to be recorded instead: which seasons fed it,
+  -- how much of the season the betting market had priced, and what the run warned about.
+  CREATE TABLE IF NOT EXISTS model_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ran_at TEXT,
+    target_season INTEGER,
+    history_seasons TEXT,
+    newest_season INTEGER,
+    players INTEGER,
+    rookies INTEGER,
+    matched INTEGER,
+    env_coverage REAL,
+    env_priced_games INTEGER,
+    warnings TEXT,
+    elapsed_ms INTEGER
+  );
+
   CREATE TABLE IF NOT EXISTS source_metadata (
     source TEXT PRIMARY KEY,
     last_fetched TEXT,
@@ -180,6 +199,20 @@ addColumnIfMissing('players', 'fp_tier', 'INTEGER');
 addColumnIfMissing('players', 'ff_pos_rank', 'INTEGER');
 addColumnIfMissing('players', 'ff_points', 'REAL');
 
+// The expected-points model's own output. Stored rather than computed per request
+// because a full run reads six seasons of nflverse and takes several seconds — far too
+// slow to sit in the path of a board that redraws every time a draft pick lands.
+// Value over replacement is NOT stored: it depends on league size and league type, so
+// it is derived per request in routes/players.js alongside the consensus.
+addColumnIfMissing('players', 'xfp_points', 'REAL');
+addColumnIfMissing('players', 'xfp_ppg', 'REAL');
+addColumnIfMissing('players', 'xfp_games', 'REAL');
+addColumnIfMissing('players', 'xfp_floor', 'REAL');
+addColumnIfMissing('players', 'xfp_ceiling', 'REAL');
+addColumnIfMissing('players', 'xfp_best_ball', 'REAL');
+addColumnIfMissing('players', 'xfp_confidence', 'TEXT');
+addColumnIfMissing('players', 'xfp_components', 'TEXT');
+
 // Populate name_normalized for any rows missing it
 (function populateNameNormalized() {
   const missing = db.prepare('SELECT id, name FROM players WHERE name_normalized IS NULL').all();
@@ -196,13 +229,14 @@ addColumnIfMissing('players', 'ff_points', 'REAL');
 const initSource = db.prepare(`
   INSERT OR IGNORE INTO source_metadata (source, status) VALUES (?, 'never')
 `);
-['fantasypros', 'underdog', 'sleeper', 'ffc', 'market', 'dynastyprocess', 'dynastydaddy', 'fantasycalc', 'footballers'].forEach(s => initSource.run(s));
+['fantasypros', 'underdog', 'sleeper', 'ffc', 'market', 'dynastyprocess', 'dynastydaddy', 'fantasycalc', 'footballers', 'expectedpoints'].forEach(s => initSource.run(s));
 
 // Lookup indexes for the matcher and the projection-rank subquery.
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_players_norm_pos ON players (name_normalized, position);
   CREATE INDEX IF NOT EXISTS idx_players_sleeper_id ON players (sleeper_player_id);
   CREATE INDEX IF NOT EXISTS idx_players_pos_proj ON players (position, projected_pts);
+  CREATE INDEX IF NOT EXISTS idx_players_pos_xfp ON players (position, xfp_points);
   CREATE INDEX IF NOT EXISTS idx_draft_picks_player ON draft_picks (player_id);
 `);
 

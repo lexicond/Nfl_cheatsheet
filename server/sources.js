@@ -174,6 +174,48 @@ const COLUMNS = {
     family: 'footballers',
     provider: 'The Fantasy Footballers, three-analyst projections',
   },
+  // This board's own expected-points model. Not a market and not a panel of experts:
+  // it is computed here from nflverse usage and betting-market team totals — see
+  // server/model/. It is registered under all four season-long views because the
+  // projection itself does not depend on league type; only value over replacement does,
+  // and that is derived per request.
+  //
+  // `consensus: false` is not a matter of taste. Averaging a projection into an ADP
+  // consensus would mix a points forecast with pick numbers, exactly the mistake the
+  // positional-rank column already refuses to make. It is displayed, sortable, and
+  // deliberately outside every average.
+  xfp_points: {
+    label: 'Expected Points', short: 'xFP', source: 'expectedpoints',
+    format: 'BB', league: '1QB', scoring: 'half', kind: 'model', consensus: false,
+    excludedReason: 'A points projection, not a pick number — and this board\'s own model, so averaging it into a market consensus would let the board vote on itself',
+    what: 'This board\'s own projection, not anyone else\'s. It works out how many half-PPR points each player should score from three things kept separate: the opportunity his role gives him, what he does per opportunity once the noise is regressed out, and how many points the betting market expects his offence to score. Backtested on a season it had never seen.',
+    family: 'expectedpoints',
+    provider: 'This board\'s model — nflverse usage × betting-market team totals',
+  },
+  xfp_points_bb_sf: {
+    label: 'Expected Points', short: 'xFP', source: 'expectedpoints',
+    format: 'BB', league: '2QB', scoring: 'half', kind: 'model', consensus: false,
+    excludedReason: 'A points projection, not a pick number',
+    what: 'The same expected-points projection, shown on the best-ball superflex board. The projection does not change with league type; what changes is value over replacement, because a superflex league starts far more quarterbacks.',
+    family: 'expectedpoints',
+    provider: 'This board\'s model — nflverse usage × betting-market team totals',
+  },
+  xfp_points_rd: {
+    label: 'Expected Points', short: 'xFP', source: 'expectedpoints',
+    format: 'RD', league: '1QB', scoring: 'half', kind: 'model', consensus: false,
+    excludedReason: 'A points projection, not a pick number',
+    what: 'The same expected-points projection, shown on the redraft board.',
+    family: 'expectedpoints',
+    provider: 'This board\'s model — nflverse usage × betting-market team totals',
+  },
+  xfp_points_rd_sf: {
+    label: 'Expected Points', short: 'xFP', source: 'expectedpoints',
+    format: 'RD', league: '2QB', scoring: 'half', kind: 'model', consensus: false,
+    excludedReason: 'A points projection, not a pick number',
+    what: 'The same expected-points projection, shown on the redraft superflex board.',
+    family: 'expectedpoints',
+    provider: 'This board\'s model — nflverse usage × betting-market team totals',
+  },
   fc_value: {
     label: 'FantasyCalc', short: 'FC', source: 'fantasycalc',
     format: 'DYN', league: '1QB', scoring: 'half', kind: 'value',
@@ -253,6 +295,7 @@ const KIND_LABEL = {
   ecr: 'Expert rankings',
   value: 'Trade values',
   posrank: 'Projection rank, by position',
+  model: 'This board\'s own model',
 };
 
 // Superflex dynasty columns are sent to the client under their base name, because a
@@ -260,6 +303,9 @@ const KIND_LABEL = {
 // player payload actually carries.
 const FIELD_ALIAS = {
   ff_pos_rank_rd: 'ff_pos_rank',
+  xfp_points_bb_sf: 'xfp_points',
+  xfp_points_rd: 'xfp_points',
+  xfp_points_rd_sf: 'xfp_points',
   ktc_value_sf: 'ktc_value',
   fc_value_sf: 'fc_value',
   ds_value_sf: 'ds_value',
