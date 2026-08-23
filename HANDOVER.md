@@ -29,6 +29,38 @@ the room is.
 The standalone cheat sheet carries all of it too, deriving VOR on the page so the league-size
 and superflex switches keep working offline.
 
+## An audit found five bugs — read this before trusting an earlier number
+
+The columns were audited by looking at their extremes, which is where a projection
+exposes itself. Everything below is fixed, and each has a check that fails if it returns.
+
+1. **Every quarterback had a ~145-point floor.** Nathan Peterman projected 143 on two
+   career opportunities; Philip Rivers, retired since 2020, projected 146. Cause: rates
+   are per game and thin samples regress toward a baseline drawn from players who had a
+   role — a *starter's* 30.4 attempts a game — while a one-game season still pulled
+   expected games up to 10.5. Fixed by a role gate that refuses to answer rather than
+   inventing a starter.
+2. **Retired players kept projecting.** Usage history never expires, so Derek Carr cleared
+   the gate on his 2024 season and projected 207. A current team is now required.
+3. **Projections were never withdrawn.** The scraper only ever wrote; a player it stopped
+   projecting kept his old number indefinitely. **385 stale rows** were sitting on the
+   board, and they were the reason an earlier coverage check read 100%.
+4. **The arbitrage column was arithmetic on mismatched populations.** VOR was ranked over
+   860 players and the market over 400, so the difference was largely the difference in
+   denominators — median −19, range −672 to +324, and every "biggest buy" was a player
+   with a value over replacement of about minus forty whom both sides agreed to ignore.
+   Now computed over the players who have both numbers, inside the draftable range only:
+   median 0, range ±133.
+5. **The backtest could not see any of this.** Its pool required six games in the prior
+   season, which excludes both the thin-sample players above and the bounce-back — a
+   starter two years ago who missed last season. And once the gate began refusing players,
+   the tuner scored the model on what it could project but the benchmark on the whole pool.
+   Both fixed; the pool is harder now and the numbers below are lower and more honest than
+   the ones this handover first carried.
+
+The model is **better** after the audit, not worse: on the harder pool it beats the
+benchmark by 0.031 rather than 0.013, and now wins at every position.
+
 ## Is it any good? — the evidence
 
 Backtested on **2025**, a season the model was never given, training only on 2024 and
@@ -38,14 +70,14 @@ the one the crosswalk knows he joined later.
 
 | | model | naive "repeat last season" |
 |---|---|---|
-| **Value over replacement** | **0.7031** | 0.6902 |
-| QB | **0.620** | 0.608 |
-| RB | **0.721** | 0.693 |
-| WR | **0.728** | 0.718 |
-| TE | **0.744** | 0.709 |
-| raw pooled points | 0.680 | **0.706** |
+| **Value over replacement** | **0.7249** | 0.6941 |
+| QB | **0.703** | 0.688 |
+| RB | **0.726** | 0.685 |
+| WR | **0.729** | 0.719 |
+| TE | **0.732** | 0.670 |
+| raw pooled points | 0.691 | **0.713** |
 
-Spearman rank correlation, n=375.
+Spearman rank correlation, n=323. The pool is every player with a real season in either of the two years before the test — including the bounce-backs, which an earlier version excluded and which are the hardest cases in it.
 
 **Read that last row carefully, because it is the most important thing in this handover.**
 The model loses on one pooled ranking by raw points while beating the benchmark at every

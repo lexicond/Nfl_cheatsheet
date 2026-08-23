@@ -127,20 +127,33 @@ function rmse(pairs) {
   // recorded a real prior season. Including every fringe body flatters both the model
   // and the benchmark, because predicting that a third-string tight end scores nothing
   // is easy and is not what the board is for.
+  // A player belongs in the pool if he had a real season in EITHER of the two years
+  // before the test. Requiring it of the immediately prior season only — the first
+  // version of this — quietly excludes the bounce-back: a starter two years ago who lost
+  // most of last season to injury and is being drafted this year on the earlier season.
+  // That is exactly where how far back the model looks decides the answer, so a pool
+  // without them cannot see the model's biggest failure mode.
+  const before = aggregateSeason((await nflverse.loadSeasonStats(testSeason - 2)).rows, testSeason - 2);
   const pool = [];
-  for (const [gsis, p] of prior) {
-    if (p.games < 6) continue;
-    if (!nflverse.POSITIONS.has(p.position)) continue;
-    const act = actual.get(gsis);
-    pool.push({
-      gsis_id: gsis,
-      name: p.name,
-      position: p.position,
-      prior_points: p.points,
-      // A player who did not appear scored nothing. That is a real outcome, not a gap:
-      // dropping him would quietly remove every injury and every bust from the test.
-      actual_points: act ? act.points : 0,
-    });
+  const seen = new Set();
+  for (const source of [prior, before]) {
+    for (const [gsis, p] of source) {
+      if (seen.has(gsis) || p.games < 6 || !nflverse.POSITIONS.has(p.position)) continue;
+      seen.add(gsis);
+      const priorRec = prior.get(gsis);
+      const act = actual.get(gsis);
+      pool.push({
+        gsis_id: gsis,
+        name: p.name,
+        position: p.position,
+        // The benchmark is always last season's points, whether or not last season is the
+        // one that qualified him — a player who missed it really did score little.
+        prior_points: priorRec ? priorRec.points : 0,
+        // A player who did not appear scored nothing. That is a real outcome, not a gap:
+        // dropping him would quietly remove every injury and every bust from the test.
+        actual_points: act ? act.points : 0,
+      });
+    }
   }
 
   const byGsis = new Map(projected.projections.map(p => [p.gsis_id, p]));
@@ -284,17 +297,72 @@ function rmse(pairs) {
     warn(`database unavailable (${err.message}) — skipping coverage`);
   }
   if (db) {
-    const rows = db.prepare(
-      'SELECT sleeper_player_id FROM players WHERE sleeper_player_id IS NOT NULL AND adp_consensus IS NOT NULL'
-    ).all();
     const have = new Set(P.filter(p => p.sleeper_id).map(p => String(p.sleeper_id)));
-    const hit = rows.filter(r => have.has(String(r.sleeper_player_id))).length;
-    const pct = rows.length ? hit / rows.length : 0;
-    const label = `${hit}/${rows.length} drafted-relevant board players have a projection (${(pct * 100).toFixed(1)}%)`;
-    if (pct >= 0.85) ok(label);
-    else if (pct >= 0.6) warn(`${label} — lower than expected, check the crosswalk`);
-    else bad(`${label} — the crosswalk is not reaching the board`);
+    const covered = (limit) => {
+      const rows = db.prepare(
+        `SELECT sleeper_player_id FROM players
+         WHERE sleeper_player_id IS NOT NULL AND adp_consensus IS NOT NULL
+         ${limit ? 'AND adp_consensus <= ' + limit : ''}`
+      ).all();
+      const hit = rows.filter(r => have.has(String(r.sleeper_player_id))).length;
+      return { hit, total: rows.length, pct: rows.length ? hit / rows.length : 0 };
+    };
+
+    // The range that decides a draft. This must be essentially complete: a player being
+    // taken in the first seventeen rounds with no projection is a hole in the board.
+    const core = covered(200);
+    const coreLabel = `${core.hit}/${core.total} players inside ADP 200 have a projection (${(core.pct * 100).toFixed(1)}%)`;
+    if (core.pct >= 0.98) ok(coreLabel);
+    else if (core.pct >= 0.9) warn(`${coreLabel} — some draftable players are missing one`);
+    else bad(`${coreLabel} — the crosswalk or the role gate is cutting into the draftable range`);
+
+    // Beyond it, coverage is expected to fall away: the role gate deliberately refuses
+    // players with no recent role, and almost all of them live in the deep tail. Reported
+    // so the number is visible, but not asserted on — a low figure here is the gate
+    // working, not a fault.
+    const all = covered(null);
+    console.log(`  ${all.hit}/${all.total} across the whole board (${(all.pct * 100).toFixed(1)}%) — ` +
+      `the rest are players the role gate refused`);
   }
+
+  /* ------------------------------------------------------------- the role gate */
+  section('Role gate — no projection without the evidence to support one');
+  console.log(`  refused: ${live.meta.gated.noLastSeason} with no season last year, ` +
+    `${live.meta.gated.thinRole} with too little of one`);
+
+  // The failure this guards against: every rate in the model is per game and every thin
+  // sample is regressed toward a baseline drawn from players who had a role, so without
+  // the gate a quarterback who threw two passes regressed onto a starter's workload and
+  // projected about 145 points. Nathan Peterman, two opportunities, projected 143.
+  const ungated = P.filter(p => !p.components?.basis)
+    .filter(p => (p.components?.role_opportunity ?? 0) < 20 && p.points > 60);
+  if (ungated.length === 0) {
+    ok('no player projects a real season off fewer than 20 opportunities');
+  } else {
+    bad(`${ungated.length} player(s) project >60 points on under 20 opportunities — ` +
+      `e.g. ${ungated.slice(0, 3).map(p => `${p.name} ${p.points}`).join(', ')}`);
+  }
+
+  // A projection may be anchored on an older season — that is how a player who lost last
+  // season to injury stays on the board — but never further back than the model allows,
+  // and never at full strength. Both halves are asserted, because dropping the discount
+  // is what made this change harmful in the backtest.
+  const { maxAnchorBack } = require('../model').TUNING;
+  const tooOld = P.filter(p => !p.components?.basis)
+    .filter(p => p.components?.level_season != null
+      && live.meta.newest_season - p.components.level_season > maxAnchorBack);
+  if (tooOld.length === 0) {
+    ok(`no projection reaches further back than ${maxAnchorBack} season(s) for its role anchor`);
+  } else {
+    bad(`${tooOld.length} projection(s) anchored more than ${maxAnchorBack} seasons back — ` +
+      `e.g. ${tooOld.slice(0, 3).map(p => `${p.name} (${p.components.level_season})`).join(', ')}`);
+  }
+  const anchoredBack = P.filter(p => (p.components?.anchored_back ?? 0) > 0);
+  console.log(`  ${anchoredBack.length} projections are anchored on an older season, ` +
+    `discounted to ${Math.round(require('../model').TUNING.staleDiscount * 100)}%`);
+  const undiscounted = anchoredBack.filter(p => p.confidence !== 'low');
+  if (undiscounted.length === 0) ok('every older-anchored projection is marked low confidence');
+  else bad(`${undiscounted.length} older-anchored projection(s) are not marked low confidence`);
 
   console.log(`\n${failures === 0 ? '\x1b[32mPASSED\x1b[0m' : '\x1b[31mFAILED\x1b[0m'} — ${failures} failure(s), ${warnings} warning(s)\n`);
   process.exit(failures === 0 ? 0 : 1);

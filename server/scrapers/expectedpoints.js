@@ -62,8 +62,16 @@ async function fetchExpectedPoints({ targetSeason = SEASON_YEAR } = {}) {
 
   const claimed = new Map();
   let matched = 0;
+  let cleared = 0;
   let positionMismatch = 0;
   const unmatched = [];
+
+  const clearStale = db.prepare(`
+    UPDATE players SET
+      xfp_points = NULL, xfp_ppg = NULL, xfp_games = NULL, xfp_floor = NULL,
+      xfp_ceiling = NULL, xfp_best_ball = NULL, xfp_confidence = NULL, xfp_components = NULL
+    WHERE id = ?
+  `);
 
   const rows = db.transaction(() => {
     let count = 0;
@@ -103,6 +111,17 @@ async function fetchExpectedPoints({ targetSeason = SEASON_YEAR } = {}) {
       matched++;
       count++;
     }
+
+    // Clear anyone this run did not project. Without this a projection is written once
+    // and never taken back: a player the model now refuses — retired, no longer on a
+    // team, or too thin to project — keeps last run's number on the board indefinitely,
+    // and it still reads as current because every other column beside it is. The board
+    // reported full coverage of the draftable range on exactly this stale data.
+    for (const row of db.prepare('SELECT id FROM players WHERE xfp_points IS NOT NULL').all()) {
+      if (claimed.has(row.id)) continue;
+      clearStale.run(row.id);
+      cleared++;
+    }
     return count;
   })();
 
@@ -135,7 +154,8 @@ async function fetchExpectedPoints({ targetSeason = SEASON_YEAR } = {}) {
   });
 
   const note =
-    `${matched} matched · ${meta.target_season} from ${meta.history_seasons.slice(0, 3).join('/')} · ` +
+    `${matched} matched${cleared ? `, ${cleared} cleared` : ''} · ` +
+    `${meta.target_season} from ${meta.history_seasons.slice(0, 3).join('/')} · ` +
     `market priced ${Math.round(meta.environment.coverage * 100)}% of games` +
     (meta.warnings.length ? ` · ${meta.warnings.join(' · ')}` : '');
 
@@ -148,6 +168,7 @@ async function fetchExpectedPoints({ targetSeason = SEASON_YEAR } = {}) {
   return {
     success: true,
     players_updated: matched,
+    cleared_stale: cleared,
     projections: projections.length,
     rookies: meta.rookies,
     position_mismatch: positionMismatch,

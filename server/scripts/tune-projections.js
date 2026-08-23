@@ -49,16 +49,32 @@ function spearman(pairs) {
 async function buildPool(testSeason) {
   const actual = aggregateSeason((await nflverse.loadSeasonStats(testSeason)).rows, testSeason);
   const prior = aggregateSeason((await nflverse.loadSeasonStats(testSeason - 1)).rows, testSeason - 1);
+  const before = aggregateSeason((await nflverse.loadSeasonStats(testSeason - 2)).rows, testSeason - 2);
+
+  // A player belongs in the pool if he had a real season in EITHER of the two years
+  // before the test. Requiring it of the immediately prior season only — which is what
+  // this did at first — quietly excludes the bounce-back: a player who was a starter two
+  // years ago, lost most of last season to injury, and is being drafted this year on the
+  // strength of the earlier season. That is precisely the case where how far back the
+  // model looks decides the answer, so leaving it out of the pool meant the recency
+  // weights were chosen without ever being tested on the players they matter most for.
   const pool = [];
-  for (const [gsis, p] of prior) {
-    if (p.games < 6 || !nflverse.POSITIONS.has(p.position)) continue;
-    const act = actual.get(gsis);
-    pool.push({
-      gsis_id: gsis,
-      position: p.position,
-      prior_points: p.points,
-      actual_points: act ? act.points : 0,
-    });
+  const seen = new Set();
+  for (const source of [prior, before]) {
+    for (const [gsis, p] of source) {
+      if (seen.has(gsis) || p.games < 6 || !nflverse.POSITIONS.has(p.position)) continue;
+      seen.add(gsis);
+      const priorRec = prior.get(gsis);
+      const act = actual.get(gsis);
+      pool.push({
+        gsis_id: gsis,
+        position: p.position,
+        // The naive benchmark is always last season's points, whether or not last season
+        // is the one that qualified him — a player who missed it really did score little.
+        prior_points: priorRec ? priorRec.points : 0,
+        actual_points: act ? act.points : 0,
+      });
+    }
   }
   return pool;
 }
@@ -82,13 +98,25 @@ async function score(testSeason, pool, tuning) {
     scored.push({ ...r, projected: pr.points });
     (byPos[r.position] = byPos[r.position] || []).push([pr.points, r.actual_points]);
   }
+  // The benchmark is computed over exactly the players the model could score, never over
+  // the whole pool. Scoring the two on different populations is not a comparison: once
+  // the role gate began refusing players, the benchmark was being credited for a set of
+  // easy cases — men who did nothing last season and nothing this one — that the model
+  // was never shown. That alone moved the naive number by more than any hyperparameter.
   const out = {
     raw: spearman(pairs),
     vor: vorSpearman(scored, r => r.projected),
+    naive_raw: spearman(scored.map(r => [r.prior_points, r.actual_points])),
+    naive_vor: vorSpearman(scored, r => r.prior_points),
     n: pairs.length,
     positions: {},
+    naive_positions: {},
   };
   for (const [pos, list] of Object.entries(byPos)) out.positions[pos] = spearman(list);
+  for (const pos of ['QB', 'RB', 'WR', 'TE']) {
+    const sub = scored.filter(r => r.position === pos);
+    if (sub.length >= 10) out.naive_positions[pos] = spearman(sub.map(r => [r.prior_points, r.actual_points]));
+  }
   return out;
 }
 
@@ -123,12 +151,17 @@ function naiveScore(pool) {
 }
 
 // Candidate recency weightings, from "last season only" to the original flat spread.
+// Weights are multiplied by games played, so these are "how much is a season worth per
+// game of it", not "how much is a season worth". A tail of zero discards an older season
+// entirely however many games it holds — which is what broke the bounce-back case.
 const RECENCY_GRID = [
   [1.0, 0, 0],
+  [1.0, 0.25, 0],
+  [1.0, 0.35, 0.12],
+  [1.0, 0.5, 0.2],
   [0.85, 0.15, 0],
-  [0.8, 0.15, 0.05],
+  [0.8, 0.35, 0.15],
   [0.75, 0.2, 0.05],
-  [0.7, 0.22, 0.08],
   [0.6, 0.28, 0.12],
 ];
 const SHRINK_GRID = [0.5, 0.75, 1.0, 1.5];
@@ -147,11 +180,8 @@ const SHRINK_GRID = [0.5, 0.75, 1.0, 1.5];
 
   const tunePool = await buildPool(tuningSeason);
   const validPool = await buildPool(validationSeason);
-  const tuneNaive = naiveScore(tunePool);
-  const validNaive = naiveScore(validPool);
-
-  console.log(`naive benchmark (VOR)  — tuning ${tuneNaive.vor.toFixed(4)}, validation ${validNaive.vor.toFixed(4)}`);
-  console.log(`naive benchmark (raw)  — tuning ${tuneNaive.raw.toFixed(4)}, validation ${validNaive.raw.toFixed(4)}\n`);
+  console.log(`pool sizes — tuning ${tunePool.length}, validation ${validPool.length}`);
+  console.log('(the benchmark is recomputed inside each run, over exactly the players that run could score)\n');
 
   const results = [];
   for (const recency of RECENCY_GRID) {
@@ -161,8 +191,8 @@ const SHRINK_GRID = [0.5, 0.75, 1.0, 1.5];
       results.push({ tuning, score: s.vor, raw: s.raw, positions: s.positions });
       console.log(
         `  recency [${recency.join(', ')}]  effShrink ${efficiencyShrink}` +
-        `  ->  VOR ${s.vor.toFixed(4)}  raw ${s.raw.toFixed(4)}` +
-        `  (${s.vor > tuneNaive.vor ? 'beats' : 'loses to'} naive on VOR)`
+        `  ->  VOR ${s.vor.toFixed(4)} vs naive ${s.naive_vor.toFixed(4)}` +
+        `  (${s.vor > s.naive_vor ? 'beats' : 'loses to'} naive, n=${s.n})`
       );
     }
   }
@@ -174,14 +204,14 @@ const SHRINK_GRID = [0.5, 0.75, 1.0, 1.5];
     `recency [${best.tuning.recency.join(', ')}], efficiencyShrink ${best.tuning.efficiencyShrink}`);
 
   const held = await score(validationSeason, validPool, best.tuning);
-  console.log(`\nheld-out ${validationSeason}:`);
-  console.log(`  VOR : model ${held.vor.toFixed(4)} vs naive ${validNaive.vor.toFixed(4)}` +
-    `  (${held.vor > validNaive.vor ? '\x1b[32mbeats\x1b[0m' : '\x1b[31mloses to\x1b[0m'} naive)`);
-  console.log(`  raw : model ${held.raw.toFixed(4)} vs naive ${validNaive.raw.toFixed(4)}` +
+  console.log(`\nheld-out ${validationSeason} (n=${held.n}):`);
+  console.log(`  VOR : model ${held.vor.toFixed(4)} vs naive ${held.naive_vor.toFixed(4)}` +
+    `  (${held.vor > held.naive_vor ? '\x1b[32mbeats\x1b[0m' : '\x1b[31mloses to\x1b[0m'} naive)`);
+  console.log(`  raw : model ${held.raw.toFixed(4)} vs naive ${held.naive_raw.toFixed(4)}` +
     `  (context only — see the header comment)`);
   for (const pos of ['QB', 'RB', 'WR', 'TE']) {
-    if (held.positions[pos] == null) continue;
-    console.log(`    ${pos}: ${held.positions[pos].toFixed(4)} vs naive ${validNaive.positions[pos].toFixed(4)}`);
+    if (held.positions[pos] == null || held.naive_positions[pos] == null) continue;
+    console.log(`    ${pos}: ${held.positions[pos].toFixed(4)} vs naive ${held.naive_positions[pos].toFixed(4)}`);
   }
 
   console.log('\nPaste into TUNING in server/model/index.js:');

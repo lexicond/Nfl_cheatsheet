@@ -323,22 +323,25 @@ export default function PlayerRow({
     // draft him earlier than the room is.
     xfp_edge: (
       <td key="xfp_edge" className={`${cellClass} w-14 font-mono text-right`}>
-        {player.xfp_edge == null || Math.abs(player.xfp_edge) < 8 ? (
+        {player.xfp_edge == null || Math.abs(player.xfp_edge) < 25 ? (
           <span
             className="text-[#555875]"
             title={player.xfp_edge == null
-              ? 'Not enough to compare — he needs both a projection and a consensus number'
+              ? 'Not enough to compare — he needs both a projection and a consensus number, and to be inside the range that actually gets drafted'
               : `The model and the market are within ${Math.abs(player.xfp_edge)} places of each other on him. `
-                + 'Only gaps of 8 places or more get a number.'}
+                + 'Only gaps of 25 places — about two rounds — get a number.'}
           >
             {player.xfp_edge == null ? '–' : '·'}
           </span>
         ) : (
           <span
             className={player.xfp_edge > 0 ? 'text-green-400' : 'text-amber-400'}
-            title={player.xfp_edge > 0
+            title={(player.xfp_edge > 0
               ? `The model ranks him ${player.xfp_edge} places higher than the market is drafting him — a buy, if you believe the projection`
-              : `The market is drafting him ${Math.abs(player.xfp_edge)} places higher than the model ranks him — a fade`}
+              : `The market is drafting him ${Math.abs(player.xfp_edge)} places higher than the model ranks him — a fade`)
+              + (player.position === 'QB'
+                ? '. Read quarterbacks here with care: value over replacement judges them against the last startable QB, and best ball makes you roster two or three whatever that says.'
+                : '')}
           >
             {player.xfp_edge > 0 ? `+${player.xfp_edge}` : player.xfp_edge}
           </span>

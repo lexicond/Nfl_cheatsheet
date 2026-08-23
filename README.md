@@ -181,7 +181,7 @@ projection has nothing to say about a keep-forever league:
 | **xFP** | Projected half-PPR points |
 | **VOR** | Points above the last startable player at his position. **This is the one to draft on** — raw points are not comparable across positions |
 | **Ceil** | 85th-percentile season |
-| **Edge** | How far the model and the market disagree; positive means it would draft him earlier than the room is |
+| **Edge** | How far the model and the market disagree, in draft places; positive means it would draft him earlier than the room is. Computed only inside the range that actually gets drafted |
 
 VOR and Edge are recomputed on every request because they move with league size and with
 superflex — a superflex league starts far more quarterbacks, so the bar each is measured
@@ -193,8 +193,13 @@ folding the board's own model into a market consensus would let the board vote o
 Projections join the board on Sleeper's player id through the DynastyProcess crosswalk, so
 the name-matching heuristics used elsewhere are not involved.
 
+**It declines to answer where it has nothing to say.** A player with no recent role, or no
+current team, gets a dash rather than a number — without that guard a quarterback who threw
+two passes regressed onto a starter's workload and projected 145 points. Coverage inside the
+draftable range (ADP top 200) stays above 98%; beyond it, the gaps are the guard working.
+
 **Backtested before being trusted.** Projected onto 2025 having been given only 2024 and
-earlier, it beats "repeat last season" on value over replacement (Spearman 0.703 vs 0.690)
+earlier, it beats "repeat last season" on value over replacement (Spearman 0.725 vs 0.694)
 and at every individual position. Run it yourself:
 
 ```bash

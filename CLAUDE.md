@@ -171,6 +171,46 @@ it was never given and fails if it does not beat "repeat last season".
   stability measurement and the FPOE talent prior. Re-run
   `node server/scripts/tune-projections.js` before changing it — it selects on one season
   and validates on a later one it never saw.
+- **Shrinkage toward a positional baseline is shrinkage toward a STARTER.** Every rate in
+  the model is per game, and the baselines are drawn from players who had a role — 30.4
+  pass attempts a game at quarterback. Regress a quarterback who threw two passes toward
+  that, multiply by an expected-games figure that pulls a one-game season up to 10.5, and
+  he projects about 145 points. Nathan Peterman projected 143 on two career opportunities;
+  Philip Rivers, retired since 2020, projected 146. Every quarterback who ever took a snap
+  sat on the same floor. `ROLE_GATE` in `model/index.js` refuses the question instead:
+  no recent role, no projection, and the board shows a dash.
+- **A player must still be on a team.** The role gate alone does not catch a retired
+  player — his usage history never expires, so Derek Carr cleared it on 2024 and projected
+  207. The crosswalk's current team is required, which also stops the environment layer
+  silently falling back to a league baseline for exactly the players it knows least about.
+- **A projection must be withdrawn, not just written.** `expectedpoints.js` nulls every
+  row it did not project this run. Without that a player the model has stopped believing
+  in keeps his last number for ever, and it reads as current because every column beside
+  it is. The board reported full coverage of the draftable range on 385 stale rows.
+- **Reaching back for an older season needs a discount or it makes things worse.** Letting
+  the role anchor use a season the player has not repeated keeps genuinely draftable
+  players on the board — Jayden Reed, Tank Dell and Braelon Allen all lost most of last
+  season — but at full strength it ranked *below* "repeat last season", because most
+  players who lose a role never get it back. At `staleDiscount` 0.55 the trade turns
+  positive. Both that and `maxAnchorBack` were selected on one season and validated on
+  another.
+- **An evaluation pool filtered to healthy players cannot see the model's worst failure.**
+  The backtest originally required six games in the season before the test, which excludes
+  the bounce-back — a starter two years ago who missed last season and is being drafted on
+  the older one. That is exactly where the recency weights decide the answer, so they were
+  being chosen without ever being tested on the players they matter most for. The pool now
+  takes either of the two prior seasons.
+- **Score the model and the benchmark on the same players.** Once the role gate started
+  refusing players, the tuner was scoring the model on what it could project and the
+  benchmark on the whole pool — crediting the benchmark with a set of easy cases the model
+  never saw. That moved the naive number by more than any hyperparameter did.
+- **Two rankings can only be subtracted if they rank the same people.** The arbitrage
+  column ranked value over replacement across 860 players and the market across 400, so
+  the difference was mostly the difference in denominators: median −19, range −672 to
+  +324. It is now computed over the players who have both, and only inside the range that
+  actually gets drafted — beyond that a deep ADP comes off a single ECR list that keeps
+  ordering players long after anyone is picking them, and every "biggest buy" was a player
+  both sides agreed to ignore.
 - **The expected-points column is never averaged into anything.** It is this board's own
   model; folding it into a market consensus would let the board vote on itself, on top of
   the existing rule that a points projection is not a pick number. `consensus: false`, and

@@ -255,17 +255,32 @@ router.get('/', (req, res) => {
     // position; this compares where value over replacement puts him on the whole board
     // against where the market is drafting him — which is the question a pick actually
     // poses, since a pick is spent across positions, not within one.
+    //
+    // Both rankings must be built over the SAME players or the number is meaningless.
+    // Ranking VOR across everyone with a projection while ranking the market across only
+    // those carrying an ADP compares a place out of 860 with a place out of 400, and the
+    // difference is mostly the difference in denominators: it put the median edge at -19
+    // and stretched the range to -672..+324, which is not a scale anybody can read.
+    // Restricted to the players who have both, a rank means the same thing on each side
+    // and the edge is bounded by the size of that pool.
     if (format !== 'DYN') {
+      // Only over the range that actually gets drafted. Beyond it both rankings are
+      // nearly arbitrary — a deep ADP comes off a single ECR list that keeps ordering
+      // players long after anybody is picking them — so rank gaps out there are large,
+      // meaningless, and swamp the real ones. Unrestricted, every "biggest buy" was a
+      // player with a value over replacement of about minus forty and an ADP past 400:
+      // the model and the market both saying don't draft him, disagreeing about how
+      // firmly. Twenty rounds is past the end of any league played here.
+      const draftableTo = teamSize * 20;
+      const comparable = enriched.filter(p =>
+        p.xfp_vor != null && p.adp_consensus != null && p.adp_consensus <= draftableTo);
+
       const vorRank = new Map();
-      enriched
-        .filter(p => p.xfp_vor != null)
-        .sort((a, b) => b.xfp_vor - a.xfp_vor)
+      comparable.slice().sort((a, b) => b.xfp_vor - a.xfp_vor)
         .forEach((p, i) => vorRank.set(p.id, i + 1));
 
       const marketRank = new Map();
-      enriched
-        .filter(p => p.adp_consensus != null)
-        .sort((a, b) => a.adp_consensus - b.adp_consensus)
+      comparable.slice().sort((a, b) => a.adp_consensus - b.adp_consensus)
         .forEach((p, i) => marketRank.set(p.id, i + 1));
 
       for (const p of enriched) {

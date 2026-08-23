@@ -25,6 +25,34 @@ const PRIOR_SEASONS = 3;
 const STABILITY_SEASONS = 6;
 
 /**
+ * The role gate: how much a player must actually have done last season before the model
+ * will say anything about him at all.
+ *
+ * This exists because of a failure that shrinkage alone cannot fix. Every rate in the
+ * model is per game, and every thin sample is regressed toward a positional baseline —
+ * but that baseline is drawn from players who had a role, so it is a STARTER's workload
+ * (30.4 pass attempts a game at quarterback). Regress a quarterback who threw two passes
+ * toward it, multiply by an expected-games figure that a one-game season still pulls up
+ * to 10.5, and he projects for about 145 points. Nathan Peterman, two career
+ * opportunities in the window, projected 143. Philip Rivers, retired since 2020,
+ * projected 146. Every quarterback who ever took a snap collapsed onto the same floor.
+ *
+ * Shrinking toward a lower baseline is not the fix: it would drag genuine starters down
+ * with it, because the same constants apply to everyone. The honest fix is to refuse the
+ * question. A player with no recent role gives the model nothing to work from, so it
+ * returns nothing and the board shows a dash — the same as any player no source ranks.
+ *
+ * Thresholds are opportunities (pass attempts + carries + targets) in his most recent
+ * season, and they are deliberately low: they are there to exclude players with no role,
+ * not to express an opinion about depth. Against the live board this drops 43 players
+ * who carry an ADP, none inside the top 50 and one inside the top 150.
+ *
+ * The proper fix is nflverse's depth charts, which would say who is starting rather than
+ * inferring it from last season's volume. That is the right next step and is not built.
+ */
+const ROLE_GATE = { QB: 100, RB: 60, WR: 35, TE: 25 };
+
+/**
  * Hyperparameters, selected OUT OF SAMPLE by scripts/tune-projections.js: every
  * candidate is scored on one test season and the winner is then checked against a
  * different, later one it was never fitted on. Picking these by eye on the season you
@@ -38,6 +66,19 @@ const STABILITY_SEASONS = 6;
  *   efficiencyShrink multiplier on Module B's
  */
 const TUNING = {
+  // How far back the role anchor may reach, and what a projection built on an older
+  // season is discounted by. Both selected on one season and validated on a later one.
+  //
+  // The discount is the load-bearing half and it is not a fudge. Letting the anchor reach
+  // back at all is what keeps genuinely draftable players on the board — Jayden Reed,
+  // Tank Dell, Braelon Allen all lost most of last season — but at full strength it made
+  // the model WORSE than doing nothing, because most players who lose a role never get it
+  // back and "he'll score what he scored last season, which was nothing" is right about
+  // them. Discounted, the trade turns positive: the players who do return are worth more
+  // than the ones who do not cost. A flat multiplier is crude — it treats one season away
+  // the same as two — and scaling it with distance is the obvious next thing to try.
+  maxAnchorBack: 2,
+  staleDiscount: 0.55,
   // Only the most recent season the player actually has carries weight. This was the
   // surprise of the tuning run and it is worth stating plainly: blending three seasons
   // of usage — which is what the architecture suggests and what the first version did —
@@ -45,7 +86,7 @@ const TUNING = {
   // over fast enough that a season two years back is mostly noise about this one, and
   // the shrinkage step already handles a thin recent sample. Older seasons are still
   // used, for measuring stability and for the FPOE talent prior.
-  recency: [1, 0, 0],
+  recency: [0.85, 0.15, 0],
   volumeShrink: 1,
   // Half the shrinkage the measured reliabilities imply. Those are estimated over a
   // pooled sample of every player at a position, which understates how much a
@@ -225,6 +266,7 @@ async function runModel({
 
   // --- Per player --------------------------------------------------------------
   const projections = [];
+  const gated = { noLastSeason: 0, thinRole: 0, noTeam: 0 };
 
   for (const [gsis, allSeasons] of fullHistory) {
     // Priors use the recent window only; the deeper history exists for stability.
@@ -234,35 +276,73 @@ async function runModel({
     const position = recent[0].position;
     if (!nflverse.POSITIONS.has(position)) continue;
 
+    // The role gate: is there ANY season here with enough of a role to project from?
+    //
+    // Not "was it last season". Requiring the newest season to qualify left a hole in the
+    // draftable range — Jayden Reed at ADP 96, Tank Dell at 188, Braelon Allen at 184 all
+    // lost most of last season and would have shown a dash, which is a worse board than a
+    // conservative number. So the window is walked newest-first for the most recent season
+    // that clears the bar, and the projection is anchored there. If nothing clears it, the
+    // model genuinely has nothing to say and returns nothing.
+    const threshold = ROLE_GATE[position] ?? 30;
+    const opportunityOf = s => s.attempts + s.carries + s.targets;
+    const tune0 = { ...TUNING, ...tuning };
+    const anchorIndex = recent.findIndex(s =>
+      opportunityOf(s) >= threshold && (newest - s.season) <= tune0.maxAnchorBack);
+    if (anchorIndex === -1) {
+      if (recent[0].season !== newest) gated.noLastSeason++;
+      else gated.thinRole++;
+      continue;
+    }
+    // Anchor the level on that season and everything older; the thin seasons in front of
+    // it are dropped rather than allowed to drag a healthy role down to an injured one.
+    const usable = recent.slice(anchorIndex);
+    const anchor = usable[0];
+    const roleOpportunity = opportunityOf(anchor);
+    // Projecting off a season that is not the most recent one is a materially weaker
+    // claim — he has not held that role for a year — and the confidence says so below.
+    const anchoredBack = newest - anchor.season;
+
     const idEntry = crosswalk.byGsis.get(gsis);
+
+    // He has to be on a team. A retired player keeps his usage history for ever, so the
+    // role gate alone will happily project him: Derek Carr, retired, cleared it on his
+    // 2024 season and projected 207 points. There is also no team environment to place a
+    // free agent in, so the environment layer silently falls back to a league baseline
+    // for exactly the players it can say least about.
+    const currentTeam = idEntry?.team;
+    if (!currentTeam || currentTeam === 'NA' || currentTeam === 'FA') { gated.noTeam++; continue; }
     // The team he is on NOW, from the crosswalk, not the one he finished last season
     // with. A player who changed teams in the offseason is projected into his new
     // offence, which is the whole point of having an environment layer. A backtest
     // must not do this — the crosswalk knows where he ended up.
-    const team = useHistoryTeam
-      ? recent[0].team
-      : ((idEntry?.team && idEntry.team !== 'NA') ? idEntry.team : recent[0].team);
+    const team = useHistoryTeam ? recent[0].team : currentTeam;
     const env = environment.table.get(team) || null;
 
-    const fpoe = fpoeResidual(recent, position, rateBaselines);
-    const tune = { ...TUNING, ...tuning };
-    const volume = projectVolume(recent, position, volBaselines, stability.table, env, tune);
-    const efficiency = projectEfficiency(recent, position, rateBaselines, stability.table, fpoe, tune);
-    const { ppg, breakdown, env_scalar_applied } =
+    const fpoe = fpoeResidual(usable, position, rateBaselines);
+    const tune = tune0;
+    const volume = projectVolume(usable, position, volBaselines, stability.table, env, tune);
+    const efficiency = projectEfficiency(usable, position, rateBaselines, stability.table, fpoe, tune);
+    let { ppg, breakdown, env_scalar_applied } =
       expectedPointsPerGame(volume, efficiency, env?.env_scalar ?? 1);
+    // A projection anchored on a season he has not repeated since is a weaker claim than
+    // one anchored on last season, and the backtest is blunt about it: most players who
+    // lose a role do not get it back, so projecting the old role at full strength is
+    // worse than not projecting at all.
+    if (anchoredBack > 0) ppg *= tune0.staleDiscount;
 
     const age = idEntry?.age ?? null;
-    const gamesPlayed = expectedGames(recent, position, age);
-    const cv = weeklyVolatility(recent, position, ppg);
+    const gamesPlayed = expectedGames(usable, position, age);
+    const cv = weeklyVolatility(usable, position, ppg);
     const sim = simulateSeason(ppg, gamesPlayed, cv, { iterations, seed: gsis });
 
     // How much this projection should be trusted. Driven by the things that actually
     // undermine it: no recent season, thin opportunity, or a team the market has not
     // priced.
-    const totalOpportunity = recent.reduce((a, s) => a + s.targets + s.carries + s.attempts, 0);
-    const sawLastSeason = recent.some(s => s.season === newest);
+    const totalOpportunity = usable.reduce((a, s) => a + s.targets + s.carries + s.attempts, 0);
     let confidence = 'high';
-    if (!sawLastSeason || totalOpportunity < 80) confidence = 'low';
+    // Anchored on an older season means he has not held this role for a year.
+    if (anchoredBack > 0 || totalOpportunity < 80) confidence = 'low';
     else if (totalOpportunity < 250 || env?.source === 'baseline') confidence = 'medium';
 
     projections.push({
@@ -288,19 +368,24 @@ async function runModel({
         env_scalar: env_scalar_applied,
         fpoe: Math.round(fpoe * 1000) / 1000,
         talent_multiplier: efficiency.talent_multiplier,
-        seasons_used: recent.map(s => s.season),
+        role_opportunity: roleOpportunity,
+        anchored_back: anchoredBack,
+        seasons_used: usable.map(s => s.season),
         // Which season actually set the level of the projection, as opposed to which
         // ones contributed sample size and the talent prior. With the tuned recency
         // weights these are not the same, and the panel should not imply they are.
-        level_season: recent[0].season,
+        level_season: anchor.season,
         opportunities: totalOpportunity,
       },
     });
   }
 
-  // --- Rookies -----------------------------------------------------------------
-  // Anyone drafted into the target season, or the one before it who never recorded a
-  // usable season, has no history to project from.
+  // --- Draft-capital projections -------------------------------------------------
+  // True rookies have no history at all. Second-year players who failed the role gate
+  // are in the same position for practical purposes: what little they did is too thin to
+  // extrapolate, and draft capital is the best remaining predictor. Both are projected
+  // from the curve, but they are labelled differently — telling a reader a player has
+  // "no NFL usage yet" when he played eight games last season is simply untrue.
   const projected = new Set(projections.map(p => p.gsis_id));
   let rookieCount = 0;
 
@@ -312,6 +397,11 @@ async function runModel({
     const env = environment.table.get(entry.team) || null;
     const ppg = projectRookie(entry, entry.position, rookieCurve, env);
     if (ppg == null) continue;
+
+    // Did he appear at all? Anything in the usage history means he is a second-year
+    // player the gate turned away, not a player who has never taken a snap.
+    const played = fullHistory.get(gsis);
+    const trueRookie = entry.draft_year >= targetSeason;
 
     const gamesPlayed = entry.position === 'RB' ? 13.5 : 13.0;
     // Rookies are more volatile than veterans at the same projection — the role is not
@@ -333,14 +423,17 @@ async function runModel({
       best_ball: sim ? Math.round(sim.best_ball * 10) / 10 : null,
       volatility: Math.round(cv * 1000) / 1000,
       confidence: 'low',
-      is_rookie: true,
+      is_rookie: trueRookie,
+      from_draft_capital: true,
       components: {
         env_team: entry.team,
         env_total: env?.implied_total ?? null,
         env_source: env?.source ?? null,
         draft_ovr: entry.draft_ovr,
         draft_round: entry.draft_round,
-        basis: 'draft capital — no NFL usage yet',
+        basis: trueRookie
+          ? 'draft capital — no NFL usage yet'
+          : 'draft capital — too little NFL usage to project from',
       },
     });
     rookieCount++;
@@ -363,6 +456,9 @@ async function runModel({
         league_mean_scoring: environment.league_mean_scoring,
       },
       stability_measured: stability.measured.length,
+      // Players the role gate refused. Reported rather than silently dropped: a
+      // projection that is absent is a claim too, and it should be a visible one.
+      gated,
       environment_max_week: environmentMaxWeek,
       history_team: useHistoryTeam,
       crosswalk_rows: crosswalk.count,
