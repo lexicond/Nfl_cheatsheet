@@ -40,21 +40,29 @@ function AdpRow({ label, adp, posRank, position }) {
 // Every ADP/value source the modal can show, with the field it reads. Rows for
 // sources that have no number for this player are dropped rather than shown as "–",
 // so the panel reflects what was actually fetched.
-const SOURCE_ROWS = [
-  { label: 'Underdog (best ball)', field: 'adp_underdog', posRank: 'pos_rank_underdog' },
-  { label: 'FantasyPros (best ball)', field: 'adp_fantasypros', posRank: 'pos_rank_fantasypros' },
-  { label: 'FantasyPros (½PPR)', field: 'adp_fp_rd' },
-  { label: 'FantasyPros (superflex)', field: 'adp_fp_sf' },
-  { label: 'FantasyPros (dynasty)', field: 'adp_fp_dyn' },
-  { label: 'FFC (½PPR)', field: 'adp_ffc' },
-  { label: 'FFC (2QB)', field: 'adp_ffc_sf' },
-  { label: 'Sleeper (½PPR)', field: 'adp_sl_rd' },
-  { label: 'Sleeper (2QB)', field: 'adp_sl_sf' },
-  { label: 'ESPN (PPR)', field: 'adp_espn' },
-  { label: 'Yahoo (½PPR)', field: 'adp_yahoo' },
-];
+// The dynasty columns are aliased by the server: under 2QB, adp_fp_dyn and adp_sl_dyn
+// carry the *superflex* numbers under their base names, because the board only ever
+// shows one league type at a time. A fixed label would therefore be wrong in one of the
+// two, so the dynasty rows are named from the league type actually on screen.
+function sourceRows(leagueType) {
+  const dyn = leagueType === '2QB' ? 'dynasty superflex' : 'dynasty 1QB';
+  return [
+    { label: 'Underdog (best ball)', field: 'adp_underdog', posRank: 'pos_rank_underdog' },
+    { label: 'FantasyPros (best ball)', field: 'adp_fantasypros', posRank: 'pos_rank_fantasypros' },
+    { label: 'FantasyPros (½PPR)', field: 'adp_fp_rd' },
+    { label: 'FantasyPros (superflex)', field: 'adp_fp_sf' },
+    { label: `FantasyPros (${dyn})`, field: 'adp_fp_dyn' },
+    { label: `Sleeper (${dyn})`, field: 'adp_sl_dyn' },
+    { label: 'FFC (½PPR)', field: 'adp_ffc' },
+    { label: 'FFC (2QB)', field: 'adp_ffc_sf' },
+    { label: 'Sleeper (½PPR)', field: 'adp_sl_rd' },
+    { label: 'Sleeper (2QB)', field: 'adp_sl_sf' },
+    { label: 'ESPN (PPR)', field: 'adp_espn' },
+    { label: 'Yahoo (½PPR)', field: 'adp_yahoo' },
+  ];
+}
 
-export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = {}, format = 'BB' }) {
+export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = {}, format = 'BB', leagueType = '1QB' }) {
   const [draft, setDraft] = useState(null);
   const [saved, setSaved] = useState(false);
   const panelRef = useRef(null);
@@ -134,7 +142,7 @@ export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = 
                 </tr>
               </thead>
               <tbody>
-                {SOURCE_ROWS.filter(row => player[row.field] != null).map(row => (
+                {sourceRows(leagueType).filter(row => player[row.field] != null).map(row => (
                   <AdpRow
                     key={row.field}
                     label={row.field === 'adp_underdog' && udNote && !udNote.startsWith('Underdog')

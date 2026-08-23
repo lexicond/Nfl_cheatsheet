@@ -81,6 +81,15 @@ router.get('/', (req, res) => {
     // The whole table is read every time (a few thousand rows) so that positional
     // ranks are computed over every player, not just the ones passing the filters —
     // otherwise hiding drafted players would silently renumber everyone below them.
+    //
+    // A live Sleeper draft, when one is connected, takes players off the board through
+    // the same route as the manual tick. The two stay separate columns: `drafted` is
+    // what you marked by hand, `draft_pick_no` is what the draft room did, and
+    // disconnecting clears the second without touching the first.
+    //
+    // The MIN(pick_no) join keeps one row per player even if a draft ever reports him
+    // twice (a keeper listed alongside his pick) — a duplicate row here would show the
+    // player twice on the board and skew every positional rank computed below.
     const rows = db.prepare(`
       SELECT
         p.*,
@@ -88,11 +97,37 @@ router.get('/', (req, res) => {
         o.tier,
         CASE WHEN o.starred = 1 THEN 1 ELSE 0 END AS starred,
         CASE WHEN o.flagged = 1 THEN 1 ELSE 0 END AS flagged,
-        CASE WHEN o.drafted = 1 THEN 1 ELSE 0 END AS drafted,
-        o.note_upside, o.note_downside, o.note_sources, o.note_personal
+        CASE WHEN o.drafted = 1 THEN 1 ELSE 0 END AS drafted_manual,
+        o.note_upside, o.note_downside, o.note_sources, o.note_personal,
+        d.pick_no AS draft_pick_no,
+        d.round AS draft_round,
+        d.draft_slot AS draft_slot
       FROM players p
       LEFT JOIN player_overrides o ON o.player_id = p.id
+      LEFT JOIN draft_picks d ON d.player_id = p.id AND d.pick_no = (
+        SELECT MIN(x.pick_no) FROM draft_picks x WHERE x.player_id = p.id
+      )
     `).all();
+
+    // Who owns each draft slot, resolved once rather than per player.
+    const draftSession = db.prepare('SELECT * FROM draft_sync WHERE id = 1').get() || null;
+    const slotNames = new Map();
+    if (draftSession) {
+      const parse = (json) => {
+        try {
+          return json ? JSON.parse(json) : {};
+        } catch {
+          return {};
+        }
+      };
+      const teamNames = parse(draftSession.team_names);
+      const draftOrder = parse(draftSession.draft_order);
+      for (const [uid, slot] of Object.entries(draftOrder)) {
+        if (teamNames[uid]) slotNames.set(slot, teamNames[uid]);
+      }
+    }
+    // Mock drafts have no league behind them and so no team names — the slot stands in.
+    const teamForSlot = (slot) => (slot ? slotNames.get(slot) || `Slot ${slot}` : null);
 
     // Consensus is recomputed per request rather than read from the stored column,
     // because the user's exclusions change it.
@@ -108,11 +143,19 @@ router.get('/', (req, res) => {
         ? Math.round((r.adp_consensus_prev - r.adp_consensus) * 10) / 10
         : null;
 
+      const takenLive = r.draft_pick_no != null;
+
       return {
         ...r,
         starred: r.starred === 1,
         flagged: r.flagged === 1,
-        drafted: r.drafted === 1,
+        drafted_manual: r.drafted_manual === 1,
+        // One flag for "off the board", however he got there: the sink-to-bottom sort,
+        // the Hide Drafted filter and the strikethrough all read this.
+        drafted: r.drafted_manual === 1 || takenLive,
+        drafted_by: takenLive ? teamForSlot(r.draft_slot) : null,
+        drafted_by_me: takenLive && draftSession != null
+          && draftSession.my_slot != null && r.draft_slot === draftSession.my_slot,
         ktc_value: isSF ? (r.ktc_value_sf ?? r.ktc_value) : r.ktc_value,
         fc_value: isSF ? (r.fc_value_sf ?? r.fc_value) : r.fc_value,
         ds_value: isSF ? (r.ds_value_sf ?? r.ds_value) : r.ds_value,
@@ -204,7 +247,12 @@ router.get('/', (req, res) => {
 
     const result = relevant.filter(p => {
       if (positions.length > 0 && !positions.includes(p.position)) return false;
-      if (tierFilter != null && Number.isFinite(tierFilter) && p.tier !== tierFilter) return false;
+      // Filter on the tier the board actually shows him in: yours if you set one,
+      // otherwise the automatic one. Matching only hand-set tiers meant the T1-T5
+      // buttons emptied the board for anyone who had never set one by hand — which is
+      // everyone, by default, while every row displays an automatic tier badge.
+      if (tierFilter != null && Number.isFinite(tierFilter)
+        && (p.tier ?? p.tier_auto) !== tierFilter) return false;
       if (starred === '1' && !p.starred) return false;
       if (drafted !== '1' && p.drafted) return false;
       if (needle && !p.name.toLowerCase().includes(needle)) return false;
@@ -262,7 +310,9 @@ const RESPONSE_FIELDS = [
   'projected_pts', 'proj_pos_rank', 'pos_rank_consensus', 'value_score',
   'ktc_value', 'fc_value', 'ds_value', 'dp_value', 'adp_fp_dyn', 'adp_sl_dyn',
   'age', 'fp_tier', 'tier_auto', 'round', 'spread', 'sleeper_gap',
-  'personal_rank', 'tier', 'starred', 'flagged', 'drafted',
+  'ff_pos_rank', 'ff_points',
+  'personal_rank', 'tier', 'starred', 'flagged', 'drafted', 'drafted_manual',
+  'draft_pick_no', 'draft_round', 'drafted_by', 'drafted_by_me',
   'note_upside', 'note_downside', 'note_sources', 'note_personal',
   'last_updated',
 ];

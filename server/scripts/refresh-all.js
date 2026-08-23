@@ -13,6 +13,7 @@ const SCRAPERS = [
   ['dynastyprocess', () => require('../scrapers/dynastyprocess').fetchDynastyProcess()],
   ['dynastydaddy', () => require('../scrapers/dynastydaddy').fetchDynastyDaddy()],
   ['fantasycalc', () => require('../scrapers/fantasycalc').fetchFantasyCalc()],
+  ['footballers', () => require('../scrapers/footballers').fetchFootballers()],
 ];
 
 (async () => {

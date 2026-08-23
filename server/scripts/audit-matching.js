@@ -95,7 +95,15 @@ for (const r of db.prepare('SELECT * FROM players').all()) {
   if (!groups.has(key)) groups.set(key, []);
   groups.get(key).push(r);
 }
-const dupes = [...groups.values()].filter(g => g.length > 1);
+// Two rows sharing a name and position are only a duplicate if they are the same man.
+// Distinct Sleeper ids are proof they are not — Frank Gore and Frank Gore Jr. are both
+// running backs on the same roster and are two different players. Flagging them buries
+// the real duplicates this check exists to find.
+const dupes = [...groups.values()].filter(g => {
+  if (g.length < 2) return false;
+  const ids = g.map(r => r.sleeper_player_id).filter(Boolean);
+  return !(ids.length === g.length && new Set(ids).size === g.length);
+});
 console.log(dupes.length === 0 ? '  none' : '');
 for (const g of dupes.slice(0, 12)) {
   console.log(`  ${g.map(r => `${r.name} (${r.nfl_team || 'FA'}, id ${r.id})`).join('  |  ')}`);
@@ -119,7 +127,15 @@ const sameePlayer = [];
 for (const g of clashes) {
   for (let i = 0; i < g.length; i++) {
     for (let j = i + 1; j < g.length; j++) {
-      if (firstNamesCompatible(firstOf(g[i]), firstOf(g[j]))) sameePlayer.push([g[i], g[j]]);
+      // Distinct Sleeper ids settle it: two ids are two men, however alike the names.
+      // Without this, Frank Gore and Frank Gore Jr. — same surname, same position, same
+      // roster, compatible first names — read as one player split in two, and the check
+      // fails forever on a pair that is correct.
+      const distinctIds = g[i].sleeper_player_id && g[j].sleeper_player_id
+        && g[i].sleeper_player_id !== g[j].sleeper_player_id;
+      if (!distinctIds && firstNamesCompatible(firstOf(g[i]), firstOf(g[j]))) {
+        sameePlayer.push([g[i], g[j]]);
+      }
     }
   }
 }

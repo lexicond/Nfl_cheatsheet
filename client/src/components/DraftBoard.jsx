@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -26,18 +26,35 @@ const COL_PX = {
   consensus: 100, projected_pts: 64, pos_rank: 64, age: 48,
   round: 44, sleeper_gap: 60, spread: 58,
   ktc_value: 80, fc_value: 80, ds_value: 80, dp_value: 80,
-  tier: 56, flags: 64, status: 96, notes: 48,
+  tier: 56, flags: 64, status: 96, notes: 48, go: 36,
 };
+
+// True on a phone-width screen. Watched rather than read once, so rotating the handset
+// re-lays the board out instead of leaving it in the other orientation's shape.
+function useNarrow() {
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 640px)');
+    const on = e => setNarrow(e.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  return narrow;
+}
 
 /**
  * Columns come from the server's view descriptor rather than a copy of the source
  * registry kept here — so the columns on screen are exactly the sources the server
  * says feed this view, and a source switched off disappears from both.
+ *
+ * On a phone the drag handle and My # go: neither can be used without a pointer, and
+ * together they cost 80px that Consensus needs to be on screen at all.
  */
-function buildColumns(format, view, excluded) {
+function buildColumns(format, view, excluded, narrow, draftConnected) {
   const base = [
-    { label: '', key: 'drag' },
-    { label: 'My #', key: 'my_rank' },
+    ...(narrow ? [] : [{ label: '', key: 'drag' }, { label: 'My #', key: 'my_rank' }]),
     { label: '#', key: 'rank' },
     { label: 'Name', key: 'name' },
     { label: 'Pos', key: 'pos' },
@@ -59,18 +76,40 @@ function buildColumns(format, view, excluded) {
         .map(src => ({ label: src.short, key: src.field, numeric: true }))
     : [];
 
-  return [
-    ...base,
-    ...sourceCols,
-    { label: format === 'DYN' ? 'Rank' : 'Consensus', key: 'consensus' },
+  // "Consensus" is wider than the column it labels on a phone, and ran into its
+  // neighbour. The number under it is the same number either way.
+  const consensus = {
+    label: format === 'DYN' ? 'Rank' : (narrow ? 'Cons' : 'Consensus'),
+    key: 'consensus',
+  };
+
+  // Sleeper's API is read-only, so the pick itself has to be made in their app. This is
+  // the shortest path to it: copy the name, open the room, paste, confirm. It sits ahead
+  // of the numbers so it stays on screen on a phone, and only exists while a draft is
+  // connected, because otherwise there is nowhere to go.
+  const go = draftConnected ? [{ label: '', key: 'go' }] : [];
+  const middle = [
     ...(format === 'DYN' ? [] : [{ label: 'Rd', key: 'round' }]),
     { label: 'Δ SL', key: 'sleeper_gap' },
     { label: 'Split', key: 'spread' },
     { label: 'Proj', key: 'projected_pts' },
     { label: 'Pos Rk', key: 'pos_rank' },
-    ...tail,
   ];
+
+  // On a phone the headline number comes straight after the name. In source order it
+  // starts about 460px in, which on a 390px screen means scrolling sideways to find out
+  // what the board is actually ranking by. Nothing is dropped — the sources and the
+  // rest still follow, they are just no longer in front of the answer.
+  if (narrow) {
+    return [...base, ...go, consensus, ...sourceCols, ...middle, ...tail];
+  }
+
+  return [...base, ...go, ...sourceCols, consensus, ...middle, ...tail];
 }
+
+// A phone gets tighter columns for the few that matter, so name, position and the
+// headline number all land inside 390px.
+const COL_PX_NARROW = { rank: 30, name: 146, pos: 50, consensus: 74, bye: 42, go: 34 };
 
 function SkeletonRow({ colCount }) {
   return (
@@ -84,12 +123,21 @@ function SkeletonRow({ colCount }) {
   );
 }
 
-function TableColgroup({ columns }) {
+// With a live draft connected, Status carries the pick and the team that made it
+// rather than a one-word toggle, and 96px truncates every team name to a stub.
+function colWidth(key, draftConnected, narrow) {
+  if (key === 'status' && draftConnected) return narrow ? 120 : 148;
+  if (narrow && COL_PX_NARROW[key]) return COL_PX_NARROW[key];
+  return COL_PX[key] || 68;
+}
+
+function TableColgroup({ columns, draftConnected, narrow }) {
   return (
     <colgroup>
-      {columns.map(col => (
-        <col key={col.key} style={{ width: COL_PX[col.key] || 68, minWidth: COL_PX[col.key] || 68 }} />
-      ))}
+      {columns.map(col => {
+        const w = colWidth(col.key, draftConnected, narrow);
+        return <col key={col.key} style={{ width: w, minWidth: w }} />;
+      })}
     </colgroup>
   );
 }
@@ -100,7 +148,7 @@ function HeaderRow({ columns }) {
       {columns.map(col => (
         <th
           key={col.key}
-          className="px-2 py-2 text-left text-xs font-semibold text-[#555875] uppercase tracking-wider"
+          className="px-2 py-2 text-left text-xs font-semibold text-[#555875] uppercase tracking-wider overflow-hidden whitespace-nowrap text-ellipsis"
         >
           {col.label}
         </th>
@@ -112,14 +160,15 @@ function HeaderRow({ columns }) {
 export default function DraftBoard({
   players, loading, onUpdate, onOpenModal, onReorder,
   format = 'BB', leagueType = '1QB', view = null, excluded = [], sourceStatus = {},
-  sleeperBaseline = null, filterBarHeight = 53,
+  sleeperBaseline = null, filterBarHeight = 53, draftConnected = false, draftUrl = null,
 }) {
   const [activeId, setActiveId] = useState(null);
   const headerScrollRef = useRef(null);
   const bodyScrollRef = useRef(null);
 
-  const columns = buildColumns(format, view, excluded);
-  const totalWidth = columns.reduce((sum, col) => sum + (COL_PX[col.key] || 68), 0);
+  const narrow = useNarrow();
+  const columns = buildColumns(format, view, excluded, narrow, draftConnected);
+  const totalWidth = columns.reduce((sum, col) => sum + colWidth(col.key, draftConnected, narrow), 0);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -153,7 +202,7 @@ export default function DraftBoard({
     <div
       style={{
         position: 'sticky',
-        top: filterBarHeight,
+        top: narrow ? 0 : filterBarHeight,
         zIndex: 20,
         backgroundColor: '#0f1117',
         borderBottom: '1px solid #2e3148',
@@ -161,7 +210,7 @@ export default function DraftBoard({
     >
       <div ref={headerScrollRef} style={{ overflowX: 'hidden' }}>
         <table style={tableStyle}>
-          <TableColgroup columns={columns} />
+          <TableColgroup columns={columns} draftConnected={draftConnected} narrow={narrow} />
           <thead>
             <HeaderRow columns={columns} />
           </thead>
@@ -176,7 +225,7 @@ export default function DraftBoard({
         {stickyHeader}
         <div style={{ overflowX: 'auto' }}>
           <table style={tableStyle}>
-            <TableColgroup columns={columns} />
+            <TableColgroup columns={columns} draftConnected={draftConnected} narrow={narrow} />
             <tbody>
               {Array.from({ length: 20 }).map((_, i) => (
                 <SkeletonRow key={i} colCount={columns.length} />
@@ -209,7 +258,7 @@ export default function DraftBoard({
 
       <div ref={bodyScrollRef} style={{ overflowX: 'auto' }} onScroll={onBodyScroll}>
         <table style={tableStyle}>
-          <TableColgroup columns={columns} />
+          <TableColgroup columns={columns} draftConnected={draftConnected} narrow={narrow} />
           <SortableContext items={players.map(p => p.id)} strategy={verticalListSortingStrategy}>
             <tbody>
               {players.map((player, index) => (
@@ -220,6 +269,7 @@ export default function DraftBoard({
                   onUpdate={onUpdate}
                   onOpenModal={onOpenModal}
                   columns={columns}
+                  draftUrl={draftUrl}
                   format={format}
                   leagueType={leagueType}
                   sleeperBaseline={sleeperBaseline}

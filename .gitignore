@@ -7,3 +7,9 @@ client/dist/
 .env
 .env.local
 .DS_Store
+
+# Screenshots written by the browser suites when no output dir is passed
+tests/browser/undefined/
+undefined/
+*.png
+!cheatsheets/*.png

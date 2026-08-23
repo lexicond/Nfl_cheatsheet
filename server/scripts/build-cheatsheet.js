@@ -13,7 +13,22 @@ const { db } = require('../db');
 const { viewSources, COLUMNS, DEFAULT_OFF_FAMILIES } = require('../sources');
 
 const SEASON = new Date().getFullYear();
-const OUT = process.argv[2] || path.join(__dirname, '..', '..', 'cheatsheets', `draft-room-${SEASON}.html`);
+
+// --draft <id|url> attaches a live Sleeper draft; --user <name> marks your own picks
+// and counts down to your turn. Without them the sheet is the static snapshot it has
+// always been.
+const argv = process.argv.slice(2);
+const flag = (name) => {
+  const i = argv.indexOf(`--${name}`);
+  return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null;
+};
+// Which flags consume the argument after them. Assuming they all do meant --no-poll
+// swallowed the output path and the build silently overwrote the committed sheet.
+const VALUE_FLAGS = new Set(['--draft', '--user', '--format']);
+const positional = argv.filter((a, i) =>
+  !a.startsWith('--') && !(i > 0 && VALUE_FLAGS.has(argv[i - 1])));
+
+const OUT = positional[0] || path.join(__dirname, '..', '..', 'cheatsheets', `draft-room-${SEASON}.html`);
 const ASSETS = path.join(__dirname, '..', 'cheatsheet');
 
 const FORMATS = [['BB', '1QB'], ['BB', '2QB'], ['RD', '1QB'], ['RD', '2QB'], ['DYN', '1QB'], ['DYN', '2QB']];
@@ -39,6 +54,7 @@ const PAYLOAD_KEY = {
   ds_value: 'ds', ds_value_sf: 'dss',
   fc_value: 'fc', fc_value_sf: 'fcs',
   dp_value: 'dp', dp_value_sf: 'dps',
+  ff_pos_rank: 'ffb', ff_pos_rank_rd: 'ffb',
 };
 
 // Everything the page needs to describe and toggle its own sources, taken straight
@@ -86,6 +102,9 @@ const num = v => (v == null ? null : Math.round(Number(v) * 10) / 10);
 const int = v => (v == null ? null : Math.round(Number(v)));
 
 const players = rows.filter(r => keep.has(r.id)).map(r => ({
+  // sid is Sleeper's own player id — how a live draft's picks find their row without
+  // going anywhere near name matching.
+  sid: r.sleeper_player_id || null,
   n: r.name, t: r.nfl_team, p: r.position, b: r.bye_week, pr: num(r.projected_pts),
   ud: num(r.adp_underdog), fpb: num(r.adp_fantasypros), fpr: num(r.adp_fp_rd),
   fps: num(r.adp_fp_sf), fpd: num(r.adp_fp_dyn), ffc: num(r.adp_ffc), ffs: num(r.adp_ffc_sf),
@@ -95,6 +114,7 @@ const players = rows.filter(r => keep.has(r.id)).map(r => ({
   fc: int(r.fc_value), fcs: int(r.fc_value_sf),
   fpd: num(r.adp_fp_dyn), fpds: num(r.adp_fp_dyn_sf),
   dp: r.dp_value, dps: r.dp_value_sf,
+  ffb: r.ff_pos_rank,
   sld: num(r.adp_sl_dyn), slds: num(r.adp_sl_dyn_sf),
   age: r.age == null ? null : Math.round(Number(r.age)),
   dy: num(r.dyn_rank_consensus), dys: num(r.dyn_rank_consensus_sf),
@@ -111,8 +131,84 @@ const fetchedAt = key => {
 
 const css = fs.readFileSync(path.join(ASSETS, 'style.css'), 'utf8');
 const js = fs.readFileSync(path.join(ASSETS, 'board.js'), 'utf8');
+const liveJs = fs.readFileSync(path.join(ASSETS, 'live.js'), 'utf8');
+
+// Accepts a draft URL or a bare id, the same as the app.
+const draftRef = flag('draft');
+const draftId = draftRef
+  ? (/^\d{6,25}$/.test(draftRef.trim())
+      ? draftRef.trim()
+      : (draftRef.match(/sleeper\.(?:com|app)\/draft\/[a-z]+\/(\d{6,25})/i) || [])[1] || null)
+  : null;
+if (draftRef && !draftId) {
+  console.error(`Could not read a draft id from "${draftRef}"`);
+  process.exit(1);
+}
+// Sleeper's scoring_type says half_ppr for a best ball league and a redraft one alike,
+// so which of the two this is cannot be read off the draft — take it from --format,
+// defaulting to redraft. Dynasty and superflex it can tell, and does.
+const liveFormat = ['BB', 'RD'].includes((flag('format') || '').toUpperCase())
+  ? flag('format').toUpperCase()
+  : 'RD';
+// Resolved here rather than in the page, so the sheet opens on the right board on the
+// very first paint — before any poll has answered, and still correctly if none ever does
+// because the draft room's wifi is gone. fetchDraft asserts the sport and season, so a
+// wrong id fails at build time rather than halfway through a draft.
+async function resolveLive() {
+  if (!draftId) return null;
+  const { fetchDraft, fetchUser, fetchPicks } = require('../scrapers/sleeperDraft');
+  const meta = await fetchDraft(draftId);
+  const sc = meta.scoring_type || '';
+  let slot = null;
+  const username = flag('user');
+  if (username && meta.draft_order) {
+    try {
+      const u = await fetchUser(username);
+      slot = meta.draft_order[u.user_id] ?? null;
+      if (slot == null) console.warn(`[live] ${username} is not in this draft — no pick countdown`);
+    } catch (err) {
+      console.warn(`[live] could not resolve ${username}: ${err.message}`);
+    }
+  }
+  // The picks so far are baked in too, so the sheet is already correct the moment it
+  // opens — before any poll answers, and at all in a viewer that cannot reach Sleeper.
+  const picks = await fetchPicks(draftId);
+  const taken = {};
+  for (const p of picks) {
+    if (p.player_id == null) continue;
+    taken[String(p.player_id)] = {
+      pick: p.pick_no, round: p.round, slot: p.draft_slot,
+      mine: slot != null && p.draft_slot === slot,
+    };
+  }
+
+  return {
+    draftId,
+    username: username || null,
+    slot,
+    season: meta.season,
+    name: meta.league_name,
+    teams: [8, 10, 12, 14].includes(meta.teams) ? meta.teams : null,
+    // Dynasty and superflex are legible in the scoring type; best ball and redraft are
+    // not, since Sleeper calls both half_ppr.
+    format: /dynasty/.test(sc) ? 'DYN' : liveFormat,
+    league: /2qb|superflex/.test(sc) ? '2QB' : '1QB',
+    // Everything the bar needs before its first poll.
+    draftType: meta.type,
+    rounds: meta.rounds,
+    reversal: meta.reversal_round,
+    status: meta.status,
+    taken,
+    pickCount: picks.length,
+    builtAt: new Date().toISOString(),
+    // --no-poll is for somewhere the page cannot reach Sleeper at all: it then presents
+    // itself honestly as a snapshot rather than sitting there claiming to be live.
+    poll: !argv.includes('--no-poll'),
+  };
+}
 const builtAt = new Date().toUTCString().replace(/^\w+, /, '').replace(/:\d\d GMT$/, ' UTC');
 
+function build(LIVE) {
 const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -183,8 +279,17 @@ ${css}
         <button data-set="pos=TE" data-p="TE" aria-pressed="false">TE</button>
       </div>
     </div>
+    ${LIVE ? `<div class="group">
+      <span class="lab">Drafted</span>
+      <div class="seg" role="group" aria-label="Players already taken">
+        <button data-set="hideTaken=1" aria-pressed="true">Hide</button>
+        <button data-set="hideTaken=0" aria-pressed="false">Show</button>
+      </div>
+    </div>` : ''}
     <div class="note" id="count"></div>
   </nav>
+
+  <div id="livebar" class="livebar" hidden></div>
 
   <section class="sec" id="sources-sec">
     <div class="sec-head">
@@ -251,6 +356,7 @@ ${css}
       <li><b>ESPN and Yahoo</b> — home-league platform ADP, via DraftSharks · ${fetchedAt('market')}</li>
       <li><b>KeepTradeCut and DynastySuperflex</b> — two independent dynasty markets, 1QB and superflex, via Dynasty Daddy · ${fetchedAt('dynastydaddy')}</li>
       <li><b>FantasyCalc</b> — dynasty trade values, 1QB and superflex · ${fetchedAt('fantasycalc')}</li>
+      <li><b>The Fantasy Footballers</b> — Andy, Jason and Mike's projections, averaged and ranked within each position on this board's scoring · ${fetchedAt('footballers')}</li>
       <li><b>DynastyProcess</b> — dynasty values and player ages; shown but not averaged, being FantasyPros-derived · ${fetchedAt('dynastyprocess')}</li>
     </ul>
     <p class="fine">
@@ -271,7 +377,10 @@ const SOURCE_META = ${JSON.stringify(SOURCE_META)};
 const FAMILY_OF = ${JSON.stringify(FAMILY_OF)};
 const DEFAULT_OFF = ${JSON.stringify(DEFAULT_OFF_FAMILIES)};
 const REFERENCE_SOURCES = ${JSON.stringify(REFERENCE_SOURCES)};
+const LIVE = ${JSON.stringify(LIVE)};
+${liveJs}
 ${js}
+startLive();
 </script>
 </body>
 </html>
@@ -279,4 +388,11 @@ ${js}
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, html);
-console.log(`Wrote ${OUT} — ${players.length} players, ${(html.length / 1024).toFixed(0)} KB`);
+console.log(`Wrote ${OUT} — ${players.length} players, ${(html.length / 1024).toFixed(0)} KB`
+  + (LIVE ? ` — following ${LIVE.name || 'draft ' + LIVE.draftId}`
+      + (LIVE.slot ? `, you at slot ${LIVE.slot}` : '') : ''));
+}
+
+resolveLive()
+  .then(build)
+  .catch(err => { console.error(err.message); process.exit(1); });

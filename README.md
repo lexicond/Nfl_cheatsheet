@@ -38,9 +38,46 @@ On first run, the server automatically fetches player data from Sleeper. If that
 - Railway auto-detects `railway.json` and runs `npm run build` then `npm start`
 
 ### 2. Add a Volume (critical — persists your SQLite DB)
-- In the Railway dashboard: **Service → Volumes → Add Volume**
-- Mount path: `/data`
-- This keeps your personal rankings, notes, and overrides across deploys and sleep cycles
+
+Volumes are created on the **project canvas**, not in the service's Settings tab — which
+is the first place everyone looks, and they are not there.
+
+- Close the service panel to get back to the canvas
+- Press **⌘K** and search *Volume*, or **right-click the canvas**
+- Choose the service to attach it to
+- Set the mount path to **`/data`**
+
+Or from a terminal: `railway volume add`, then `railway volume list` to confirm.
+
+The mount path is not fixed — `db.js` reads `RAILWAY_VOLUME_MOUNT_PATH`, which Railway
+sets automatically, so any path works. `/data` keeps it clear of `/app`, where Railway
+puts the code. Volumes mount when the container starts rather than at build, so the
+service redeploys when you attach one.
+
+This keeps your rankings, notes, tiers and overrides across deploys and sleep cycles.
+
+**Without a volume the database lives inside the container and is destroyed on every
+deploy**, and the failure is silent: the app re-seeds players from Sleeper on boot, so the
+board comes back looking perfectly healthy with every ranking, star, tier and note gone.
+
+Check which you have:
+
+```bash
+curl -s https://<your-app>.up.railway.app/api/health | python3 -m json.tool | head -12
+```
+
+```jsonc
+"storage": {
+  "db_path": "/data/draft.db",
+  "volume_mount": "/data",
+  "persistent": true,        // false means the next deploy wipes it
+  "rows_with_your_data": 42
+}
+```
+
+The app says the same thing itself: an amber **⚠ Not saved** chip appears in the header
+whenever it is running on storage that will not survive, and the boot log carries the same
+warning. Both disappear once a volume is attached.
 
 ### 3. Environment variables (optional)
 | Variable | Default | Description |
@@ -110,6 +147,7 @@ Plus the players whose projected positional rank disagrees most with what they c
 | **Dynasty Daddy** | KeepTradeCut and DynastySuperflex values, 1QB and superflex; player ages and cross-platform ids | `dynasty-daddy.com/api/v1/player` — markets 0 and 3 |
 | **FantasyCalc** | Dynasty trade values, 1QB and superflex | FantasyCalc public API |
 | **DynastyProcess** | Dynasty values and player ages. Displayed but **not** averaged — see below | DynastyProcess daily CSV |
+| **The Fantasy Footballers** | Andy, Jason and Mike's statistical projections, averaged and ranked within each position. Displayed but **not** averaged — a positional rank is not a pick number | `window.udk.data` embedded in their free positional rankings pages |
 
 If a source fails, existing data for that source is preserved — only a successful fetch updates the values.
 
@@ -144,8 +182,58 @@ skews a best-ball board and a 1QB ranking never skews a superflex one:
 | Cycle tier | Click the tier badge in the row |
 | Star / flag | Click ★ / ⚑ icons in the Flags column |
 | Mark as drafted | Click the "Available" / "✓ Drafted" button |
+| Follow a live Sleeper draft | **Draft** button in the top bar — see below |
 | Add notes | Click 📝 to open the slide-over panel |
 | Close slide-over | Click ✕, click the backdrop, or press **Esc** |
+
+---
+
+## Live Sleeper draft sync
+
+Point the board at the draft you are sitting in and players disappear from it as they are
+taken, without touching anything.
+
+Open the **Draft** button in the top bar and paste the draft's Sleeper link (or its id).
+Entering your Sleeper username is optional and does two extra things: it shows which picks
+are yours, and it counts down to your next one. **Find drafts** lists this season's drafts
+for a username, so a link is not strictly needed.
+
+While connected:
+
+- A player taken in the room drops off the board within about five seconds, exactly as if
+  you had ticked him. His row shows the pick that took him and the team that made it.
+- The panel shows who is on the clock, how many picks until your turn, and the last twelve
+  picks made.
+- Picks the board does not carry — kickers, defences, deep bench — are counted and shown in
+  the feed rather than silently dropped.
+- **Disconnect** puts every one of those players back. Players you ticked by hand are a
+  separate flag and are never touched.
+
+Reloading the page rejoins the same draft. Only one draft is followed at a time.
+
+Two things worth knowing. Sleeper offers no push channel for drafts, so this polls its
+public API every five seconds — well inside Sleeper's documented ceiling, and the server
+throttles further so extra tabs cost nothing. And a draft id alone proves nothing: the
+same endpoint answers for every draft Sleeper has ever hosted, in any sport or season, so
+connecting asserts the sport and season and prints the league, scoring, type and size for
+you to check against the room you are actually in.
+
+Snake, linear and third-round-reversal drafts all get a working "on the clock" and next-pick
+countdown. Auctions are followed normally — picks land on the board as usual — but have no
+pick order to derive, so that part is left blank rather than guessed.
+
+### API
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/draft/connect` | `{ ref, username? }` — `ref` is a draft URL or id. Validates and starts following |
+| `GET /api/draft/state` | Current state; polls Sleeper first unless `?sync=0` |
+| `POST /api/draft/sync` | Force a poll, ignoring the throttle |
+| `POST /api/draft/disconnect` | Stop following and clear every live pick |
+| `GET /api/draft/lookup?username=` | This season's NFL drafts for a Sleeper username |
+
+The standalone cheat sheet in `cheatsheets/` is a point-in-time snapshot with no server
+behind it, so it has no live sync — use the app on draft day.
 
 ---
 
@@ -160,9 +248,11 @@ skews a best-ball board and a 1QB ranking never skews a superflex one:
 │   ├── consensus.js       Averaging and dynasty rank-averaging, with source exclusions
 │   ├── routes/
 │   │   ├── players.js     GET /api/players, PATCH override, POST reorder
+│   │   ├── draft.js       Live Sleeper draft: connect, poll, disconnect
 │   │   └── refresh.js     POST /api/refresh/:source, GET /api/source-status
 │   ├── scrapers/
 │   │   ├── sleeper.js     Roster, projections, Sleeper ADP by format
+│   │   ├── sleeperDraft.js Sleeper draft API, with the sport/season assertions
 │   │   ├── fantasypros.js ECR for best ball / redraft / superflex / dynasty
 │   │   ├── underdog.js    Underdog best-ball ADP (FFC fallback)
 │   │   ├── ffc.js         Fantasy Football Calculator mock-draft ADP
@@ -179,6 +269,7 @@ skews a best-ball board and a 1QB ranking never skews a superflex one:
 │   └── scripts/
 │       ├── refresh-all.js  Refresh every source from the CLI
 │       ├── validate-sources.js Assert each format contains what it claims
+│       ├── validate-draft-sync.js Assert the live draft sync matches picks correctly
 │       ├── audit-matching.js  Find name-matching damage across sources
 │       ├── test-source-toggle.js Assert switching a source off changes the board
 │       ├── build-cheatsheet.js Render the standalone cheat sheet
@@ -189,12 +280,14 @@ skews a best-ball board and a 1QB ranking never skews a superflex one:
 │   │   ├── index.css      Tailwind + custom classes
 │   │   ├── main.jsx
 │   │   ├── hooks/
-│   │   │   └── usePlayers.js
+│   │   │   ├── usePlayers.js
+│   │   │   └── useDraftSync.js  Poll a live Sleeper draft
 │   │   └── components/
 │   │       ├── DraftBoard.jsx
 │   │       ├── PlayerRow.jsx
 │   │       ├── FilterBar.jsx
 │   │       ├── PlayerModal.jsx
+│   │       ├── DraftSyncPanel.jsx  Connect to and follow a live draft
 │   │       └── SourceRefreshPanel.jsx
 │   └── index.html
 ├── package.json

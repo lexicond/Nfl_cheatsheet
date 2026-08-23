@@ -20,9 +20,19 @@ const check = (n, c, d = '') => { console.log(`  ${c ? '✓' : '✗'} ${n}${d ? 
   await p.waitForTimeout(600);
 
   const heads = async () => (await p.locator('#board thead th').allInnerTexts()).map(t => t.trim());
-  const firstCons = async () => {
+  // The consensus down the top of the board rather than one cell of it. A single row
+  // made this a hostage to the data: when every source agrees on the player at the top,
+  // his number cannot move however the sources are toggled, and the check failed while
+  // the board underneath it recomputed perfectly.
+  const firstCons = async (rows = 12) => {
     const h = await heads(); const i = h.findIndex(x => /^(consensus|rank)$/i.test(x));
-    return (await p.locator('#board tbody tr:not(.roundrow)').first().locator('td').allInnerTexts())[i]?.trim();
+    const trs = p.locator('#board tbody tr:not(.roundrow)');
+    const n = Math.min(rows, await trs.count());
+    const out = [];
+    for (let r = 0; r < n; r++) {
+      out.push((await trs.nth(r).locator('td').allInnerTexts())[i]?.trim());
+    }
+    return out.join(' ');
   };
 
   console.log('\nBest ball 1QB');

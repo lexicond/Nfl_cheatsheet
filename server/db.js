@@ -3,9 +3,41 @@ const path = require('path');
 const fs = require('fs');
 const { normalizeName } = require('./utils/normalize');
 
-const DB_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH
-  ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'draft.db')
+// Railway sets RAILWAY_VOLUME_MOUNT_PATH only when a volume is actually attached. With
+// no volume the database lands inside the container, which is destroyed on every deploy
+// — and because the app self-seeds players from Sleeper on boot, the board comes back
+// looking perfectly healthy while every ranking, star, tier and note is gone. That is
+// the whole reason this is reported rather than left to be noticed.
+const VOLUME = process.env.RAILWAY_VOLUME_MOUNT_PATH || null;
+const DB_PATH = VOLUME
+  ? path.join(VOLUME, 'draft.db')
   : path.join(__dirname, '..', 'draft.db');
+
+// Ephemeral only matters where the container is thrown away. A laptop keeps its files.
+const ON_RAILWAY = !!(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID
+  || process.env.RAILWAY_SERVICE_ID);
+
+function storageInfo() {
+  let bytes = null;
+  try {
+    bytes = fs.statSync(DB_PATH).size;
+  } catch { /* not written yet */ }
+  const userData = db.prepare(`
+    SELECT COUNT(*) AS c FROM player_overrides
+    WHERE personal_rank IS NOT NULL OR tier IS NOT NULL OR starred = 1 OR flagged = 1
+       OR drafted = 1 OR note_personal IS NOT NULL OR note_upside IS NOT NULL
+       OR note_downside IS NOT NULL
+  `).get().c;
+  return {
+    db_path: DB_PATH,
+    volume_mount: VOLUME,
+    on_railway: ON_RAILWAY,
+    // The one that matters: will this survive the next deploy?
+    persistent: !ON_RAILWAY || !!VOLUME,
+    size_bytes: bytes,
+    rows_with_your_data: userData,
+  };
+}
 
 const dbDir = path.dirname(DB_PATH);
 if (!fs.existsSync(dbDir)) {
@@ -15,7 +47,12 @@ if (!fs.existsSync(dbDir)) {
 const db = new Database(DB_PATH);
 
 db.pragma('journal_mode = WAL');
-db.pragma('synchronous = NORMAL');
+// FULL rather than NORMAL: with NORMAL, WAL only fsyncs at a checkpoint, so a container
+// killed outright can lose the last few commits — the stars and notes you just tapped in.
+// That was a free trade while the whole database was thrown away on every deploy; on a
+// volume it is not. Writes here are occasional taps and bulk refreshes that run in one
+// transaction each, so the extra fsync costs nothing measurable.
+db.pragma('synchronous = FULL');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS players (
@@ -54,6 +91,50 @@ db.exec(`
     last_fetched TEXT,
     player_count INTEGER,
     status TEXT
+  );
+
+  -- The live Sleeper draft the board is following. One row, ever: you draft in one
+  -- room at a time, and pinning the id means a reload rejoins the same draft.
+  CREATE TABLE IF NOT EXISTS draft_sync (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    draft_id TEXT NOT NULL,
+    status TEXT,
+    type TEXT,
+    season TEXT,
+    scoring_type TEXT,
+    league_id TEXT,
+    league_name TEXT,
+    teams INTEGER,
+    rounds INTEGER,
+    reversal_round INTEGER DEFAULT 0,
+    my_user_id TEXT,
+    my_display_name TEXT,
+    my_slot INTEGER,
+    team_names TEXT,
+    draft_order TEXT,
+    connected_at TEXT,
+    last_synced TEXT,
+    last_error TEXT
+  );
+
+  -- Picks as Sleeper reported them. The pick is the record; player_id is only our
+  -- match onto it, so a pick we cannot match (a kicker, a defence, a player this
+  -- board does not carry) is still stored and still shown in the feed.
+  CREATE TABLE IF NOT EXISTS draft_picks (
+    draft_id TEXT NOT NULL,
+    pick_no INTEGER NOT NULL,
+    round INTEGER,
+    draft_slot INTEGER,
+    roster_id INTEGER,
+    picked_by TEXT,
+    is_keeper INTEGER DEFAULT 0,
+    sleeper_player_id TEXT,
+    player_id INTEGER REFERENCES players(id),
+    player_name TEXT,
+    position TEXT,
+    nfl_team TEXT,
+    seen_at TEXT,
+    PRIMARY KEY (draft_id, pick_no)
   );
 `);
 
@@ -96,6 +177,8 @@ addColumnIfMissing('players', 'dp_value_sf', 'INTEGER');
 addColumnIfMissing('players', 'ds_value', 'INTEGER');
 addColumnIfMissing('players', 'ds_value_sf', 'INTEGER');
 addColumnIfMissing('players', 'fp_tier', 'INTEGER');
+addColumnIfMissing('players', 'ff_pos_rank', 'INTEGER');
+addColumnIfMissing('players', 'ff_points', 'REAL');
 
 // Populate name_normalized for any rows missing it
 (function populateNameNormalized() {
@@ -113,13 +196,14 @@ addColumnIfMissing('players', 'fp_tier', 'INTEGER');
 const initSource = db.prepare(`
   INSERT OR IGNORE INTO source_metadata (source, status) VALUES (?, 'never')
 `);
-['fantasypros', 'underdog', 'sleeper', 'ffc', 'market', 'dynastyprocess', 'dynastydaddy', 'fantasycalc'].forEach(s => initSource.run(s));
+['fantasypros', 'underdog', 'sleeper', 'ffc', 'market', 'dynastyprocess', 'dynastydaddy', 'fantasycalc', 'footballers'].forEach(s => initSource.run(s));
 
 // Lookup indexes for the matcher and the projection-rank subquery.
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_players_norm_pos ON players (name_normalized, position);
   CREATE INDEX IF NOT EXISTS idx_players_sleeper_id ON players (sleeper_player_id);
   CREATE INDEX IF NOT EXISTS idx_players_pos_proj ON players (position, projected_pts);
+  CREATE INDEX IF NOT EXISTS idx_draft_picks_player ON draft_picks (player_id);
 `);
 
 const { consensusColumns } = require('./sources');
@@ -137,4 +221,4 @@ function computeConsensus(row, format, leagueType) {
   return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
 }
 
-module.exports = { db, computeConsensus, DB_PATH };
+module.exports = { db, computeConsensus, DB_PATH, storageInfo };

@@ -127,7 +127,8 @@ export default function SourcePanel({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-80 z-50 bg-[#141821] border border-[#2e3148] rounded-lg shadow-2xl p-3">
+        <div className="fixed inset-x-3 bottom-3 max-h-[78vh] overflow-y-auto z-50 bg-[#141821] border border-[#2e3148] rounded-lg shadow-2xl p-3
+                        sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-full sm:mt-1 sm:w-80 sm:max-h-none sm:overflow-visible">
           <div className="mb-2">
             <div className="text-xs font-semibold text-[#e8eaf0]">
               {formatLabel} · {leagueType === '2QB' ? 'Superflex' : '1QB'}

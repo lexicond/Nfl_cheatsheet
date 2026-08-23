@@ -61,8 +61,12 @@ export function usePlayers() {
     currentFormat = format,
     currentExcluded = undefined,
     currentTeamSize = teamSize,
+    { quiet = false } = {},
   ) => {
-    setLoading(true);
+    // A live draft refetches the board every time a pick lands. Flashing the skeleton
+    // for that would make the board unreadable in the middle of a draft, so the poll
+    // swaps the rows in without touching the loading state.
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams();
@@ -96,11 +100,17 @@ export function usePlayers() {
       }
     } catch (err) {
       setError(err.message);
-      showToast(`Failed to load players: ${err.message}`, 'error');
+      if (!quiet) showToast(`Failed to load players: ${err.message}`, 'error');
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   }, [filters, leagueType, format, excluded, teamSize, showToast]);
+
+  // Reload the board without a skeleton — used when a live draft pick lands.
+  const refetchQuiet = useCallback(
+    () => fetchPlayers(filters, leagueType, format, undefined, teamSize, { quiet: true }),
+    [fetchPlayers, filters, leagueType, format, teamSize],
+  );
 
   const setFormat = useCallback((f) => {
     const nextFilters = { ...filters, sort: '' };
@@ -171,7 +181,10 @@ export function usePlayers() {
       return next.filter(p => {
         if (filters.hideDrafted && p.drafted) return false;
         if (filters.starred && !p.starred) return false;
-        if (filters.tier != null && p.tier !== filters.tier) return false;
+        // The same effective tier the server filters on, and the same one the badge
+        // shows: yours if you set one, otherwise the automatic one. Comparing only
+        // hand-set tiers dropped every row the moment a tier filter was active.
+        if (filters.tier != null && (p.tier ?? p.tier_auto) !== filters.tier) return false;
         return true;
       });
     });
@@ -243,6 +256,7 @@ export function usePlayers() {
     filters,
     setFilter,
     refetch: fetchPlayers,
+    refetchQuiet,
     updateOverride,
     refreshSource,
     reorderPlayer,

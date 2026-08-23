@@ -29,11 +29,21 @@ const check = (name, cond, detail = '') => {
   const badge = () => p.locator('button[title*="Which sources"]').innerText();
   const headerCols = async () => (await p.locator('thead th').allInnerTexts()).map(t => t.trim());
   const topRows = async (n = 5) => (await p.locator('tbody tr').allInnerTexts()).slice(0, n).map(t => t.replace(/\s+/g, ' '));
-  const consensusOf = async (rowIdx = 0) => {
+  // The consensus down the top of the board, not one cell of it. Reading a single row
+  // made this test a hostage to the data: when every source happens to agree on the
+  // player at the top — as they do on the consensus number one most Augusts — his
+  // number does not move however the sources are toggled, and the check failed while
+  // the board underneath it was recomputing perfectly.
+  const consensusOf = async (rows = 12) => {
     const cols = await headerCols();
     const ci = cols.findIndex(c => c === 'CONSENSUS' || c === 'RANK');
-    const cells = await p.locator('tbody tr').nth(rowIdx).locator('td').allInnerTexts();
-    return cells[ci]?.trim();
+    const texts = await p.locator('tbody tr').allInnerTexts();
+    const out = [];
+    for (let i = 0; i < Math.min(rows, texts.length); i++) {
+      const cells = await p.locator('tbody tr').nth(i).locator('td').allInnerTexts();
+      out.push(cells[ci]?.trim());
+    }
+    return out.join(' ');
   };
 
   await p.goto(APP_URL, { waitUntil: 'networkidle' });

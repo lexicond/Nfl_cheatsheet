@@ -9,9 +9,14 @@ node server/scripts/validate-sources.js    # each format contains what it claims
 node server/scripts/test-source-toggle.js  # turning a source off changes the board
 node server/scripts/audit-matching.js      # name-matching damage across sources
 node server/scripts/health-check.js        # freshness, coverage, consistency
+node server/scripts/validate-draft-sync.js # live draft: season guard, matching, undo
 ```
 
-All four exit non-zero on failure. Run them after any refresh and after any change to
+All five exit non-zero on failure.
+
+`validate-draft-sync.js` hits Sleeper's live API and rewrites the pick tables, so it
+refuses to run while a draft is connected — pass `--force` to override. Set
+`SLEEPER_DRAFT_ID` to also check a draft of your own. Run them after any refresh and after any change to
 `server/sources.js`, `server/consensus.js` or a scraper.
 
 ## Browser suites
@@ -33,6 +38,7 @@ bash tests/browser/run-all.sh
 | `csnew.js` | Cheat sheet: defaults, sticky header, league size, sorting, Superflex persistence |
 | `cstoggle.js` | Cheat sheet source toggles and hover explanations |
 | `final.js` | Both themes at phone width, and that the page never scrolls sideways |
+| `draftsync.js` | Live Sleeper draft: taken players leave the board on their own, the panel reports the room, and disconnecting puts everyone back. Seeds a real draft's first twenty picks and lets the poll fetch the rest from Sleeper, so the live path runs end to end |
 
 `APP_URL` overrides the server address; `PLAYWRIGHT_CHROMIUM` points at a prebuilt browser.
 

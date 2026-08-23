@@ -4,6 +4,9 @@ const TEAM_SIZES = [8, 10, 12, 14];
 const state = {
   format: 'BB', league: '1QB', view: 'board', pos: null,
   teams: 12, sort: '', off: null,
+  // Mid-draft the players already gone are noise, so they come off by default. The
+  // toggle only appears when a live draft is attached.
+  hideTaken: true,
 };
 
 // Sources switched off, by family. One list for the whole sheet rather than one per
@@ -18,7 +21,24 @@ try {
 } catch (e) { /* private mode or corrupt value — fall back to the defaults */ }
 if (state.off === null) state.off = DEFAULT_OFF.slice();
 
+// A sheet built for one specific draft opens on that draft's board — set here, before
+// the first render, so it is right on the first paint and stays right even if the room
+// has no signal and no poll ever answers.
+if (typeof LIVE !== 'undefined' && LIVE) {
+  if (LIVE.format) state.format = LIVE.format;
+  if (LIVE.league) state.league = LIVE.league;
+  if (LIVE.teams) state.teams = LIVE.teams;
+}
+
 const isOff = field => state.off.includes(FAMILY_OF[field]);
+
+// data-set carries strings; the state they drive is not all strings.
+function coerceSet(k, v) {
+  if (v === 'null') return null;
+  if (k === 'teams') return Number(v);
+  if (k === 'hideTaken') return v === '1';
+  return v;
+}
 
 function savePrefs() {
   try {
@@ -108,12 +128,12 @@ function buildDynastyRanks() {
 // The ranked pool for the current format, with positional ranks attached.
 function pool() {
   buildDynastyRanks();
-  const rows = PLAYERS
-    .map(p => ({ ...p, h: headline(p), sc: sourceCount(p) }))
+  let rows = PLAYERS
+    .map(p => ({ ...p, h: headline(p), sc: sourceCount(p), taken: p.sid ? TAKEN[p.sid] : null }))
     .filter(p => p.h != null)
     .sort((a, b) => a.h - b.h);
 
-  const posN = {}, projN = {};
+  const posN = {};
   rows.forEach(p => { posN[p.p] = (posN[p.p] || 0) + 1; p.pr_pos = posN[p.p]; });
 
   // Projection rank within position, over the same pool.
@@ -157,7 +177,11 @@ function pool() {
     p.slGapAdj = p.slGap == null ? null : p.slGap - p.slNorm;
   });
 
-  return rows;
+  // Drafted players come out only at the very end. Every rank above — positional rank,
+  // projection rank, the Sleeper gap and its positional norms — is counted over the
+  // whole pool, so a player being taken elsewhere in the room never renumbers anyone
+  // still on the board. Filtering earlier made all of them drift as the draft went on.
+  return state.hideTaken ? rows.filter(p => !p.taken) : rows;
 }
 
 // Tier breaks fall where the market itself leaves a gap, not on round numbers.
@@ -270,9 +294,14 @@ function renderBoard(rows) {
     const split = p.spread == null ? '<span class="muted">&ndash;</span>'
       : `<span class="${p.spread >= 24 ? 'split-wide' : p.spread >= 12 ? '' : 'muted'}">${p.spread}</span>`;
 
-    body += `<tr>
+    // A player already taken in the live draft, shown only when "hide taken" is off.
+    const tk = p.taken
+      ? ` <span class="tkchip${p.taken.mine ? ' mine' : ''}">#${p.taken.pick}${p.taken.mine ? ' you' : ''}</span>`
+      : '';
+
+    body += `<tr${p.taken ? ' class="taken"' : ''}>
       <td class="rk">${n}</td>
-      <td class="nm"><div class="pname">${esc(p.n)} ${delta}</div>
+      <td class="nm"><div class="pname">${esc(p.n)} ${delta}${tk}</div>
         <div class="pmeta">${esc(p.t || 'FA')} &middot; ${p.p}${p.pr_pos}${p.sc < 2 ? ' &middot; 1 source' : ''}</div></td>
       <td><span class="chip ${p.p}">${p.p}</span></td>
       <td class="dim">${(state.format === 'DYN' ? p.age : p.b) ?? '&ndash;'}</td>
@@ -442,8 +471,7 @@ function render() {
 
   document.querySelectorAll('[data-set]').forEach(b => {
     const [k, v] = b.dataset.set.split('=');
-    const want = v === 'null' ? null : (k === 'teams' ? Number(v) : v);
-    b.setAttribute('aria-pressed', String(state[k] === want));
+    b.setAttribute('aria-pressed', String(state[k] === coerceSet(k, v)));
   });
 
   // Superflex only exists as a concept where a source publishes it.
@@ -454,7 +482,7 @@ document.addEventListener('click', e => {
   const b = e.target.closest('[data-set]');
   if (!b) return;
   const [k, v] = b.dataset.set.split('=');
-  state[k] = v === 'null' ? null : (k === 'teams' ? Number(v) : v);
+  state[k] = coerceSet(k, v);
   if (k === 'teams') savePrefs();
   render();
 });

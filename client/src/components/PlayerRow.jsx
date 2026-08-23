@@ -54,8 +54,9 @@ function ValueBadge({ score, position }) {
 
 export default function PlayerRow({
   player, index, onUpdate, onOpenModal, columns = [],
-  format = 'BB', leagueType = '1QB', sleeperBaseline = null,
+  format = 'BB', leagueType = '1QB', sleeperBaseline = null, draftUrl = null,
 }) {
+  const [copied, setCopied] = useState(false);
   const [editingRank, setEditingRank] = useState(false);
   const [rankInput, setRankInput] = useState('');
   const rankRef = useRef(null);
@@ -94,6 +95,13 @@ export default function PlayerRow({
   // so the gap is read against its position's norm rather than against zero.
   const gapNorm = (sleeperBaseline?.positional_norms?.[player.position]) ?? 0;
   const gapVsNorm = player.sleeper_gap == null ? null : player.sleeper_gap - gapNorm;
+
+  // FantasyPros publishes real expert tiers. They sit on their own scale (theirs run
+  // well past five) so they do not drive the badge, but they are worth naming where the
+  // badge explains itself.
+  const fpTierNote = player.fp_tier != null
+    ? ` · FantasyPros put him in their tier ${player.fp_tier}`
+    : '';
 
   // Position rank in the format currently on screen, not whichever source ranked
   // him highest.
@@ -230,7 +238,16 @@ export default function PlayerRow({
     sleeper_gap: (
       <td key="sleeper_gap" className={`${cellClass} w-16 font-mono text-right`}>
         {gapVsNorm == null || Math.abs(gapVsNorm) < 5 ? (
-          <span className="text-[#555875]">{gapVsNorm == null ? '–' : '·'}</span>
+          <span
+            className="text-[#555875]"
+            title={gapVsNorm == null
+              ? 'Sleeper publishes no ranking for him in this format'
+              : `Sleeper and your consensus are within ${Math.abs(gapVsNorm)} places of each `
+                + 'other on him, so there is no edge either way. Only gaps of 5 places or '
+                + 'more get a number.'}
+          >
+            {gapVsNorm == null ? '–' : '·'}
+          </span>
         ) : (
           <span
             className={gapVsNorm > 0 ? 'text-green-400' : 'text-amber-400'}
@@ -281,7 +298,7 @@ export default function PlayerRow({
           <button
             onClick={cycleTier}
             className={`tier-badge w-7 h-7 text-xs tier-${player.tier}`}
-            title="Click to cycle tier"
+            title={`Your own tier ${player.tier}${fpTierNote} · click to cycle`}
           >
             T{player.tier}
           </button>
@@ -289,7 +306,7 @@ export default function PlayerRow({
           <button
             onClick={cycleTier}
             className="tier-badge w-7 h-7 text-xs border-dashed border-[#2e3148] text-[#555875] hover:text-[#8b90a8] opacity-50"
-            title={`Auto-tier T${player.tier_auto} (ADP-based) · click to set`}
+            title={`Tier ${player.tier_auto}, drawn from where his consensus number falls: the bands are the first half round, then rounds 1½, 3 and 6 at this league size. Not anyone’s expert tiers${fpTierNote}. Dashed because it is automatic — click to set your own.`}
           >
             T{player.tier_auto}
           </button>
@@ -326,18 +343,60 @@ export default function PlayerRow({
       </td>
     ),
 
+    // A player taken in a connected Sleeper draft shows the pick that took him instead
+    // of the manual toggle: the tick is not the user's to undo, and the pick number is
+    // the more useful fact anyway. Disconnecting the draft brings the toggle back.
     status: (
       <td key="status" className={`${cellClass} w-24`}>
-        <button
-          onClick={() => onUpdate(player.id, { drafted: !player.drafted })}
-          className={`text-xs px-2 py-0.5 rounded border transition-colors ${
-            player.drafted
-              ? 'bg-green-500/20 text-green-400 border-green-500/40'
-              : 'border-[#2e3148] text-[#555875] hover:border-[#555875] hover:text-[#8b90a8]'
-          }`}
+        {player.draft_pick_no != null ? (
+          <span
+            className={`text-xs px-2 py-0.5 rounded border block truncate ${
+              player.drafted_by_me
+                ? 'bg-green-500/20 text-green-300 border-green-500/40'
+                : 'bg-[#222535] text-[#8b90a8] border-[#2e3148]'
+            }`}
+            title={`Pick ${player.draft_pick_no}`
+              + (player.draft_round ? `, round ${player.draft_round}` : '')
+              + (player.drafted_by ? ` — ${player.drafted_by}` : '')
+              + (player.drafted_by_me ? ' (yours)' : '')}
+          >
+            #{player.draft_pick_no} {player.drafted_by_me ? 'you' : player.drafted_by}
+          </span>
+        ) : (
+          <button
+            onClick={() => onUpdate(player.id, { drafted: !player.drafted })}
+            className={`text-xs px-2 py-0.5 rounded border transition-colors ${
+              player.drafted
+                ? 'bg-green-500/20 text-green-400 border-green-500/40'
+                : 'border-[#2e3148] text-[#555875] hover:border-[#555875] hover:text-[#8b90a8]'
+            }`}
+          >
+            {player.drafted ? '✓ Drafted' : 'Available'}
+          </button>
+        )}
+      </td>
+    ),
+
+    // Sleeper takes no picks from outside its own app, so this does the next best thing:
+    // copies the name and opens the draft room, leaving a paste into its search box.
+    // Copying is best-effort — an older browser or an insecure origin just gets the link.
+    go: (
+      <td key="go" className={`${cellClass} w-9 text-center`}>
+        <a
+          href={draftUrl || 'https://sleeper.com'}
+          target="_blank"
+          rel="noreferrer"
+          onClick={() => {
+            navigator.clipboard?.writeText(player.name).then(
+              () => { setCopied(true); setTimeout(() => setCopied(false), 2000); },
+              () => {},
+            );
+          }}
+          className={`text-sm transition-colors ${copied ? 'text-green-400' : 'text-[#2e3148] hover:text-blue-400'}`}
+          title={`Copy "${player.name}" and open the draft room on Sleeper — paste it into the search box there`}
         >
-          {player.drafted ? '✓ Drafted' : 'Available'}
-        </button>
+          {copied ? '✓' : '↗'}
+        </a>
       </td>
     ),
 
