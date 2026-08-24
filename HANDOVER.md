@@ -463,6 +463,27 @@ it is good for. The model still invents its own spread there, and a market-impli
 per player is a better one — the work is fitting the per-stat ladders into a single fantasy
 points distribution, which the stats being correlated makes non-trivial.
 
+**2c. A draft-capital starting quarterback collapses his team's whole receiving corps.**
+Found by asking why Brock Bowers — ADP 18, 9.0 targets a game in 2024 — projected 111 points
+against Sleeper's 202.
+
+Team targets are scaled to the team's projected pass attempts. Those attempts are summed from
+quarterbacks the model actually projects, and a quarterback projected from draft capital is
+excluded from every team total. Las Vegas lists Fernando Mendoza first, so he contributes
+nothing: LV's budget is built from 305 attempts where a real team throws about 545. Every
+Raiders pass-catcher is then scaled down to fit, and the scale clamps at its 0.6 floor. Bowers
+is collateral damage from his quarterback being a rookie.
+
+It is exactly one team today — LV is the only one with a draft-capital quarterback listed
+first, and the league median attempt budget is a healthy 513 — which is why it reads as a
+strange one-off rather than a systemic bias. The fix is not small: either draft-capital
+quarterbacks need an attempt rate so they enter the budget, or the attempt budget needs to come
+from conserved quarterback games at an environment-set rate rather than from whichever
+quarterbacks happen to have usage history. The second is closer to how carries already work,
+but it would make the targets-per-attempt identity a check that two constants were applied
+rather than that the parts agree, so it needs the backtest run before it goes anywhere near the
+board.
+
 **3. No correlation in the simulation.** Each player's weeks are drawn independently, so a
 quarterback and his WR1 are uncorrelated when in reality they run about +0.5 together. That
 understates the ceiling of a stack and means the Ceil column cannot yet be used to build

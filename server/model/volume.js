@@ -35,12 +35,49 @@ const { shrink } = require('./stability');
  * the baseline for the rank he actually holds now is the fix, and it is the same
  * empirical-Bayes step the model already applies — just aimed at the right target.
  */
+// How fast the allowance keeps falling past third on the chart.
+//
+// The table below stops at three, and clamping everyone deeper to that row handed a WR7 a
+// WR3's workload. Las Vegas is what that costs: Dont'e Thornton (seventh) and Noah Brown
+// (seventh) projected 43 and 34 points against Sleeper's 3.7 and 7.3, and their targets went
+// into the team's total. The conservation step then scaled every Raiders receiver down by
+// 40% to fit the budget, which is how Brock Bowers — a genuine TE1 on 9.0 targets a game in
+// 2024 — came out at 100 points against Sleeper's 202. The error was made by the fringe
+// players and paid for by the starter.
+const DEEP_DECAY = 0.7;
+
+// A player Sleeper carries on the roster but does not place on the chart at all. Read as
+// "no rank known" he escaped the backup cap entirely and projected like a starter: Raheem
+// Mostert came out at 84 points against Sleeper's 10. Unranked is not first — that mistake
+// is documented and guarded elsewhere — but nor is it unknown. In practice it means deep.
+const UNRANKED_DEPTH = 5;
+
 const DEPTH_VOLUME = {
   QB: [{ attempts_pg: 32.06, carries_pg: 3.36 }, { attempts_pg: 14.0, carries_pg: 1.83 }, { attempts_pg: 8.0, carries_pg: 1.5 }],
   RB: [{ targets_pg: 2.58, carries_pg: 11.86 }, { targets_pg: 1.5, carries_pg: 5.0 }, { targets_pg: 1.0, carries_pg: 3.88 }],
   WR: [{ targets_pg: 5.13 }, { targets_pg: 2.54 }, { targets_pg: 2.14 }],
   TE: [{ targets_pg: 4.19 }, { targets_pg: 2.0 }, { targets_pg: 1.5 }],
 };
+
+/**
+ * The typical workload for a rank, continuing to fall past the end of the table.
+ *
+ * Ranks one to three come from measured usage. Beyond that the table has nothing to say, so
+ * the third row decays geometrically rather than flattening — a seventh receiver is not a
+ * third receiver, and treating him as one puts phantom targets into his team's budget.
+ */
+function depthAllowance(position, depthOrder) {
+  const table = DEPTH_VOLUME[position];
+  if (!table) return null;
+  const rank = Math.max(1, depthOrder);
+  const row = table[Math.min(rank, table.length) - 1];
+  if (!row) return null;
+  if (rank <= table.length) return row;
+  const decay = DEEP_DECAY ** (rank - table.length);
+  const out = {};
+  for (const [metric, value] of Object.entries(row)) out[metric] = value * decay;
+  return out;
+}
 
 // Recency weights, newest first. A season is only counted if the player has one.
 const RECENCY = [0.6, 0.28, 0.12];
@@ -120,7 +157,7 @@ function projectVolume(seasons, position, baselines, stability, env, tuning = {}
   // Where the depth chart names his rank, shrink toward what that rank typically does
   // rather than toward the position at large. His own history may be a different job.
   const rankBase = (depthOrder != null && (tuning.useDepthVolume ?? true))
-    ? (DEPTH_VOLUME[position]?.[Math.min(Math.max(depthOrder, 1), 3) - 1] || null)
+    ? depthAllowance(position, depthOrder)
     : null;
 
   // How far above his rank's typical workload a backup is allowed to project. Some
@@ -170,4 +207,7 @@ function projectVolume(seasons, position, baselines, stability, env, tuning = {}
   return out;
 }
 
-module.exports = { projectVolume, volumeBaselines, weightedMean, RECENCY, VOLUME_METRICS, DEPTH_VOLUME };
+module.exports = {
+  projectVolume, volumeBaselines, weightedMean, depthAllowance,
+  RECENCY, VOLUME_METRICS, DEPTH_VOLUME, UNRANKED_DEPTH,
+};

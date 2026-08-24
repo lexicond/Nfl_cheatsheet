@@ -280,9 +280,19 @@ it was never given and fails if it does not beat "repeat last season".
 - **A backup's per-game rate is a starter's rate.** It was earned in games he started with
   the man ahead of him hurt. Zach Charbonnet projected 170 points against Sleeper's 62
   until his usage was shrunk toward the baseline for the rank he actually holds.
-- **`depth_chart_order` 0 means unranked, not first.** Sleeper uses it for players carried
-  on the roster but not placed on the chart. Read as a starter it made Chase Edmonds
-  Washington's lead back.
+- **`depth_chart_order` 0 means unranked, not first — but nor is it unknown.** Sleeper uses it
+  for players carried on the roster but not placed on the chart. Read as a starter it made
+  Chase Edmonds Washington's lead back; read as *no information* it let Raheem Mostert escape
+  the backup cap entirely and project 84 points against Sleeper's 10. In practice unranked
+  means deep, so it maps to `UNRANKED_DEPTH`. A player with no depth-chart entry at all is
+  still genuinely unknown, and that distinction is the whole point of the mapping.
+- **The depth allowance has to keep falling past third, not flatten.** `DEPTH_VOLUME` stops at
+  three and the lookup used to clamp to it, so a WR7 was handed a WR3's workload — Dont'e
+  Thornton and Noah Brown projected 43 and 34 points against Sleeper's 3.7 and 7.3. Those
+  phantom targets go into the team's total, and the conservation step then scales every
+  receiver on that team down to fit the budget, so the error made by the fringe players is
+  paid for by the starter. Fixing both leaks moved agreement with Sleeper from rho 0.82 to
+  0.88 and the held-out backtest edge from +0.017 to +0.021.
 - **A current injury is a fact, not a forecast.** IR, PUP, Sus and DNR mean he is not
   playing and get no projection; Questionable and Doubtful are week-to-week noise and are
   ignored. Charbonnet sat high on the board while on PUP with a repaired ACL.

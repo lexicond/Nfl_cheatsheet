@@ -12,7 +12,7 @@
 const nflverse = require('./nflverse');
 const { buildUsageHistory, positionalBaselines } = require('./usage');
 const { buildStability } = require('./stability');
-const { projectVolume, volumeBaselines } = require('./volume');
+const { projectVolume, volumeBaselines, UNRANKED_DEPTH } = require('./volume');
 const { projectEfficiency, fpoeResidual } = require('./efficiency');
 const { buildEnvironment } = require('./environment');
 const { loadOddsGames } = require('./odds');
@@ -336,7 +336,10 @@ async function runModel({
     const depth = depthChart
       ? (depthChart.get(String(idEntry?.sleeper_id)) || depthChart.get(gsis) || null)
       : null;
-    const depthOrder = depth?.order ?? null;
+    // A player on the chart without a rank is carried but unplaced, which in practice means
+    // deep — not unknown. Left as null he escaped the backup cap and projected like a
+    // starter. `depth` being absent entirely (no chart at all) still means no information.
+    const depthOrder = depth ? (depth.order ?? UNRANKED_DEPTH) : null;
 
     // He has to be on a team. A retired player keeps his usage history for ever, so the
     // role gate alone will happily project him: Derek Carr, retired, cleared it on his
