@@ -55,6 +55,12 @@ function marketTitle(player) {
     parts.push('PARTIAL — the books price no season line for every category he scores in, '
       + 'so this total is missing one and reads low. Not comparable with a full total');
   }
+  if (player.mkt_adjusted > 0) {
+    // The one place a distribution assumption enters this column, so it is said out loud.
+    parts.push(`${player.mkt_adjusted} of these ${player.mkt_adjusted === 1 ? 'line is' : 'lines are'} `
+      + 'the median the market\'s price implies rather than the number it posts — a line at long '
+      + 'odds is a threshold, not an expectation');
+  }
   if (player.mkt_books != null) {
     parts.push(player.mkt_books >= 5
       ? `every line here is priced by at least ${player.mkt_books} books`

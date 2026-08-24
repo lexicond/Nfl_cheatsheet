@@ -86,7 +86,15 @@ deliberately outside every average and outside the model. Only rows whose positi
 scoring category priced (`mkt_complete`) are a season total; the rest are shown dimmed and
 compared with nothing.
 
-After touching anything under `server/model/` **or `scrapers/marketprops.js`**, run
+Three further market sources sit around it, each with one job and none of them a board column:
+
+| File | Role |
+|---|---|
+| `model/wintotals.js` | VegasInsider season win totals — the market on whole teams |
+| `scrapers/polymarket.js` | Threshold ladders → the distribution SHAPE nothing else publishes |
+| `scrapers/rotowire.js` | A second vendor on the same books, to check the first |
+
+After touching anything under `server/model/` **or any of the market sources above**, run
 `node server/scripts/validate-projections.js`. It backtests the model against a season
 it was never given and fails if it does not beat "repeat last season".
 
@@ -311,14 +319,39 @@ it was never given and fails if it does not beat "repeat last season".
   an under at 1050.5 (−110). De-vigging that pair produces a confident number that is simply
   wrong. The consensus book is two-sided at one number (98 of those same 107 agree), so it is
   the only line read and no de-vigging happens at all.
-- **A line is only a median if it is priced like one.** Book 68 alone posted De'Zhaun
-  Stribling — a rookie receiver — at 74.5 receptions, over at +245 against under at −376. That
-  is the market giving him about a 27% chance of getting there, not expecting him to; read as
-  a median it made him a top-20 receiver. Measured across all seven markets only 3–8% of
-  offers are lopsided like that (the median offer sits within 0.03 of even money), so
-  `PRICE_BAND` rejects them rather than correcting them: recovering a median from a one-sided
-  quote needs an assumed distribution the market has not published, and a guessed number that
-  looks like a market line is worse than no number.
+- **A line is only a median if it is priced like one, so the price is used and not just the
+  line.** Kyler Murray came back at 5.5 rushing touchdowns with the over near 28%; De'Zhaun
+  Stribling, a rookie receiver, at 74.5 receptions on +245 against −376. Read as medians those
+  are nonsense. Every line is converted to the median it implies —
+  `median = line × exp(−sigma × Φ⁻¹(1−p))` — which is a no-op at even money by construction,
+  so there is no threshold to tune and no cliff between a "fair" line and a "lopsided" one.
+  Checked against the model's independent estimate of the same statistic, it changes almost
+  nothing on the 430 already-fair offers (28.7% → 27.9% mean error) and moves the lopsided
+  ones a long way closer (278% → 197%). Only quotes past `PRICE_BAND` from even money are
+  still refused, where the fit would be extrapolating into a tail.
+- **The spread that conversion needs is the one thing no sportsbook publishes, and Polymarket
+  does.** Its threshold ladders are a survival function per player-stat — price *is*
+  probability there, since it charges on resolution rather than taking vig — so a lognormal
+  fitted through the rungs gives sigma straight from a market. The measured spreads order
+  themselves the way anyone who watches football would expect, which is the main reason to
+  believe them: passing yards 0.19, passing TDs 0.32, rushing yards 0.55, rushing TDs 0.60,
+  receiving yards 0.62, receiving TDs 0.76. Liquidity is thin ($300–$10k an event, rungs under
+  $50), so it is used for shape only and its own fitted median is recorded but never read.
+  Ladders are non-monotonic often enough that monotonicity has to be imposed before fitting.
+- **A lognormal fits a touchdown count badly, and left uncapped the correction ran away with
+  it.** TD lines are quoted in half-numbers on a base of about five, so most of the distance
+  between a posted `x.5` and the true median is the book rounding, not displacement. Uncapped,
+  Calvin Ridley's receiving touchdowns went from 4.5 to 3.1 while every book RotoWire could
+  see still said 4.5. The shift on a count is capped at half a step; yardage and receptions
+  are effectively continuous and are not capped.
+- **The consensus pseudo-book can contradict every book behind it.** Ashton Jeanty's rushing
+  yards showed a consensus of 574.5 while eleven of his twelve real books sat at 974.5–1000.5,
+  all flagged `is_off`, with one lone live outlier at 574.5 that the consensus was echoing.
+  Nothing about the offer looks broken — it parses, it is two-sided, and it is priced close
+  enough to even money to clear the band. So the consensus is also checked against the books it
+  claims to summarise (`MIN_BOOK_SUPPORT`), and where essentially none of them agree the books'
+  median is used instead. RotoWire, fetched independently in the validator, names the same
+  players from outside, which is the reason to believe the rule rather than the threshold.
 - **The books do not price every category for every player, so the totals are not all the same
   quantity.** Receiving markets exist for the pass-catching backs and not the rest — 22 of 36
   running backs had a rushing line and no receiving line at all — and adding up what is priced
@@ -330,6 +363,35 @@ it was never given and fails if it does not beat "repeat last season".
   validator compares only complete totals. Filtering to them moved model-vs-market agreement
   from rho 0.775 to 0.846 and Sleeper's from 0.914 to 0.975 — most of the apparent
   disagreement was the mismatched denominators, exactly as the arbitrage-column trap predicted.
+- **VegasInsider's four books post DIFFERENT win-total lines, so the page cannot be
+  averaged.** Baltimore came back at o11.5 (+120) from one book and o10.5 (−150) from another.
+  Each quote is converted to the total it implies before anything is combined, and the two
+  Baltimore numbers then land within 0.01 of each other from lines a full win apart. Summing
+  all 32 gives 273.3 against the 272 a season hands out — but note honestly that averaging the
+  raw lines sums correctly too, because the price corrections cancel across the league; what
+  the identity really catches is taking the MEDIAN line, which sums to 278. The price
+  adjustment earns its place per team, not in aggregate: it moves the Rams by 0.64 wins.
+- **Only the over is published on win totals**, so there is no second side to de-vig against
+  and a standard two-way overround is assumed instead. It is worth about a tenth of a win and
+  is applied identically to every team, so it cannot reorder them.
+- **RotoWire's team, position and player id are not to be trusted** — the brief's Lamar Jackson
+  row came back a cornerback with a null team, and rows here really do disagree with the board.
+  Nothing is read from them: the join is an exact normalised name against players the board
+  already has, and a name matching more than one player is skipped rather than guessed.
+- **Circa is documented as the sharp reference and is currently absent**, along with BetMGM,
+  BetRivers, Hard Rock and theScore — all five return null on every RotoWire row. Only
+  DraftKings, Caesars and FanDuel carry lines today. Worth knowing before building anything on
+  "prefer Circa when present".
+- **RotoWire is deliberately not a board column.** It carries the same six markets from broadly
+  the same books, so publishing it beside `MKT` would put two renderings of one market on the
+  board and invite them to be read as two opinions. It runs in the validator instead, where it
+  independently catches the consensus coming adrift from the market — which is what settled
+  that Jeanty's 574.5 was wrong rather than early.
+- **The vendor cross-check compares RAW consensus lines, not what the board stores.** The
+  stored number is the median a line's price implies, which is deliberately a different
+  quantity from a posted line; checking it against RotoWire's posted lines reported every price
+  correction as a vendor disagreement and put the failure rate at 9.9% of nonsense instead of
+  8.5% of signal.
 - **`mkt_books` is the THINNEST of a player's lines, not the widest.** A total whose receiving
   yards eight books agree on but whose receptions come from one is only as good as that one.
   Taking the max read as broad agreement on players who had none.

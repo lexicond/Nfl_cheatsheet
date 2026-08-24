@@ -492,6 +492,81 @@ function rmse(pairs) {
   console.log(`  reclaimed ${live.meta.qb_conservation.games_reclaimed} QB games, ` +
     `dropped ${live.meta.qb_conservation.dropped} with no share of the job left`);
 
+  /* ------------------------------------------------ the market on whole teams */
+  section('Against the market on whole teams — season win totals');
+  try {
+    const { fetchWinTotals } = require('../model/wintotals');
+    const wt = await fetchWinTotals();
+    const names = Object.keys(wt);
+
+    if (names.length < 32) {
+      warn(`only ${names.length} of 32 teams carry a win total — VegasInsider's markup may have moved`);
+    } else {
+      ok(`all 32 teams priced, ${wt[names[0]].books} books each`);
+
+      // A season hands out exactly 272 wins. Nothing in the scrape enforces that, and the
+      // books are not trying to make it true, so it is the sharpest available check that the
+      // page was read correctly and that the price adjustment is sane. Averaging the posted
+      // LINES happens to sum correctly too; taking the median line does not, and comes out
+      // near 278. Per team the two methods differ by up to 0.6 wins, which is what actually
+      // matters for ordering.
+      const total = names.reduce((a, t) => a + wt[t].wins, 0);
+      if (Math.abs(total - 272) <= 8) ok(`implied wins sum to ${total.toFixed(1)}, against the 272 a season has`);
+      else bad(`implied wins sum to ${total.toFixed(1)} — a season has 272, so the scrape or the price adjustment is wrong`);
+
+      // Books post different lines for the same team; once each quote is converted to the
+      // total it implies they should agree. If they do not, the conversion is broken.
+      const spreads = names.map(t => wt[t].crossBookSpread).sort((a, b) => a - b);
+      const worst = spreads[spreads.length - 1];
+      const multi = names.filter(t => wt[t].lines.length > 1);
+      if (worst <= 1.0) {
+        ok(`books reconcile to within ${worst.toFixed(2)} wins (median ${spreads[Math.floor(spreads.length / 2)].toFixed(2)}), ` +
+          `including ${multi.length} teams where they post different lines`);
+      } else {
+        bad(`books disagree by up to ${worst.toFixed(2)} wins after conversion — the price adjustment is not working`);
+      }
+
+      // The model's own view of each team, built bottom-up from the players it projects.
+      // Read this as a check on ORDERING, not on level: the environment layer already scales
+      // every projection by the market's implied points per game, so the model has seen the
+      // market's opinion of these offences. What it has not seen is the win total, which
+      // prices defence and schedule too — so a weak correlation here would still be a
+      // finding, and a team far off the line is worth looking at.
+      const offence = new Map();
+      for (const p of P) {
+        if (!p.team || p.components?.basis) continue;
+        offence.set(p.team, (offence.get(p.team) || 0) + (p.points || 0));
+      }
+      const pairs = names.filter(t => offence.has(t)).map(t => [offence.get(t), wt[t].wins]);
+      if (pairs.length >= 24) {
+        const r = correlation(pairs);
+        console.log(`  model's projected team offence vs the market's win total: rho ${r.toFixed(3)} over ${pairs.length} teams`);
+        // Not asserted upward: offence alone cannot explain wins, and the model does not
+        // project defence at all. Asserted downward, because no relationship would mean the
+        // bottom-up sums have come loose from the teams they belong to.
+        if (r >= 0.35) ok(`team-level offence tracks the win market at rho ${r.toFixed(3)}`);
+        else bad(`team offence and the win market are unrelated (rho ${r.toFixed(3)}) — the per-team sums are suspect`);
+
+        const fitted = pairs.slice().sort((a, b) => a[0] - b[0]);
+        const lo = fitted.slice(0, 4).map(x => x[1]).reduce((a, b) => a + b, 0) / 4;
+        const hi = fitted.slice(-4).map(x => x[1]).reduce((a, b) => a + b, 0) / 4;
+        console.log(`  the four offences it likes least are priced for ${lo.toFixed(1)} wins; the four it likes most, ${hi.toFixed(1)}`);
+
+        // Teams the role gate has hollowed out show up here rather than anywhere else: a
+        // team with no projectable quarterback has almost no projected offence, whatever
+        // the market thinks of it.
+        const byGap = pairs.map(([o, w], i) => ({ team: names.filter(t => offence.has(t))[i], o, w }))
+          .sort((a, b) => (a.o / a.w) - (b.o / b.w));
+        console.log(`  thinnest offence per priced win: ${byGap.slice(0, 3).map(x => `${x.team} (${x.o.toFixed(0)}pts / ${x.w.toFixed(1)}w)`).join(', ')}`);
+      } else {
+        warn(`only ${pairs.length} teams have both a projection and a win total`);
+      }
+    }
+  } catch (err) {
+    // The board must not fail its validation because a scraped page moved.
+    warn(`win totals unavailable (${err.message}) — skipping the team-level market check`);
+  }
+
   /* ------------------------------------------------- the per-player market */
   section('Against the betting market — the only per-player second opinion');
   if (db) {
@@ -555,6 +630,85 @@ function rmse(pairs) {
       if (modelRho >= 0.6) ok(`model tracks the market at rho ${modelRho.toFixed(3)}`);
       else bad(`model agrees with the market at only rho ${modelRho.toFixed(3)} — ` +
         'that is not independence, it is a fault');
+    }
+  }
+
+  /* -------------------------------------------- a second vendor on the market */
+  section('Cross-checked against RotoWire — is the consensus the market?');
+  if (db) {
+    try {
+      const { fetchPlayerFutures } = require('../scrapers/rotowire');
+      const { rows, failures } = await fetchPlayerFutures();
+      if (failures.length) warn(`RotoWire tables missing: ${failures.join('; ')}`);
+
+      // Compared against BettingPros' RAW consensus line, not against what this board stores.
+      // The stored number is the median that line's price implies, which is deliberately a
+      // different quantity from a posted line; checking it against RotoWire's posted lines
+      // would report every price correction as a vendor disagreement. The question here is
+      // only whether BettingPros' consensus is reporting the same market everyone else sees.
+      const { fetchOffers, consensusLine, MARKETS } = require('../scrapers/marketprops');
+      const posted = new Map();
+      for (const m of MARKETS) {
+        for (const offer of await fetchOffers(m.id, new Date().getFullYear())) {
+          const line = consensusLine(offer, 'over');
+          if (line == null) continue;
+          const who = (offer.participants || [])[0]?.name;
+          if (!who) continue;
+          const key = String(who).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
+          posted.set(`${key}|${m.column}`, { line, name: who });
+        }
+      }
+
+      const bookCoverage = {};
+      const gaps = [];
+      let compared = 0;
+      for (const r of rows) {
+        for (const [book, quote] of Object.entries(r.books)) {
+          bookCoverage[book] = (bookCoverage[book] || 0) + (quote.line != null ? 1 : 0);
+        }
+        const match = posted.get(`${r.key}|${r.column}`);
+        if (!match) continue;
+        const ours = match.line;
+        if (ours == null || !(ours > 0)) continue;
+        // Only books quoting at something like even money: a milestone rung priced at +650
+        // is not this market's central estimate any more than a lopsided consensus is.
+        const fair = Object.values(r.books).filter(q => {
+          if (q.price == null) return true;
+          const p = q.price < 0 ? -q.price / (-q.price + 100) : 100 / (q.price + 100);
+          return Math.abs(p - 0.5) <= 0.2;
+        }).map(q => q.line);
+        if (!fair.length) continue;
+        fair.sort((a, b) => a - b);
+        const theirs = fair[Math.floor(fair.length / 2)];
+        compared++;
+        const relative = Math.abs(theirs - ours) / ours;
+        if (relative > 0.15) gaps.push({ name: match.name, label: r.label, ours, theirs, relative });
+      }
+
+      const live = Object.entries(bookCoverage).filter(([, n]) => n > 0).map(([b]) => b);
+      const dead = ['circasports', 'mgm', 'betrivers', 'hardrock', 'thescore'].filter(b => !live.includes(b));
+      console.log(`  ${rows.length} RotoWire futures across 6 markets; books carrying lines: ${live.join(', ') || 'none'}`);
+      if (dead.length) {
+        console.log(`  absent today: ${dead.join(', ')} — the brief calls Circa the sharp reference, and it is not publishing`);
+      }
+
+      if (compared < 40) {
+        warn(`only ${compared} lines could be compared — the name join or their tables may have moved`);
+      } else {
+        const rate = gaps.length / compared;
+        console.log(`  ${compared} of BettingPros' posted consensus lines comparable; ` +
+          `${gaps.length} differ from RotoWire's books by more than 15% (${(100 * rate).toFixed(1)}%)`);
+        gaps.sort((a, b) => b.relative - a.relative).slice(0, 5).forEach(g =>
+          console.log(`    ${g.name} ${g.label}: ours ${g.ours}, RotoWire's books ${g.theirs} (${(100 * g.relative).toFixed(0)}%)`));
+        // Two vendors reading the same books should mostly agree. A high disagreement rate
+        // means one of them is not reporting the market, which is exactly the failure that
+        // put Ashton Jeanty on the board 400 rushing yards light.
+        if (rate <= 0.15) ok(`an independent vendor agrees with our lines on ${(100 * (1 - rate)).toFixed(0)}% of them`);
+        else bad(`an independent vendor disagrees with ${(100 * rate).toFixed(0)}% of our lines — the consensus may not be the market`);
+      }
+    } catch (err) {
+      warn(`RotoWire unavailable (${err.message}) — skipping the second-vendor cross-check`);
     }
   }
 

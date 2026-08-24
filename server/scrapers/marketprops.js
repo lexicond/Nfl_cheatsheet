@@ -30,15 +30,40 @@
  * confident nonsense. The consensus book is two-sided and consistent — 98 of those same
  * 107 agree — so it is the only line this reads, and no de-vigging happens at all.
  *
- * **A line is only a median if it is priced like one.** The consensus book usually quotes
- * both sides near even money, and there the line is the market's central estimate. It does
- * not always: book 68 alone posted De'Zhaun Stribling — a rookie receiver — at 74.5
- * receptions, over at +245 against under at -376, which is the market saying he has about
- * a 27% chance of getting there, not that it expects him to. Read as a median that line
- * makes him a top-20 receiver. Measured across all seven markets only 3-8% of offers are
- * lopsided like that, so they are rejected rather than corrected: recovering a median from
- * a one-sided quote needs an assumed distribution shape the market has not published, and
- * a guessed number that looks like a market line is worse than no number.
+ * **A line is only a median if it is priced like one, so the price is used, not just the
+ * line.** The consensus book usually quotes both sides near even money, and there the line is
+ * the market's central estimate. It often is not: Kyler Murray came back at 5.5 rushing
+ * touchdowns with the over at about 28%, and De'Zhaun Stribling — a rookie receiver — at 74.5
+ * receptions on +245 against -376. Read as medians those make Murray a rushing threat he is
+ * not priced as and Stribling a top-20 receiver.
+ *
+ * Every line is therefore converted to the median it implies, by de-vigging the two consensus
+ * prices and solving a lognormal: median = line × exp(−sigma × Φ⁻¹(1−p)). At even money that
+ * is a no-op by construction, which is the point — there is no threshold to tune and no
+ * discontinuity between a "fair" line and a "lopsided" one.
+ *
+ * The spread that conversion needs is the one thing no sportsbook publishes, and it is why
+ * Polymarket is here: its threshold ladders are a survival function per player-stat, so a
+ * lognormal fitted through them gives sigma directly from a market. See `polymarket.js`.
+ *
+ * Measured against the model's own independent estimate of the same statistic, the correction
+ * behaves as it should: on the 430 offers already priced near even money it changes almost
+ * nothing (mean error 28.7% → 27.9%), and on the lopsided ones it moves them a long way
+ * closer (278% → 197%). Adjusted rows are counted and flagged rather than passed off as
+ * posted lines — `mkt_adjusted` — because this is the one place a distribution assumption
+ * enters a column that is otherwise pure market data.
+ *
+ * **The consensus pseudo-book can contradict every book behind it.** Ashton Jeanty's rushing
+ * yards came back with a consensus of 574.5 while eleven of his twelve real books sat at
+ * 974.5-1000.5 — all of them flagged `is_off`, with one lone live outlier at 574.5 that the
+ * consensus was echoing. RotoWire's independent pull had DraftKings live at 999.5 priced at
+ * evens, confirming the consensus was the wrong number rather than the market having moved.
+ * Nothing about that offer looks broken: it parses, it is two-sided, and it is priced close
+ * enough to even money to clear the band above. So the consensus is also checked against the
+ * books it claims to summarise — `MIN_BOOK_SUPPORT` — and where essentially none of them
+ * agree, the median of the books is used in its place rather than the row being thrown away.
+ * Six of 320 offers need that. The validator runs the same check from outside, against
+ * RotoWire, and independently names the same players, which is the reason to believe it.
  *
  * **The books do not price every category for every player, so the totals are not all the
  * same quantity.** Receiving markets exist for the pass-catching backs and not the rest:
@@ -62,6 +87,8 @@ const { db } = require('../db');
 const { get } = require('../utils/http');
 const { fetchCsv, SOURCES } = require('../model/nflverse');
 const { RULES } = require('../model/scoring');
+const { probit } = require('../model/wintotals');
+const { fetchShapes, sigmaFor, normaliseName: polymarketName } = require('./polymarket');
 
 const BASE = 'https://api.bettingpros.com/v3';
 
@@ -75,11 +102,38 @@ const CONSENSUS_BOOK = 0;
 // The `/offers` route refuses anything above 10 with a 400.
 const PAGE_SIZE = 10;
 
-// How far the de-vigged over price may sit from even money before the line stops being a
-// median. A quote at -110/-110 is 0.500; the widest kept here is a bit past 2/1 against.
-// Chosen from the data: the median offer sits within 0.03 of even, so this rejects the
-// lopsided tail without touching the market proper.
-const PRICE_BAND = 0.15;
+// Past this far from even money the lognormal is being asked to extrapolate into a tail it
+// was never fitted on, and a single stale price would move the answer enormously. Those are
+// still refused. Everything inside is corrected rather than discarded.
+const PRICE_BAND = 0.35;
+
+// A price this close to certainty carries no usable information about the middle.
+const PRICE_FLOOR = 0.02;
+
+// Touchdown markets are counts, quoted in whole-step half-numbers on a base of about five.
+// A lognormal is a poor model for a small integer, and most of the distance between a posted
+// x.5 line and the true median there is quantisation rather than displacement — the books
+// cannot post 4.2, so they post 4.5 and move the price. Left uncapped the correction read
+// that as a real shift and pulled Calvin Ridley's receiving touchdowns from 4.5 to 3.1,
+// against 4.5 at every book RotoWire could see. The shift on a count is therefore capped at
+// half a step, which is as far as quantisation alone can account for. Yardage and receptions
+// are effectively continuous and are not capped.
+const COUNT_COLUMNS = new Set(['mkt_pass_tds', 'mkt_rush_tds', 'mkt_rec_tds']);
+const MAX_COUNT_SHIFT = 0.5;
+
+// The least share of an offer's own books that must sit near its consensus line before that
+// line is believed. Set where it separates the genuinely broken consensus lines from ordinary
+// book-to-book variation: at 0.2 it rejects eight offers of 320, every one of which is a
+// consensus contradicted by the market it claims to summarise. Only applied where there are
+// at least MIN_BOOKS_TO_CHECK books to be outvoted by.
+const MIN_BOOK_SUPPORT = 0.2;
+const MIN_BOOKS_TO_CHECK = 3;
+
+// How far a book's line may sit from the consensus and still count as agreeing with it. The
+// floor matters: touchdown markets step by a whole touchdown on a base of five or six, so a
+// purely proportional tolerance would treat one ordinary step as a disagreement.
+const SUPPORT_TOLERANCE = 0.08;
+const SUPPORT_TOLERANCE_FLOOR = 0.5;
 
 // Season-long over/under markets, verified live against `/offers`.
 //
@@ -204,6 +258,69 @@ function overProbability(offer) {
   return total > 0 ? over / total : null;
 }
 
+/**
+ * The median this quote implies, given how far its price sits from even money.
+ *
+ * At p = 0.5 this returns the line unchanged. Below it the market is saying the line is a
+ * stretch and the median sits lower; above it, higher. `sigma` is the spread of the player's
+ * season in log space — see `polymarket.js` for where it comes from.
+ */
+function impliedMedian(line, pOver, sigma, column) {
+  if (!(line > 0) || !(sigma > 0)) return null;
+  if (pOver == null) return line;
+  const p = Math.min(1 - PRICE_FLOOR, Math.max(PRICE_FLOOR, pOver));
+  const z = probit(1 - p);
+  if (z == null || !Number.isFinite(z)) return null;
+  const median = line * Math.exp(-sigma * z);
+  if (!COUNT_COLUMNS.has(column)) return median;
+  // See MAX_COUNT_SHIFT: on a count, most of the gap is the book rounding to a half-number.
+  const shift = Math.max(-MAX_COUNT_SHIFT, Math.min(MAX_COUNT_SHIFT, median - line));
+  return line + shift;
+}
+
+/**
+ * What share of an offer's real books quote a line near its consensus.
+ *
+ * Returns null when there are too few books to judge — an offer nobody but the consensus
+ * prices is thin, which `mkt_books` already reports, but it is not contradicted.
+ *
+ * Lines flagged `is_off` are counted. A suspended quote is still the number that book last
+ * stood behind, and in the case this exists to catch it was the eleven suspended books that
+ * were right and the one live book that was wrong.
+ */
+function bookSupport(offer, side, consensus) {
+  const selection = (offer.selections || []).find(s => s.selection === side);
+  const lines = [];
+  for (const book of selection?.books || []) {
+    if (book.id === CONSENSUS_BOOK) continue;
+    for (const l of book.lines || []) {
+      const n = Number(l.line);
+      if (Number.isFinite(n)) lines.push(n);
+    }
+  }
+  if (lines.length < MIN_BOOKS_TO_CHECK) return null;
+  const tolerance = Math.max(SUPPORT_TOLERANCE * Math.abs(consensus), SUPPORT_TOLERANCE_FLOOR);
+  return lines.filter(l => Math.abs(l - consensus) <= tolerance).length / lines.length;
+}
+
+/** The median line across an offer's real books, ignoring the consensus pseudo-book. */
+function bookMedian(offer, side) {
+  const selection = (offer.selections || []).find(s => s.selection === side);
+  const lines = [];
+  for (const book of selection?.books || []) {
+    if (book.id === CONSENSUS_BOOK) continue;
+    for (const l of book.lines || []) {
+      const n = Number(l.line);
+      if (Number.isFinite(n)) lines.push(n);
+    }
+  }
+  if (!lines.length) return null;
+  lines.sort((a, b) => a - b);
+  return lines.length % 2
+    ? lines[(lines.length - 1) / 2]
+    : (lines[lines.length / 2 - 1] + lines[lines.length / 2]) / 2;
+}
+
 /** How many real books priced this offer at all — the consensus is only as good as its inputs. */
 function bookCount(offer) {
   const ids = new Set();
@@ -224,8 +341,10 @@ async function fetchMarketProps() {
   // fantasypros_id is BettingPros' own participant id, and the crosswalk carries it — so
   // this joins exactly, with no name matching anywhere in the path.
   let byFantasyPros;
+  let crosswalkRows = [];
   try {
     const { rows } = await fetchCsv('ids', SOURCES.ids(), { maxAgeHours: 24, kind: 'ids' });
+    crosswalkRows = rows;
     byFantasyPros = new Map();
     for (const r of rows) {
       if (r.fantasypros_id && r.fantasypros_id !== 'NA' && r.sleeper_id && r.sleeper_id !== 'NA') {
@@ -237,6 +356,25 @@ async function fetchMarketProps() {
     return { success: false, error: err.message, source: 'marketprops', timestamp: now };
   }
 
+  // Polymarket's distribution shapes, used to turn a priced line into the median it implies.
+  // Its ladders carry no player ids, so it is handed a name index built from the same
+  // crosswalk; a name that resolves to more than one player is marked rather than guessed.
+  let shapes = { byPlayer: {}, byStat: {} };
+  try {
+    const byName = new Map();
+    for (const r of crosswalkRows) {
+      if (!r.sleeper_id || r.sleeper_id === 'NA' || !r.name) continue;
+      const key = polymarketName(r.name);
+      if (!key) continue;
+      byName.set(key, byName.has(key) ? 'AMBIGUOUS' : String(r.sleeper_id));
+    }
+    shapes = await fetchShapes(byName);
+  } catch (err) {
+    // Shape is a refinement, not a requirement: without it the fallback spreads apply and
+    // the correction degrades rather than the column disappearing.
+    console.warn(`[MarketProps] Polymarket shapes unavailable (${err.message}) — using fallback spreads`);
+  }
+
   const bySleeper = db.prepare('SELECT id, position FROM players WHERE sleeper_player_id = ?');
   const values = new Map();       // player row id -> { column: line }
   const positionOf = new Map();
@@ -246,6 +384,10 @@ async function fetchMarketProps() {
   let sidesDisagreed = 0;
   let lopsided = 0;
   let completeRows = 0;
+  let unsupported = 0;
+  let adjusted = 0;
+  let adjustedFromLadder = 0;
+  const adjustedTerms = new Map();
 
   for (const m of MARKETS) {
     let offers;
@@ -279,7 +421,23 @@ async function fetchMarketProps() {
       // rather than adjusted — see the header. An offer priced on one side only cannot be
       // checked, so it is kept and its thin book count is what warns the reader.
       const pOver = overProbability(offer);
+      // Past the band the lognormal would be extrapolating into a tail it was never fitted
+      // on, where one stale price moves the answer enormously. Those are still refused.
       if (pOver != null && Math.abs(pOver - 0.5) > PRICE_BAND) { lopsided++; continue; }
+
+      // A consensus its own books do not support is not a consensus — take theirs instead.
+      // The price belongs to the consensus quote, so it is dropped along with it: a repaired
+      // line is the books' median, uncorrected.
+      let line = over;
+      let priced = pOver;
+      const support = bookSupport(offer, 'over', over);
+      if (support != null && support < MIN_BOOK_SUPPORT) {
+        const fromBooks = bookMedian(offer, 'over');
+        if (fromBooks == null) continue;
+        line = fromBooks;
+        priced = null;
+        unsupported++;
+      }
 
       const participant = (offer.participants || [])[0];
       const sleeperId = byFantasyPros.get(String(participant?.id));
@@ -288,8 +446,24 @@ async function fetchMarketProps() {
       if (!row) continue;
 
       positionOf.set(row.id, row.position);
+
+      // The line as posted is only the median when it is priced at even money. Convert it.
+      const { sigma, basis } = sigmaFor(shapes, m.column, sleeperId);
+      const median = impliedMedian(line, priced, sigma, m.column);
+      if (median == null || median <= 0) continue;
+      const [floor, ceiling] = PLAUSIBLE[m.column];
+      // Neither the correction nor a repair may carry a line outside what that statistic
+      // can be.
+      if (median < floor || median > ceiling) continue;
+      const moved = Math.abs(median - over) / over > 0.02;
+      if (moved) {
+        adjusted++;
+        if (basis === 'player' && priced != null) adjustedFromLadder++;
+      }
+
       if (!values.has(row.id)) values.set(row.id, {});
-      values.get(row.id)[m.column] = over;
+      values.get(row.id)[m.column] = Math.round(median * 10) / 10;
+      adjustedTerms.set(row.id, (adjustedTerms.get(row.id) || 0) + (moved ? 1 : 0));
       // The weakest link, not the widest: a player whose receiving yards eight books agree
       // on but whose receptions come from one is only as trustworthy as that one.
       const seen = books.get(row.id);
@@ -312,7 +486,7 @@ async function fetchMarketProps() {
     UPDATE players SET
       ${COLUMNS.map(c => `${c} = @${c}`).join(', ')},
       mkt_points = @mkt_points, mkt_books = @mkt_books,
-      mkt_complete = @mkt_complete, last_updated = @ts
+      mkt_complete = @mkt_complete, mkt_adjusted = @mkt_adjusted, last_updated = @ts
     WHERE id = @id
   `);
 
@@ -320,7 +494,7 @@ async function fetchMarketProps() {
   db.transaction(() => {
     // Clear every row first: a line that is withdrawn must not persist as though current.
     db.prepare(`UPDATE players SET ${COLUMNS.map(c => `${c} = NULL`).join(', ')},
-                mkt_points = NULL, mkt_books = NULL, mkt_complete = NULL
+                mkt_points = NULL, mkt_books = NULL, mkt_complete = NULL, mkt_adjusted = NULL
                 WHERE mkt_points IS NOT NULL OR ${COLUMNS.map(c => `${c} IS NOT NULL`).join(' OR ')}`).run();
 
     for (const [id, v] of values) {
@@ -340,6 +514,7 @@ async function fetchMarketProps() {
         mkt_points: Math.round(pts * 10) / 10,
         mkt_books: books.get(id) || null,
         mkt_complete: complete ? 1 : 0,
+        mkt_adjusted: adjustedTerms.get(id) || 0,
       });
       written++;
     }
@@ -351,15 +526,18 @@ async function fetchMarketProps() {
   console.log(`[MarketProps] ${written} players carry a season line — ${note}`);
   console.log(`[MarketProps] consensus book two-sided on all but ${sidesDisagreed} offers; best-price lines never read`);
   console.log(`[MarketProps] dropped ${lopsided} offers priced too far from even money to read as a median`);
+  console.log(`[MarketProps] repaired ${unsupported} offers whose consensus line no book behind it agreed with`);
+  console.log(`[MarketProps] price-adjusted ${adjusted} lines to the median they imply ` +
+    `(${adjustedFromLadder} using the player's own Polymarket ladder, the rest his position's typical spread)`);
   console.log(`[MarketProps] ${completeRows} of ${written} totals cover their position's full scoring; the rest are marked partial`);
 
   return {
-    success: true, players_updated: written, counts, sides_disagreed: sidesDisagreed, lopsided, complete: completeRows,
+    success: true, players_updated: written, counts, sides_disagreed: sidesDisagreed, lopsided, unsupported, adjusted, complete: completeRows,
     failures, source: 'marketprops', timestamp: now,
   };
 }
 
 module.exports = {
   fetchMarketProps, MARKETS, PLAUSIBLE, REQUIRED_TERMS,
-  fetchOffers, consensusLine, overProbability, isComplete,
+  fetchOffers, consensusLine, overProbability, isComplete, bookSupport, bookMedian,
 };

@@ -242,6 +242,10 @@ addColumnIfMissing('players', 'mkt_books', 'INTEGER');
 // receiving for the pass-catching backs and skip the rest, so a partial total is not a
 // season projection and must not be compared with one.
 addColumnIfMissing('players', 'mkt_complete', 'INTEGER');
+// How many of his lines were moved from the posted number to the median that number's price
+// implies. The one place a distribution assumption enters an otherwise pure market column,
+// so it is counted rather than hidden.
+addColumnIfMissing('players', 'mkt_adjusted', 'INTEGER');
 
 // Populate name_normalized for any rows missing it
 (function populateNameNormalized() {

@@ -110,9 +110,11 @@ correlate **0.737** with the ones books have actually posted, a mean absolute er
 **Read that as partly circular.** The model already scales every projection by the market's
 implied team total, so the *ordering* of teams is inherited from the prices it is being
 checked against. The *level* is not: the points are built bottom-up from projected
-touchdowns, and they come in at 20.8 a game against the market's 23.0. A real sportsbook win
-total would be a better yardstick; no clean free source carries one, and season-long player
-props would have to be scraped.
+touchdowns, and they come in at 20.8 a game against the market's 23.0.
+
+**That yardstick now exists.** VegasInsider publishes season win totals across four books in
+server-rendered HTML, so `model/wintotals.js` reads them and the validator checks the model
+against them every run — see *The market on whole teams* below.
 
 **Where it is visibly wrong:** Miami projects 3.5 wins because no Miami quarterback clears
 the role gate, so the team is hollow rather than bad. Any team whose new starter was gated
@@ -248,6 +250,106 @@ a model that has come loose from the market entirely is broken rather than contr
 Levels agree to 0.96×, which is the more reassuring half: the model and the market are pricing
 the same amount of football, they disagree about who gets it.
 
+## Reading the price, not just the line
+
+The first version of the market column threw away every line that was not priced near even
+money — sixteen of them — on the grounds that recovering a median from a one-sided quote needs
+a distribution nobody publishes. That was the wrong call twice over: it lost players entirely,
+and the distribution *is* published, just not by a sportsbook.
+
+Kyler Murray was posted at 5.5 rushing touchdowns with the over near 28%. That is the market
+saying he probably will not get there, not that it expects him to. Every line is now converted
+to the median its price implies:
+
+```
+median = line × exp(−sigma × Φ⁻¹(1 − p))
+```
+
+which is a no-op at even money by construction — no threshold to tune, no cliff between a
+"fair" line and a "lopsided" one. Murray's 5.5 becomes 5.0, Stribling's 74.5 receptions falls
+out of the top twenty, and ten more players keep a total they were previously refused.
+
+**The check that it works.** Compared against the model's own independent estimate of the same
+statistic, the correction changes almost nothing on the 430 offers already priced fairly (mean
+error 28.7% → 27.9%) and moves the lopsided ones a long way closer (278% → 197%). Agreement
+with the model rose from rho 0.846 to 0.857 and Sleeper's from 0.975 to 0.978 — two independent
+yardsticks moving the same way.
+
+**Where sigma comes from: Polymarket.** Its threshold ladders are a survival function per
+player-stat, and because it charges on resolution rather than taking vig, price *is*
+probability. Fit a lognormal through the rungs and the spread falls out. The measured spreads
+order themselves the way anyone who watches football would expect, which is the main reason to
+trust them:
+
+| stat | sigma |
+|---|---|
+| Passing yards | 0.19 |
+| Passing TDs | 0.32 |
+| Rushing yards | 0.55 |
+| Rushing TDs | 0.60 |
+| Receiving yards | 0.62 |
+| Receiving TDs | 0.76 |
+
+Liquidity is thin — $300 to $10k an event, individual rungs under $50 — so it supplies shape
+and nothing else. Its own fitted medians are recorded and never read.
+
+**Where it had to be reined in.** A lognormal fits a touchdown count badly. TD lines are quoted
+in half-numbers on a base of about five, so most of the gap between a posted `x.5` and the true
+median is the book rounding rather than real displacement. Uncapped, the correction took Calvin
+Ridley's receiving touchdowns from 4.5 to 3.1 while every book RotoWire could see still said
+4.5. Counts are now capped at half a step; yardage and receptions are not capped.
+
+Adjusted lines are counted in `mkt_adjusted` and named in the tooltip. This is the one place a
+distribution assumption enters an otherwise pure market column, so it says so.
+
+## The consensus that contradicted its own books
+
+Ashton Jeanty's rushing-yards consensus came back at 574.5. Eleven of his twelve real books sat
+at 974.5–1000.5 — all flagged `is_off` — with one live outlier at 574.5 that the consensus was
+echoing. Nothing about the offer looks broken: it parses, it is two-sided, and it is priced
+close enough to even money to clear the price band.
+
+RotoWire settled it. Its independent pull had DraftKings **live** at 999.5 priced at evens, so
+the consensus was wrong rather than early. The consensus is now checked against the books it
+claims to summarise, and where essentially none of them agree the books' median is used in its
+place — Jeanty comes back at 975.5 instead of being dropped. Five offers need that.
+
+The validator runs the same check from outside against RotoWire and names the same players,
+which is the reason to believe the rule rather than the threshold. It compares **raw consensus
+lines**, not what the board stores: the stored number is a price-implied median, and checking
+that against posted lines reported every correction as a vendor disagreement.
+
+**RotoWire is deliberately not a board column.** It carries the same six markets from broadly
+the same books, so showing it beside `MKT` would put two renderings of one market on the board
+and invite them to be read as two opinions.
+
+**Two things the brief promised that are not there.** Circa — "the sharp reference" — publishes
+nothing today, and neither do BetMGM, BetRivers, Hard Rock or theScore. Only DraftKings,
+Caesars and FanDuel carry lines. And there is no receptions table at all, which is the one
+market BettingPros does have.
+
+## The market on whole teams
+
+VegasInsider's win totals close the gap the fixture work left open. All 32 teams, four books
+each, server-rendered.
+
+**The books post different lines, so the page cannot be averaged.** Baltimore came back at
+o11.5 (+120) from one book and o10.5 (−150) from another. Each quote is converted to the total
+it implies before anything is combined — and the two Baltimore numbers then land within 0.01 of
+each other, from lines a full win apart. Across all 32 teams the books reconcile to within 0.43
+wins.
+
+Summing every team gives **273.3 implied wins against the 272 a season actually hands out**.
+Stated honestly: averaging the raw lines sums correctly too, because the price corrections
+cancel across the league. What the identity catches is taking the *median* line, which sums to
+278. The price adjustment earns its place per team — it moves the Rams by 0.64 wins and eight
+teams by more than a third of one.
+
+The model's projected team offence tracks the win market at **rho 0.860**. Read that as a check
+on ordering rather than level: the environment layer already scales every projection by the
+market's implied points per game. What it has not seen is the win total, which prices defence
+and schedule too.
+
 **The two columns are not the same quantity, and that is the point of showing both.** A market
 line already discounts the games the books expect a player to miss. The model's number is a
 full seventeen on purpose. So the market reads low on anyone the books think is fragile, and
@@ -350,12 +452,16 @@ injuries. Touchdown rate remains the noisiest input in the model and the market'
 remain the best available replacement for it, so this is the highest-value thing still
 undone.
 
-**2b. Three of the four sources in the brief are still unread.** RotoWire (per-book detail
-including Circa, the sharp reference, for cross-checking BettingPros), Polymarket (threshold
-ladders, which give a *distribution* per player rather than a median — the natural input to
-the best-ball ceiling, where the model currently invents its own spread), and VegasInsider
-(multi-book win totals). DraftKings' own endpoints are Akamai-blocked and OddsTrader renders
-client-side; the brief says do not attempt either, and neither was attempted.
+**2b. All four sources in the brief are now read**, each in the role it is actually good for:
+BettingPros for the lines, Polymarket for the distribution shape those lines need to be read
+correctly, RotoWire as a second vendor checking the first, VegasInsider for the market on whole
+teams. DraftKings' own endpoints are Akamai-blocked and OddsTrader renders client-side; the
+brief says do not attempt either, and neither was attempted.
+
+What Polymarket has *not* been used for yet is the best-ball ceiling, which is the other thing
+it is good for. The model still invents its own spread there, and a market-implied distribution
+per player is a better one — the work is fitting the per-stat ladders into a single fantasy
+points distribution, which the stats being correlated makes non-trivial.
 
 **3. No correlation in the simulation.** Each player's weeks are drawn independently, so a
 quarterback and his WR1 are uncorrelated when in reality they run about +0.5 together. That
