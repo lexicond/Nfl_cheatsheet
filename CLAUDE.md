@@ -386,13 +386,20 @@ it was never given and fails if it does not beat "repeat last season".
   WR2 and WR3 pushes the team over its target budget, the conservation step scales everyone
   back to fit, and the alpha pays for it — Justin Jefferson fell from 173 to 143. The rank's
   own baseline stays the shrink target; only the hard cap moved.
-- **Team pass attempts have to be anchored like carries are, and BOTH sides must move
-  together.** Attempts summed from whichever quarterbacks have usage history came to 496 a
-  team against a real 545, because backups take games at a backup's rate. Every target is
-  derived from that total, so every pass-catcher on the board read about 9% light. Anchoring
-  only the targets is worse than not fixing it: it put 512 targets against 496 attempts, which
-  is impossible, since every attempt is at most one target. `LEAGUE_PASS_ATTEMPTS` now scales
-  the passing side too, which restores the identity at 0.94 and lifts the level to 526.
+- **Correct the attempt LEVEL, never the spread — teams do not all throw the same.** Attempts
+  summed from whichever quarterbacks have usage history came to 496 a team against a real 545,
+  because backups take their share of the games at a backup's rate. Every target is derived
+  from that total, so every pass-catcher read about 9% light. But that shortfall is an
+  artefact of the games split and says nothing about any particular team, so only the level is
+  corrected — one scalar shared by all 32, which by construction cannot reorder them.
+  Replacing each team's attempts with `LEAGUE_PASS_ATTEMPTS × (1 + lean)` was tried and is
+  wrong: real teams ranged 397–800 last season (sd 73) and the constant collapsed the model's
+  spread to sd 24. A team with a poor quarterback throws less and his receivers catch fewer —
+  that is signal the model had and the constant deleted. It also tests worse on held-out data
+  (+0.0397 against +0.0411). The level-only correction lands the league at 545 with sd 46.
+- **Both sides of the attempt correction must move together.** Correcting only the targets put
+  512 targets against 496 attempts, which is not a projection but an impossibility: every
+  attempt is at most one target. Scaling the passing side too restores the identity at 0.94.
 - **`components.basis` marks a player projected from draft capital, and it is NOT the same as
   `is_rookie`.** Quinn Ewers and Cam Miller are in their second year with no NFL usage, so they
   take the draft-capital path while `is_rookie` is false. The ledger filtered on `is_rookie`,

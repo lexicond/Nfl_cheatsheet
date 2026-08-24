@@ -480,13 +480,28 @@ and a draft-capital quarterback carries an attempt rate for his rank — so he e
 allocation and the attempt budget instead of sitting outside both. Las Vegas had been projecting
 thirty quarterback games in a seventeen-game season.
 
-Separately, the attempt budget is now anchored to a league-typical total exactly as carries
-always have been, because summing it from whichever quarterbacks have usage history came to 496
-a team against a real 545 and left every pass-catcher on the board 9% light. Both sides move
-together: anchoring only the targets put 512 targets against 496 attempts, which is not a
-projection but an impossibility.
+Separately, the attempt LEVEL is corrected — but deliberately not the spread. Summing a team's
+attempts from the quarterbacks the model projects came to 496 against a real 545, because a
+backup takes his share of the games at a backup's rate, and every target is derived from that
+total, so every pass-catcher read 9% light.
 
-Bowers now projects 206.7 and is TE1, against Sleeper's 202.5.
+The first attempt at this replaced each team's attempts with a league constant tilted by game
+script. That was wrong and the owner caught it: real teams ranged from 397 to 800 attempts last
+season, a standard deviation of 73, and the constant collapsed the model's spread to 24 — about
+two thirds of the genuine between-team variation deleted. A team with a poor quarterback really
+does throw less, and his receivers really do catch fewer.
+
+What ships instead is a single correction scalar shared by all 32 teams, so it moves the league
+onto a realistic scale and by construction cannot reorder anyone. The league lands at 545 with
+a spread of 46, and it tests better on held-out data than the constant did (+0.0411 against
++0.0397). Both sides still move together: correcting only the targets put 512 targets against
+496 attempts, which is an impossibility rather than a projection.
+
+**What that means for the two players who prompted this.** Bowers projects 172.6 against the
+betting market's 178.1 — the model and the books essentially agree, and Sleeper's 202.5 is the
+outlier. Jefferson projects 174.4 against the market's 201.9. Both are still below Sleeper, and
+that is now a position rather than a bug: the Raiders and Vikings quarterback rooms are priced
+in rather than averaged away.
 
 **3. No correlation in the simulation.** Each player's weeks are drawn independently, so a
 quarterback and his WR1 are uncorrelated when in reality they run about +0.5 together. That

@@ -686,21 +686,39 @@ async function runModel({
     t.car += (p.components.carries_pg || 0) * g;
   }
 
+  // The league-wide attempt correction.
+  //
+  // Summing a team's attempts from the quarterbacks the model projects came to 496 against
+  // a real 545, and every target is derived from that total, so every pass-catcher on the
+  // board read about 9% light. But the shortfall is an ARTEFACT, not a finding: it comes
+  // from the games split, where a backup takes his share at a backup's attempt rate. It
+  // says nothing about any particular team.
+  //
+  // So only the level is corrected, with one scalar shared by all 32 teams, and the spread
+  // is left exactly as the model projected it. Replacing each team's own attempts with a
+  // league constant was tried and it is wrong: real teams ranged from 397 to 800 attempts
+  // last season, a standard deviation of 73, and the constant collapsed the model's spread
+  // to 24. A team with a poor quarterback really does throw less, and his receivers really
+  // do catch fewer — that is signal the model had and the constant deleted.
+  //
+  // Because the correction is identical for every team it cannot reorder them; it moves
+  // the whole league onto a realistic scale and nothing else.
+  const projectedLeagueAtt = [...teamTotals.values()].reduce((a, t) => a + t.att, 0)
+    / (teamTotals.size || 1);
+  const attemptCorrection = projectedLeagueAtt > 0
+    ? Math.max(0.85, Math.min(1.3, LEAGUE_PASS_ATTEMPTS / projectedLeagueAtt))
+    : 1;
+
   const scales = new Map();
   for (const [team, t] of teamTotals) {
     const env = environment.table.get(team);
     const lean = env?.pass_lean ?? 0;
-    // Attempts are anchored the same way carries always have been, and for the same
-    // reason. Summing them from whichever quarterbacks happen to have usage history came
-    // to 496 a team against a real 545, because backups take games at a backup's rate and
-    // some starters project below a starter's. Every target on the team is then derived
-    // from that short total, so every pass-catcher on the board read about 9% light — the
-    // one systematic level error left in the model.
+    // This team's own projected volume, on a realistic league scale.
     //
-    // Both sides move together. Anchoring only the targets was tried and it breaks the
-    // thing that makes this checkable: it put 514 targets against 496 attempts, which is
+    // Both sides move together. Correcting only the targets was tried and it breaks the
+    // thing that makes this checkable: it put 512 targets against 496 attempts, which is
     // not a projection but an impossibility, since every attempt is at most one target.
-    const targetAtt = LEAGUE_PASS_ATTEMPTS * (1 + lean);
+    const targetAtt = t.att * attemptCorrection;
     const targetTgt = targetAtt * TARGETS_PER_ATTEMPT;
     const targetCar = LEAGUE_RUSH_ATTEMPTS * (1 - lean * 2);
     scales.set(team, {
