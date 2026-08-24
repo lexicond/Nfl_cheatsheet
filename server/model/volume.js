@@ -35,6 +35,21 @@ const { shrink } = require('./stability');
  * the baseline for the rank he actually holds now is the fix, and it is the same
  * empirical-Bayes step the model already applies — just aimed at the right target.
  */
+// How many men a position actually plays at once.
+//
+// The backup cap below exists because you cannot take a starter's touches while another man
+// is listed ahead of you. That is true of a backfield and it is not true of a receiving
+// corps: a base offence puts three receivers on the field together, so a WR2 is a starter
+// with a different route tree, not a backup. Applying the cap from rank two pinned George
+// Pickens, Tee Higgins, Jameson Williams and Davante Adams — every one of them a genuine
+// first-choice receiver listed second — at 3.2 targets a game, which is a fourth receiver's
+// workload. It cost draftable receivers about 17% against Sleeper across the board.
+//
+// The cap and the rank baseline both still apply beyond these counts, which is where the
+// original cases live: Isiah Pacheco and Zach Charbonnet are second running backs behind one
+// starter, and that is exactly the situation the cap was measured on.
+const SIMULTANEOUS_STARTERS = { QB: 1, RB: 1, WR: 2, TE: 1 };
+
 // How fast the allowance keeps falling past third on the chart.
 //
 // The table below stops at three, and clamping everyone deeper to that row handed a WR7 a
@@ -160,6 +175,7 @@ function projectVolume(seasons, position, baselines, stability, env, tuning = {}
     ? depthAllowance(position, depthOrder)
     : null;
 
+
   // How far above his rank's typical workload a backup is allowed to project. Some
   // headroom for a good player in a committee, but not a starter's share: you cannot
   // take a starter's touches while another man is listed ahead of you.
@@ -187,7 +203,8 @@ function projectVolume(seasons, position, baselines, stability, env, tuning = {}
   // What he certainly can do is out-target him. So the ceiling is on the sum, and when
   // it binds everything scales together — the mix he has earned survives, only its size
   // is limited.
-  if (depthOrder != null && depthOrder >= 2 && rankBase) {
+  const startersHere = SIMULTANEOUS_STARTERS[position] ?? 1;
+  if (depthOrder != null && depthOrder > startersHere && rankBase) {
     const metrics = VOLUME_METRICS.filter(m => rankBase[m] != null);
     const projected = metrics.reduce((a, m) => a + (out[m] || 0), 0);
     const allowed = metrics.reduce((a, m) => a + rankBase[m], 0) * BACKUP_HEADROOM;
@@ -209,5 +226,5 @@ function projectVolume(seasons, position, baselines, stability, env, tuning = {}
 
 module.exports = {
   projectVolume, volumeBaselines, weightedMean, depthAllowance,
-  RECENCY, VOLUME_METRICS, DEPTH_VOLUME, UNRANKED_DEPTH,
+  RECENCY, VOLUME_METRICS, DEPTH_VOLUME, UNRANKED_DEPTH, SIMULTANEOUS_STARTERS,
 };

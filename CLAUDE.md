@@ -373,6 +373,26 @@ it was never given and fails if it does not beat "repeat last season".
   validator compares only complete totals. Filtering to them moved model-vs-market agreement
   from rho 0.775 to 0.846 and Sleeper's from 0.914 to 0.975 — most of the apparent
   disagreement was the mismatched denominators, exactly as the arbitrage-column trap predicted.
+- **The backup cap was designed on running backs and must not be aimed at receivers.** "You
+  cannot take a starter's touches while another man is listed ahead of you" is true of a
+  backfield and false of a receiving corps — a base offence plays two receivers and a slot at
+  once. Applied from rank two it pinned George Pickens, Tee Higgins, Jameson Williams and
+  Davante Adams at 3.2 targets a game, a fourth receiver's workload, and cost draftable
+  receivers 17% against Sleeper. `SIMULTANEOUS_STARTERS` now says how many a position plays at
+  once and the cap starts beyond that. Raising WR to 3 was tried and is worse than 2 — the
+  third receiver really is capped in practice — so the number is empirical, not anatomical.
+- **Shrinking a second receiver toward the FIRST receiver's baseline makes things worse, not
+  better.** It looks like the natural companion to the cap fix and it is not: inflating every
+  WR2 and WR3 pushes the team over its target budget, the conservation step scales everyone
+  back to fit, and the alpha pays for it — Justin Jefferson fell from 173 to 143. The rank's
+  own baseline stays the shrink target; only the hard cap moved.
+- **Team pass attempts have to be anchored like carries are, and BOTH sides must move
+  together.** Attempts summed from whichever quarterbacks have usage history came to 496 a
+  team against a real 545, because backups take games at a backup's rate. Every target is
+  derived from that total, so every pass-catcher on the board read about 9% light. Anchoring
+  only the targets is worse than not fixing it: it put 512 targets against 496 attempts, which
+  is impossible, since every attempt is at most one target. `LEAGUE_PASS_ATTEMPTS` now scales
+  the passing side too, which restores the identity at 0.94 and lifts the level to 526.
 - **`components.basis` marks a player projected from draft capital, and it is NOT the same as
   `is_rookie`.** Quinn Ewers and Cam Miller are in their second year with no NFL usage, so they
   take the draft-capital path while `is_rookie` is false. The ledger filtered on `is_rookie`,

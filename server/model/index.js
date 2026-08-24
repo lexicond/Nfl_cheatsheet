@@ -12,7 +12,7 @@
 const nflverse = require('./nflverse');
 const { buildUsageHistory, positionalBaselines } = require('./usage');
 const { buildStability } = require('./stability');
-const { projectVolume, volumeBaselines, UNRANKED_DEPTH } = require('./volume');
+const { projectVolume, volumeBaselines, depthAllowance, UNRANKED_DEPTH } = require('./volume');
 const { projectEfficiency, fpoeResidual } = require('./efficiency');
 const { buildEnvironment } = require('./environment');
 const { loadOddsGames } = require('./odds');
@@ -476,6 +476,91 @@ async function runModel({
     });
   }
 
+  // --- Draft-capital projections -------------------------------------------------
+  // True rookies have no history at all. Second-year players who failed the role gate
+  // are in the same position for practical purposes: what little they did is too thin to
+  // extrapolate, and draft capital is the best remaining predictor. Both are projected
+  // from the curve, but they are labelled differently — telling a reader a player has
+  // "no NFL usage yet" when he played eight games last season is simply untrue.
+  //
+  // This runs BEFORE both conservation steps, and it did not always. Appended afterwards,
+  // these players sat outside every team budget: Las Vegas projected thirty quarterback
+  // games in a seventeen-game season because its listed starter was a rookie and simply
+  // was not in the allocation. They also carry the depth chart now — without it the
+  // allocator could not see that a draft-capital quarterback was the man listed first, and
+  // treated him as the weakest claim in the room.
+  const projected = new Set(projections.map(p => p.gsis_id));
+  let rookieCount = 0;
+
+  for (const [gsis, entry] of crosswalk.byGsis) {
+    if (projected.has(gsis)) continue;
+    if (entry.draft_year == null || entry.draft_year < targetSeason - 1) continue;
+    if (!nflverse.POSITIONS.has(entry.position)) continue;
+
+    const env = environment.table.get(entry.team) || null;
+    const ppg = projectRookie(entry, entry.position, rookieCurve, env);
+    if (ppg == null) continue;
+
+    // Did he appear at all? Anything in the usage history means he is a second-year
+    // player the gate turned away, not a player who has never taken a snap.
+    const played = fullHistory.get(gsis);
+    const trueRookie = entry.draft_year >= targetSeason;
+
+    // The depth chart, resolved the same way it is for everyone else. A draft-capital
+    // player is exactly the case where last season's usage says nothing and the chart says
+    // everything, so leaving it off here was the worst place to leave it off.
+    const rookieDepth = depthChart
+      ? (depthChart.get(String(entry.sleeper_id)) || depthChart.get(gsis) || null)
+      : null;
+    const rookieDepthOrder = rookieDepth ? (rookieDepth.order ?? UNRANKED_DEPTH) : null;
+
+    const gamesPlayed = entry.position === 'RB' ? 13.5 : 13.0;
+    // Rookies are more volatile than veterans at the same projection — the role is not
+    // yet established, so the week-to-week spread is wider.
+    const cv = Math.min(1.4, (require('./combine').POSITION_CV[entry.position] ?? 0.65) * 1.15);
+    const sim = simulateSeason(ppg, gamesPlayed, cv, { iterations, seed: gsis });
+
+    projections.push({
+      gsis_id: gsis,
+      sleeper_id: entry.sleeper_id,
+      name: entry.name,
+      position: entry.position,
+      team: entry.team,
+      points: sim ? Math.round(sim.mean * 10) / 10 : Math.round(ppg * gamesPlayed * 10) / 10,
+      ppg: Math.round(ppg * 100) / 100,
+      games: gamesPlayed,
+      floor: sim ? Math.round(sim.floor * 10) / 10 : null,
+      ceiling: sim ? Math.round(sim.ceiling * 10) / 10 : null,
+      best_ball: sim ? Math.round(sim.best_ball * 10) / 10 : null,
+      volatility: Math.round(cv * 1000) / 1000,
+      confidence: 'low',
+      is_rookie: trueRookie,
+      from_draft_capital: true,
+      components: {
+        env_team: entry.team,
+        env_total: env?.implied_total ?? null,
+        env_source: env?.source ?? null,
+        draft_ovr: entry.draft_ovr,
+        draft_round: entry.draft_round,
+        depth_order: rookieDepthOrder,
+        injury_status: rookieDepth?.injury ?? null,
+        // A quarterback who is going to start throws, and his team's receivers are fed
+        // from those attempts. Without a rate here he contributed nothing to the team's
+        // budget, so Las Vegas was scaled to 305 attempts where a real team throws 545 and
+        // every Raiders receiver was cut to fit. The rate is the one measured for his rank
+        // on the chart — the same table every other quarterback is shrunk toward — and it
+        // is a budget contribution only: the projection itself still comes from the curve.
+        ...(entry.position === 'QB' && rookieDepthOrder != null
+          ? { attempts_pg: depthAllowance('QB', rookieDepthOrder)?.attempts_pg ?? 0 }
+          : {}),
+        basis: trueRookie
+          ? 'draft capital — no NFL usage yet'
+          : 'draft capital — too little NFL usage to project from',
+      },
+    });
+    rookieCount++;
+  }
+
   // --- Conservation: a team only has one quarterback job ---------------------------
   //
   // Every player is projected independently, which is right for positions that genuinely
@@ -581,14 +666,22 @@ async function runModel({
   // fails honestly while the board misleads — but the validator says which it is.
   const TARGETS_PER_ATTEMPT = 0.94;   // the rest are thrown away, spiked or sacked
   const LEAGUE_RUSH_ATTEMPTS = 455;
+  const LEAGUE_PASS_ATTEMPTS = 545;
 
   const teamTotals = new Map();
   for (const p of projections) {
-    if (p.components.basis) continue;
+    // A draft-capital player has no per-metric projection to scale, so he is not scaled —
+    // but a quarterback among them now carries an attempt rate, and those attempts are
+    // real: they are what his receivers are fed from. Leaving them out built the budget as
+    // though nobody threw the ball, which is how one rookie quarterback shrank an entire
+    // receiving corps.
+    const isDraftCapital = !!p.components.basis;
+    if (isDraftCapital && !(p.components.attempts_pg > 0)) continue;
     if (!teamTotals.has(p.team)) teamTotals.set(p.team, { att: 0, tgt: 0, car: 0 });
     const t = teamTotals.get(p.team);
     const g = p.games || 0;
     t.att += (p.components.attempts_pg || 0) * g;
+    if (isDraftCapital) continue;   // he consumes attempts, but has no targets or carries to count
     t.tgt += (p.components.targets_pg || 0) * g;
     t.car += (p.components.carries_pg || 0) * g;
   }
@@ -597,11 +690,23 @@ async function runModel({
   for (const [team, t] of teamTotals) {
     const env = environment.table.get(team);
     const lean = env?.pass_lean ?? 0;
-    const targetTgt = t.att * TARGETS_PER_ATTEMPT;
+    // Attempts are anchored the same way carries always have been, and for the same
+    // reason. Summing them from whichever quarterbacks happen to have usage history came
+    // to 496 a team against a real 545, because backups take games at a backup's rate and
+    // some starters project below a starter's. Every target on the team is then derived
+    // from that short total, so every pass-catcher on the board read about 9% light — the
+    // one systematic level error left in the model.
+    //
+    // Both sides move together. Anchoring only the targets was tried and it breaks the
+    // thing that makes this checkable: it put 514 targets against 496 attempts, which is
+    // not a projection but an impossibility, since every attempt is at most one target.
+    const targetAtt = LEAGUE_PASS_ATTEMPTS * (1 + lean);
+    const targetTgt = targetAtt * TARGETS_PER_ATTEMPT;
     const targetCar = LEAGUE_RUSH_ATTEMPTS * (1 - lean * 2);
     scales.set(team, {
       // Bounded: a scale far from 1 means something else is wrong and silently
       // multiplying by it would hide that rather than fix it.
+      pass: t.att > 0 ? Math.max(0.6, Math.min(1.4, targetAtt / t.att)) : 1,
       rec: t.tgt > 0 ? Math.max(0.6, Math.min(1.4, targetTgt / t.tgt)) : 1,
       rush: t.car > 0 ? Math.max(0.6, Math.min(1.4, targetCar / t.car)) : 1,
     });
@@ -612,22 +717,30 @@ async function runModel({
     if (c.basis) continue;
     const sc = scales.get(p.team);
     if (!sc) continue;
-    if (Math.abs(sc.rec - 1) < 0.001 && Math.abs(sc.rush - 1) < 0.001) continue;
+    if (Math.abs(sc.rec - 1) < 0.001 && Math.abs(sc.rush - 1) < 0.001
+      && Math.abs(sc.pass - 1) < 0.001) continue;
 
     const recPts = (c.receiving || 0) * sc.rec;
     const rushPts = (c.rushing || 0) * sc.rush;
-    const newPpg = recPts + rushPts + (c.passing || 0);
+    const passPts = (c.passing || 0) * sc.pass;
+    const newPpg = recPts + rushPts + passPts;
     if (!(newPpg > 0)) continue;
 
     for (const [k, f] of [['targets_pg', sc.rec], ['receptions_pg', sc.rec], ['rec_yards_pg', sc.rec],
                           ['rec_tds_pg', sc.rec], ['carries_pg', sc.rush], ['rush_yards_pg', sc.rush],
-                          ['rush_tds_pg', sc.rush]]) {
+                          ['rush_tds_pg', sc.rush], ['attempts_pg', sc.pass],
+                          ['pass_yards_pg', sc.pass], ['pass_tds_pg', sc.pass]]) {
       if (c[k] != null) c[k] = Math.round(c[k] * f * 1000) / 1000;
     }
     c.receiving = Math.round(recPts * 100) / 100;
     c.rushing = Math.round(rushPts * 100) / 100;
+    c.passing = Math.round(passPts * 100) / 100;
     c.total_tds_pg = Math.round(((c.rec_tds_pg || 0) + (c.rush_tds_pg || 0) + (c.pass_tds_pg || 0)) * 1000) / 1000;
-    c.team_scale = { receiving: Math.round(sc.rec * 1000) / 1000, rushing: Math.round(sc.rush * 1000) / 1000 };
+    c.team_scale = {
+      passing: Math.round(sc.pass * 1000) / 1000,
+      receiving: Math.round(sc.rec * 1000) / 1000,
+      rushing: Math.round(sc.rush * 1000) / 1000,
+    };
 
     p.ppg = Math.round(newPpg * 100) / 100;
     const sim = simulateSeason(p.ppg, p.games, p.volatility, { iterations, seed: p.gsis_id });
@@ -635,65 +748,6 @@ async function runModel({
     p.floor = sim ? Math.round(sim.floor * 10) / 10 : null;
     p.ceiling = sim ? Math.round(sim.ceiling * 10) / 10 : null;
     p.best_ball = sim ? Math.round(sim.best_ball * 10) / 10 : null;
-  }
-
-  // --- Draft-capital projections -------------------------------------------------
-  // True rookies have no history at all. Second-year players who failed the role gate
-  // are in the same position for practical purposes: what little they did is too thin to
-  // extrapolate, and draft capital is the best remaining predictor. Both are projected
-  // from the curve, but they are labelled differently — telling a reader a player has
-  // "no NFL usage yet" when he played eight games last season is simply untrue.
-  const projected = new Set(projections.map(p => p.gsis_id));
-  let rookieCount = 0;
-
-  for (const [gsis, entry] of crosswalk.byGsis) {
-    if (projected.has(gsis)) continue;
-    if (entry.draft_year == null || entry.draft_year < targetSeason - 1) continue;
-    if (!nflverse.POSITIONS.has(entry.position)) continue;
-
-    const env = environment.table.get(entry.team) || null;
-    const ppg = projectRookie(entry, entry.position, rookieCurve, env);
-    if (ppg == null) continue;
-
-    // Did he appear at all? Anything in the usage history means he is a second-year
-    // player the gate turned away, not a player who has never taken a snap.
-    const played = fullHistory.get(gsis);
-    const trueRookie = entry.draft_year >= targetSeason;
-
-    const gamesPlayed = entry.position === 'RB' ? 13.5 : 13.0;
-    // Rookies are more volatile than veterans at the same projection — the role is not
-    // yet established, so the week-to-week spread is wider.
-    const cv = Math.min(1.4, (require('./combine').POSITION_CV[entry.position] ?? 0.65) * 1.15);
-    const sim = simulateSeason(ppg, gamesPlayed, cv, { iterations, seed: gsis });
-
-    projections.push({
-      gsis_id: gsis,
-      sleeper_id: entry.sleeper_id,
-      name: entry.name,
-      position: entry.position,
-      team: entry.team,
-      points: sim ? Math.round(sim.mean * 10) / 10 : Math.round(ppg * gamesPlayed * 10) / 10,
-      ppg: Math.round(ppg * 100) / 100,
-      games: gamesPlayed,
-      floor: sim ? Math.round(sim.floor * 10) / 10 : null,
-      ceiling: sim ? Math.round(sim.ceiling * 10) / 10 : null,
-      best_ball: sim ? Math.round(sim.best_ball * 10) / 10 : null,
-      volatility: Math.round(cv * 1000) / 1000,
-      confidence: 'low',
-      is_rookie: trueRookie,
-      from_draft_capital: true,
-      components: {
-        env_team: entry.team,
-        env_total: env?.implied_total ?? null,
-        env_source: env?.source ?? null,
-        draft_ovr: entry.draft_ovr,
-        draft_round: entry.draft_round,
-        basis: trueRookie
-          ? 'draft capital — no NFL usage yet'
-          : 'draft capital — too little NFL usage to project from',
-      },
-    });
-    rookieCount++;
   }
 
   return {

@@ -463,7 +463,7 @@ it is good for. The model still invents its own spread there, and a market-impli
 per player is a better one — the work is fitting the per-stat ladders into a single fantasy
 points distribution, which the stats being correlated makes non-trivial.
 
-**2c. A draft-capital starting quarterback collapses his team's whole receiving corps.**
+**2c. FIXED — a draft-capital starting quarterback collapsed his team's whole receiving corps.**
 Found by asking why Brock Bowers — ADP 18, 9.0 targets a game in 2024 — projected 111 points
 against Sleeper's 202.
 
@@ -474,15 +474,19 @@ nothing: LV's budget is built from 305 attempts where a real team throws about 5
 Raiders pass-catcher is then scaled down to fit, and the scale clamps at its 0.6 floor. Bowers
 is collateral damage from his quarterback being a rookie.
 
-It is exactly one team today — LV is the only one with a draft-capital quarterback listed
-first, and the league median attempt budget is a healthy 513 — which is why it reads as a
-strange one-off rather than a systemic bias. The fix is not small: either draft-capital
-quarterbacks need an attempt rate so they enter the budget, or the attempt budget needs to come
-from conserved quarterback games at an environment-set rate rather than from whichever
-quarterbacks happen to have usage history. The second is closer to how carries already work,
-but it would make the targets-per-attempt identity a check that two constants were applied
-rather than that the parts agree, so it needs the backtest run before it goes anywhere near the
-board.
+Fixed by doing both of the things that were on the table. Draft-capital projections now run
+BEFORE the conservation steps rather than being appended after them, they carry the depth chart,
+and a draft-capital quarterback carries an attempt rate for his rank — so he enters the games
+allocation and the attempt budget instead of sitting outside both. Las Vegas had been projecting
+thirty quarterback games in a seventeen-game season.
+
+Separately, the attempt budget is now anchored to a league-typical total exactly as carries
+always have been, because summing it from whichever quarterbacks have usage history came to 496
+a team against a real 545 and left every pass-catcher on the board 9% light. Both sides move
+together: anchoring only the targets put 512 targets against 496 attempts, which is not a
+projection but an impossibility.
+
+Bowers now projects 206.7 and is TE1, against Sleeper's 202.5.
 
 **3. No correlation in the simulation.** Each player's weeks are drawn independently, so a
 quarterback and his WR1 are uncorrelated when in reality they run about +0.5 together. That
