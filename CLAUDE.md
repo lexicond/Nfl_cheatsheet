@@ -386,6 +386,24 @@ it was never given and fails if it does not beat "repeat last season".
   WR2 and WR3 pushes the team over its target budget, the conservation step scales everyone
   back to fit, and the alpha pays for it — Justin Jefferson fell from 173 to 143. The rank's
   own baseline stays the shrink target; only the hard cap moved.
+- **Every touchdown a quarterback throws is caught by somebody, and nothing made that true.**
+  The model produced 811 passing touchdowns against 742 receiving ones, so 69 of its own
+  thrown touchdowns landed on nobody. Passing touchdowns are the side to trust — 811 against
+  a real 811, and 4.66% per attempt against a real 4.65% — so the receiving side is now
+  reconciled to them per team. It is applied on top of the receiving scale rather than folded
+  into it, because yards and receptions are constrained by targets while touchdowns are
+  constrained by the throw: two budgets that happen to sit on the same players.
+- **A draft-capital quarterback needs ALL his budget rates, not just attempts.** Giving him
+  attempts alone left Las Vegas throwing 442 times for ONE touchdown — 0.22% per attempt
+  against a league 4.65% — and the receiving-touchdown reconciliation above then cut every
+  Raiders receiver by 30% to match a passing game that scored nothing. Brock Bowers paid for
+  it twice over. Attempts, passing yards and passing touchdowns all come from the rank
+  allowance and league rates; his own projection still comes from the rookie curve.
+- **Sleeper is not ground truth and reads high.** Its league totals come to 11,640 receptions,
+  129,683 receiving yards and 833 receiving touchdowns; the last two real seasons produced
+  11,130-11,563, 121,678-126,476 and about 801. On yardage this model's total is the closest
+  of the three.A gap against Sleeper is therefore not evidence of a fault on its own — check the
+  number against nflverse before chasing it.
 - **Correct the attempt LEVEL, never the spread — teams do not all throw the same.** Attempts
   summed from whichever quarterbacks have usage history came to 496 a team against a real 545,
   because backups take their share of the games at a backup's rate. Every target is derived

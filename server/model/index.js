@@ -13,6 +13,7 @@ const nflverse = require('./nflverse');
 const { buildUsageHistory, positionalBaselines } = require('./usage');
 const { buildStability } = require('./stability');
 const { projectVolume, volumeBaselines, depthAllowance, UNRANKED_DEPTH } = require('./volume');
+const { RULES } = require('./scoring');
 const { projectEfficiency, fpoeResidual } = require('./efficiency');
 const { buildEnvironment } = require('./environment');
 const { loadOddsGames } = require('./odds');
@@ -51,6 +52,12 @@ const STABILITY_SEASONS = 6;
  * The proper fix is nflverse's depth charts, which would say who is starting rather than
  * inferring it from last season's volume. That is the right next step and is not built.
  */
+// League-typical passing production per attempt, used only to give a quarterback projected
+// from draft capital a coherent contribution to his team's budget. Measured on 2025: 811
+// passing touchdowns and about 3,900 yards a team across 545 attempts.
+const LEAGUE_YARDS_PER_ATTEMPT = 7.2;
+const LEAGUE_TD_PER_ATTEMPT = 0.0465;
+
 const ROLE_GATE = { QB: 100, RB: 60, WR: 35, TE: 25 };
 
 // Designations that mean he is not available for the season's start, as opposed to the
@@ -544,14 +551,27 @@ async function runModel({
         draft_round: entry.draft_round,
         depth_order: rookieDepthOrder,
         injury_status: rookieDepth?.injury ?? null,
-        // A quarterback who is going to start throws, and his team's receivers are fed
-        // from those attempts. Without a rate here he contributed nothing to the team's
-        // budget, so Las Vegas was scaled to 305 attempts where a real team throws 545 and
-        // every Raiders receiver was cut to fit. The rate is the one measured for his rank
-        // on the chart — the same table every other quarterback is shrunk toward — and it
-        // is a budget contribution only: the projection itself still comes from the curve.
+        // A quarterback who is going to start throws, and his team's receivers are fed from
+        // those attempts. Without rates here he contributed nothing to the team's budget, so
+        // Las Vegas was scaled to 305 attempts where a real team throws 545 and every Raiders
+        // receiver was cut to fit.
+        //
+        // All three rates are needed, not just attempts. Giving him attempts alone left Las
+        // Vegas throwing 442 times for ONE touchdown — 0.22% per attempt against a league
+        // 4.65% — and the receiving-touchdown reconciliation then cut its receivers by 30% to
+        // match a passing game that scored nothing. Brock Bowers paid for it.
+        //
+        // These are budget contributions only. His own projection still comes from the
+        // rookie curve, and nothing scales these — the conservation pass skips him.
         ...(entry.position === 'QB' && rookieDepthOrder != null
-          ? { attempts_pg: depthAllowance('QB', rookieDepthOrder)?.attempts_pg ?? 0 }
+          ? (() => {
+            const attempts = depthAllowance('QB', rookieDepthOrder)?.attempts_pg ?? 0;
+            return {
+              attempts_pg: attempts,
+              pass_yards_pg: attempts * LEAGUE_YARDS_PER_ATTEMPT,
+              pass_tds_pg: attempts * LEAGUE_TD_PER_ATTEMPT,
+            };
+          })()
           : {}),
         basis: trueRookie
           ? 'draft capital — no NFL usage yet'
@@ -677,13 +697,15 @@ async function runModel({
     // receiving corps.
     const isDraftCapital = !!p.components.basis;
     if (isDraftCapital && !(p.components.attempts_pg > 0)) continue;
-    if (!teamTotals.has(p.team)) teamTotals.set(p.team, { att: 0, tgt: 0, car: 0 });
+    if (!teamTotals.has(p.team)) teamTotals.set(p.team, { att: 0, tgt: 0, car: 0, passTd: 0, recTd: 0 });
     const t = teamTotals.get(p.team);
     const g = p.games || 0;
     t.att += (p.components.attempts_pg || 0) * g;
+    t.passTd += (p.components.pass_tds_pg || 0) * g;
     if (isDraftCapital) continue;   // he consumes attempts, but has no targets or carries to count
     t.tgt += (p.components.targets_pg || 0) * g;
     t.car += (p.components.carries_pg || 0) * g;
+    t.recTd += (p.components.rec_tds_pg || 0) * g;
   }
 
   // The league-wide attempt correction.
@@ -721,12 +743,24 @@ async function runModel({
     const targetAtt = t.att * attemptCorrection;
     const targetTgt = targetAtt * TARGETS_PER_ATTEMPT;
     const targetCar = LEAGUE_RUSH_ATTEMPTS * (1 - lean * 2);
+    // Bounded: a scale far from 1 means something else is wrong and silently
+    // multiplying by it would hide that rather than fix it.
+    const sc0 = {
+      pass: t.att > 0 ? Math.max(0.6, Math.min(1.4, targetAtt / t.att)) : 1,
+      rec: t.tgt > 0 ? Math.max(0.6, Math.min(1.4, targetTgt / t.tgt)) : 1,
+    };
     scales.set(team, {
-      // Bounded: a scale far from 1 means something else is wrong and silently
-      // multiplying by it would hide that rather than fix it.
       pass: t.att > 0 ? Math.max(0.6, Math.min(1.4, targetAtt / t.att)) : 1,
       rec: t.tgt > 0 ? Math.max(0.6, Math.min(1.4, targetTgt / t.tgt)) : 1,
       rush: t.car > 0 ? Math.max(0.6, Math.min(1.4, targetCar / t.car)) : 1,
+      // Every touchdown a quarterback throws is caught by somebody. Nothing in the model
+      // made that true and it was not: league-wide it produced 811 passing touchdowns
+      // against 742 receiving ones, so 69 of its own thrown touchdowns landed on nobody.
+      // Passing touchdowns are the side to trust — the model puts them at 811 against a
+      // real 811, and 4.66% per attempt against a real 4.65% — so the receiving side is
+      // reconciled to them. Both sides carry the pass scale already, so this is computed
+      // on the post-scale totals and only the ratio between them moves.
+      recTd: t.recTd > 0 ? Math.max(0.7, Math.min(1.4, (t.passTd * sc0.pass) / (t.recTd * sc0.rec))) : 1,
     });
   }
 
@@ -741,8 +775,7 @@ async function runModel({
     const recPts = (c.receiving || 0) * sc.rec;
     const rushPts = (c.rushing || 0) * sc.rush;
     const passPts = (c.passing || 0) * sc.pass;
-    const newPpg = recPts + rushPts + passPts;
-    if (!(newPpg > 0)) continue;
+    if (!(recPts + rushPts + passPts > 0)) continue;
 
     for (const [k, f] of [['targets_pg', sc.rec], ['receptions_pg', sc.rec], ['rec_yards_pg', sc.rec],
                           ['rec_tds_pg', sc.rec], ['carries_pg', sc.rush], ['rush_yards_pg', sc.rush],
@@ -750,14 +783,28 @@ async function runModel({
                           ['pass_yards_pg', sc.pass], ['pass_tds_pg', sc.pass]]) {
       if (c[k] != null) c[k] = Math.round(c[k] * f * 1000) / 1000;
     }
-    c.receiving = Math.round(recPts * 100) / 100;
+    // Receiving touchdowns are then reconciled to the passing touchdowns actually thrown.
+    // Applied on top of the receiving scale rather than folded into it, because yards and
+    // receptions are constrained by targets and touchdowns are constrained by the throw —
+    // two different budgets that happen to sit on the same players.
+    let tdDelta = 0;
+    if (sc.recTd != null && Math.abs(sc.recTd - 1) > 0.001 && c.rec_tds_pg != null) {
+      const before = c.rec_tds_pg;
+      c.rec_tds_pg = Math.round(before * sc.recTd * 1000) / 1000;
+      tdDelta = (c.rec_tds_pg - before) * RULES.receiving_tds;
+    }
+
+    c.receiving = Math.round((recPts + tdDelta) * 100) / 100;
     c.rushing = Math.round(rushPts * 100) / 100;
     c.passing = Math.round(passPts * 100) / 100;
     c.total_tds_pg = Math.round(((c.rec_tds_pg || 0) + (c.rush_tds_pg || 0) + (c.pass_tds_pg || 0)) * 1000) / 1000;
+    const newPpg = recPts + tdDelta + rushPts + passPts;
+    if (!(newPpg > 0)) continue;
     c.team_scale = {
       passing: Math.round(sc.pass * 1000) / 1000,
       receiving: Math.round(sc.rec * 1000) / 1000,
       rushing: Math.round(sc.rush * 1000) / 1000,
+      receiving_td: Math.round((sc.recTd ?? 1) * 1000) / 1000,
     };
 
     p.ppg = Math.round(newPpg * 100) / 100;
