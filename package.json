@@ -7,7 +7,11 @@
     "start": "node server/index.js",
     "build": "cd client && npm install && npm run build",
     "dev": "concurrently \"node server/index.js\" \"cd client && npm run dev\"",
-    "install:all": "npm install && cd client && npm install"
+    "install:all": "npm install && cd client && npm install",
+    "refresh": "node server/scripts/refresh-all.js",
+    "validate": "node server/scripts/validate-sources.js && node server/scripts/validate-draft-sync.js && node server/scripts/validate-projections.js",
+    "validate:projections": "node server/scripts/validate-projections.js",
+    "tune:projections": "node server/scripts/tune-projections.js"
   },
   "dependencies": {
     "axios": "^1.19.0",

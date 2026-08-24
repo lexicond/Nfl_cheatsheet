@@ -1,5 +1,9 @@
 node_modules/
 client/dist/
+
+# nflverse CSV pulls cached by the expected-points model. Regenerated on demand and
+# tens of megabytes; on Railway it lands on the volume beside the database.
+.nflverse-cache/
 *.db
 *.db-journal
 *.db-shm

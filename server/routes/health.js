@@ -33,7 +33,7 @@ router.get('/', (req, res) => {
     // Per-column coverage over the players carrying any market signal.
     const coverageCols = ['adp_underdog', 'adp_fantasypros', 'adp_ffc', 'adp_fp_rd', 'adp_fp_sf',
                           'adp_fp_dyn', 'adp_sl_rd', 'adp_sl_sf', 'adp_espn', 'adp_yahoo',
-                          'ktc_value', 'fc_value', 'bye_week'];
+                          'ktc_value', 'fc_value', 'bye_week', 'xfp_points', 'mkt_points'];
     const columnCoverage = {};
     for (const c of coverageCols) {
       columnCoverage[c] = db.prepare(`SELECT COUNT(*) AS n FROM players WHERE ${c} IS NOT NULL`).get().n;
@@ -57,6 +57,29 @@ router.get('/', (req, res) => {
       if (s.status === 'error' || isStale) overallStatus = 'degraded';
     }
 
+    // The last expected-points run, and what it was built from. The model is the only
+    // column here with no publisher behind it to be checked against, so its provenance
+    // is reported rather than left to be inferred from a points figure that always
+    // looks plausible.
+    const lastRun = db.prepare('SELECT * FROM model_runs ORDER BY id DESC LIMIT 1').get() || null;
+    const model = lastRun ? {
+      ran_at: lastRun.ran_at,
+      target_season: lastRun.target_season,
+      history_seasons: lastRun.history_seasons ? lastRun.history_seasons.split(',').map(Number) : [],
+      // The check that matters: was last season in the data? Projecting a season
+      // without the one before it is a materially weaker claim.
+      includes_last_season: lastRun.newest_season === lastRun.target_season - 1,
+      players_projected: lastRun.players,
+      rookies: lastRun.rookies,
+      matched_to_board: lastRun.matched,
+      market_priced_share: lastRun.env_coverage,
+      warnings: lastRun.warnings ? lastRun.warnings.split(' · ') : [],
+      elapsed_ms: lastRun.elapsed_ms,
+    } : null;
+    if (model && (!model.includes_last_season || model.warnings.length > 0)) {
+      overallStatus = overallStatus === 'ok' ? 'degraded' : overallStatus;
+    }
+
     res.json({
       status: overallStatus,
       // Whether anything saved here survives the next deploy. Reported because the
@@ -69,6 +92,7 @@ router.get('/', (req, res) => {
       ktc_value_coverage: playerCount > 0 ? (ktcCount / playerCount).toFixed(2) : '0.00',
       top20_consistency_mismatches: consistencyMismatches.map(p => p.name),
       column_coverage: columnCoverage,
+      model: model,
       sources: sourceDetails,
     });
   } catch (err) {

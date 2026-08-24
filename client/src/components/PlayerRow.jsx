@@ -25,6 +25,94 @@ function TrendIndicator({ trend }) {
   return <span className="text-red-400 text-xs ml-1" title={`Falling ${trend.toFixed(1)} picks`}>▼{Math.abs(trend).toFixed(1)}</span>;
 }
 
+/**
+ * What the model's projection is actually made of, for the cell tooltip. The breakdown
+ * is stored as JSON on the row, so a number nobody can interrogate never appears on the
+ * board — this is the board's own model, with no second source to check it against.
+ */
+/**
+ * The market's season line, spelled out. Worth showing the components rather than just
+ * the total, because the total is only as trustworthy as the lines behind it — a player
+ * priced for receiving yards but not touchdowns scores low here for a reason that has
+ * nothing to do with the market's opinion of him.
+ */
+function marketTitle(player) {
+  const parts = [`Betting market: ${player.mkt_points.toFixed(0)} half-PPR points from its season over/unders`];
+  const bits = [];
+  const add = (v, unit) => { if (v != null) bits.push(`${v} ${unit}`); };
+  add(player.mkt_pass_yards, 'pass yds');
+  add(player.mkt_pass_tds, 'pass TD');
+  add(player.mkt_rush_yards, 'rush yds');
+  add(player.mkt_rush_tds, 'rush TD');
+  add(player.mkt_rec_yards, 'rec yds');
+  add(player.mkt_rec_tds, 'rec TD');
+  add(player.mkt_receptions, 'rec');
+  if (bits.length) parts.push(bits.join(' · '));
+  if (!player.mkt_complete) {
+    // The books price receiving for the pass-catching backs and skip the rest, so this
+    // total is missing a category the player really scores in. Not an error and not a
+    // zero — the market simply saw no liquidity there.
+    parts.push('PARTIAL — the books price no season line for every category he scores in, '
+      + 'so this total is missing one and reads low. Not comparable with a full total');
+  }
+  if (player.mkt_adjusted > 0) {
+    // The one place a distribution assumption enters this column, so it is said out loud.
+    parts.push(`${player.mkt_adjusted} of these ${player.mkt_adjusted === 1 ? 'line is' : 'lines are'} `
+      + 'the median the market\'s price implies rather than the number it posts — a line at long '
+      + 'odds is a threshold, not an expectation');
+  }
+  if (player.mkt_books != null) {
+    parts.push(player.mkt_books >= 5
+      ? `every line here is priced by at least ${player.mkt_books} books`
+      : `one of these lines comes from just ${player.mkt_books} book${player.mkt_books === 1 ? '' : 's'} — a thin consensus`);
+  }
+  // The one category with no season market at all, and it only bites quarterbacks.
+  if (player.position === 'QB') {
+    parts.push('no interception market exists, so this reads about two dozen points high for a quarterback');
+  }
+  if (player.xfp_points != null) {
+    const gap = player.xfp_points - player.mkt_points;
+    parts.push(Math.abs(gap) < 15
+      ? 'the model agrees with it to within 15 points'
+      : `the model has him ${Math.abs(gap).toFixed(0)} points ${gap > 0 ? 'higher' : 'lower'}`
+        + ' — and note the market line already discounts for games it expects him to miss,'
+        + ' while the model assumes a full season');
+  }
+  return parts.join(' · ');
+}
+
+function xfpTitle(player) {
+  let parts = [`Model projection: ${player.xfp_points?.toFixed(0)} half-PPR points`];
+  if (player.xfp_pos_rank != null) parts[0] += ` (${player.position}${player.xfp_pos_rank})`;
+  // A full season unless the depth chart splits the job, which is only quarterbacks.
+  if (player.xfp_games != null) {
+    parts.push(player.xfp_games >= 16.9
+      ? 'over a full season — the model does not forecast injuries'
+      : `over ${player.xfp_games.toFixed(1)} games, his share of the job on the depth chart`);
+  }
+
+  let c = null;
+  try {
+    c = player.xfp_components ? JSON.parse(player.xfp_components) : null;
+  } catch { /* a malformed breakdown must not take the tooltip down */ }
+
+  if (c) {
+    if (c.basis) parts.push(c.basis + (c.draft_ovr ? ` (pick ${c.draft_ovr})` : ''));
+    else {
+      const bits = [];
+      if (c.targets_pg) bits.push(`${c.targets_pg.toFixed(1)} targets/g`);
+      if (c.carries_pg) bits.push(`${c.carries_pg.toFixed(1)} carries/g`);
+      if (c.attempts_pg) bits.push(`${c.attempts_pg.toFixed(1)} pass att/g`);
+      if (bits.length) parts.push(bits.join(', '));
+    }
+    if (c.env_total != null) {
+      parts.push(`${c.env_team} priced for ${c.env_total} points a game${c.env_source === 'market' ? '' : ` (${c.env_source})`}`);
+    }
+  }
+  if (player.xfp_confidence === 'low') parts.push('low confidence — thin or no recent usage');
+  return parts.join(' · ');
+}
+
 // score = market position rank − projected position rank. Positive means the market
 // drafts him later than the projections rank him.
 function ValueBadge({ score, position }) {
@@ -55,6 +143,7 @@ function ValueBadge({ score, position }) {
 export default function PlayerRow({
   player, index, onUpdate, onOpenModal, columns = [],
   format = 'BB', leagueType = '1QB', sleeperBaseline = null, draftUrl = null,
+  replacement = null,
 }) {
   const [copied, setCopied] = useState(false);
   const [editingRank, setEditingRank] = useState(false);
@@ -218,6 +307,144 @@ export default function PlayerRow({
             {player.projected_pts.toFixed(1)}
           </span>
         ) : <span className="text-[#555875]">–</span>}
+      </td>
+    ),
+
+    // The model's own projection. Coloured by how much of it rests on real evidence:
+    // a rookie priced off draft capital alone should not read the same as a starter
+    // with three seasons of usage behind him.
+    xfp_points: (
+      <td key="xfp_points" className={`${cellClass} w-16 font-mono text-right`}>
+        {player.xfp_points != null ? (
+          <span
+            className={player.xfp_confidence === 'low' ? 'text-[#8b90a8] italic' : `pos-text-${player.position}`}
+            title={xfpTitle(player)}
+          >
+            {player.xfp_points.toFixed(0)}
+          </span>
+        ) : <span className="text-[#555875]">–</span>}
+      </td>
+    ),
+
+    // Value over replacement — the model's cross-position number, and the one worth
+    // drafting on. Raw points cannot be compared across positions at all: a quarterback
+    // out-scores every running back and is still not the better pick.
+    xfp_vor: (
+      <td key="xfp_vor" className={`${cellClass} w-16 font-mono text-right`}>
+        {player.xfp_vor == null ? (
+          <span className="text-[#555875]">–</span>
+        ) : (
+          <span
+            className={player.xfp_vor > 0 ? 'text-[#e8eaf0]' : 'text-[#555875]'}
+            title={
+              `${player.xfp_vor.toFixed(0)} points more than a replacement ${player.position} over the season`
+              + (replacement?.[player.position] != null
+                ? ` — the last ${player.position} worth starting in this league projects ${replacement[player.position].toFixed(0)}`
+                : '')
+              + '. This is the number to compare across positions; raw points are not comparable.'
+            }
+          >
+            {player.xfp_vor.toFixed(0)}
+          </span>
+        )}
+      </td>
+    ),
+
+    // Best-ball ceiling. Best ball starts your best players each week automatically, so
+    // a spike week is worth more than a steady one and the ceiling is closer to what you
+    // are actually buying than the mean is.
+    xfp_ceiling: (
+      <td key="xfp_ceiling" className={`${cellClass} w-16 font-mono text-right`}>
+        {player.xfp_ceiling != null ? (
+          <span
+            className="text-[#8b90a8]"
+            title={
+              `Upside season: ${player.xfp_ceiling.toFixed(0)} points, against a projection of `
+              + `${player.xfp_points != null ? player.xfp_points.toFixed(0) : '?'} and a downside of `
+              + `${player.xfp_floor != null ? player.xfp_floor.toFixed(0) : '?'}`
+              + (player.xfp_best_ball != null
+                ? `. Counting only his best weeks, as best ball does: ${player.xfp_best_ball.toFixed(0)}`
+                : '')
+              + '. From simulating the season week by week. Read it as the range if he holds '
+              + 'his role — the model does not forecast who gets injured, so this is not a '
+              + 'percentile of every outcome.'
+            }
+          >
+            {player.xfp_ceiling.toFixed(0)}
+          </span>
+        ) : <span className="text-[#555875]">–</span>}
+      </td>
+    ),
+
+    // Where the model and the market disagree, across the whole board rather than
+    // within a position. This is the arbitrage number: positive means the model would
+    // draft him earlier than the room is.
+    xfp_edge: (
+      <td key="xfp_edge" className={`${cellClass} w-14 font-mono text-right`}>
+        {player.xfp_edge == null || Math.abs(player.xfp_edge) < 25 ? (
+          <span
+            className="text-[#555875]"
+            title={player.xfp_edge == null
+              ? 'Not enough to compare — he needs both a projection and a consensus number, and to be inside the range that actually gets drafted'
+              : `The model and the market are within ${Math.abs(player.xfp_edge)} places of each other on him. `
+                + 'Only gaps of 25 places — about two rounds — get a number.'}
+          >
+            {player.xfp_edge == null ? '–' : '·'}
+          </span>
+        ) : (
+          <span
+            className={player.xfp_edge > 0 ? 'text-green-400' : 'text-amber-400'}
+            title={(player.xfp_edge > 0
+              ? `The model ranks him ${player.xfp_edge} places higher than the market is drafting him — a buy, if you believe the projection`
+              : `The market is drafting him ${Math.abs(player.xfp_edge)} places higher than the model ranks him — a fade`)
+              + (player.position === 'QB'
+                ? '. Read quarterbacks here with care: value over replacement judges them against the last startable QB, and best ball makes you roster two or three whatever that says.'
+                : '')}
+          >
+            {player.xfp_edge > 0 ? `+${player.xfp_edge}` : player.xfp_edge}
+          </span>
+        )}
+      </td>
+    ),
+
+    // Points per game — the model's real claim. The season total is this times a full
+    // season, so this is the number that is free of any assumption about availability.
+    xfp_ppg: (
+      <td key="xfp_ppg" className={`${cellClass} w-14 font-mono text-right`}>
+        {player.xfp_ppg != null ? (
+          <span
+            className={player.xfp_confidence === 'low' ? 'text-[#8b90a8] italic' : `pos-text-${player.position}`}
+            title={`${player.xfp_ppg.toFixed(1)} half-PPR points per game he plays. `
+              + 'The season figure beside it is this over a full seventeen games — the model '
+              + 'does not try to predict who gets injured, so the rate is the honest comparison '
+              + 'between two players.'}
+          >
+            {player.xfp_ppg.toFixed(1)}
+          </span>
+        ) : <span className="text-[#555875]">–</span>}
+      </td>
+    ),
+
+    // The betting market's own season total for him, scored under this league's rules.
+    // Deliberately shown next to the model rather than folded into it: this number is an
+    // expected value that already discounts the games the books think he will miss, and
+    // the model's is a full season on purpose. Where they diverge sharply, the books are
+    // usually saying something about availability rather than about talent.
+    mkt_points: (
+      <td key="mkt_points" className={`${cellClass} w-16 font-mono text-right`}>
+        {player.mkt_points != null ? (
+          <span
+            className={player.mkt_complete ? 'text-[#8b90a8]' : 'text-[#555875] italic'}
+            title={marketTitle(player)}
+          >
+            {player.mkt_points.toFixed(0)}{player.mkt_complete ? '' : '*'}
+          </span>
+        ) : (
+          <span
+            className="text-[#555875]"
+            title="No season-long betting line published for him. The books price roughly the top 100 skill players and 31 quarterbacks; everyone else is unpriced, which is itself a signal about how the market sees him."
+          >–</span>
+        )}
       </td>
     ),
 

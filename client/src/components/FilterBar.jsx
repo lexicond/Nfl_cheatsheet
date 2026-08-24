@@ -23,6 +23,15 @@ function getSortOptions(view, excluded, format) {
     ...active.map(s => ({ value: s.column, label: s.label })),
     { value: 'sleeper_gap', label: 'Cheapest on Sleeper' },
     { value: 'spread', label: 'Most disagreement' },
+    // The model's own orderings. Only offered where they mean something: dynasty is a
+    // keep-forever league and this is a one-season projection.
+    ...(format !== 'DYN' && !excluded.includes('expectedpoints') ? [
+      { value: 'xfp_vor', label: 'Value over replacement' },
+      { value: 'xfp_edge', label: 'Biggest edge vs market' },
+      { value: 'xfp_ceiling', label: 'Highest ceiling' },
+      { value: 'xfp_points', label: 'Expected points' },
+      { value: 'xfp_ppg', label: 'Points per game' },
+    ] : []),
     ...(format === 'DYN' ? [{ value: 'age', label: 'Age (youngest)' }] : []),
     ...SORT_COMMON,
   ];

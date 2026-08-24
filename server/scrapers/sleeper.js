@@ -49,8 +49,10 @@ async function fetchSleeper() {
   const now = new Date().toISOString();
 
   const insertPlayer = db.prepare(`
-    INSERT INTO players (name, name_normalized, position, nfl_team, sleeper_player_id, last_updated)
-    VALUES (@name, @name_normalized, @position, @nfl_team, @sleeper_player_id, @last_updated)
+    INSERT INTO players (name, name_normalized, position, nfl_team, sleeper_player_id,
+                         depth_chart_order, depth_chart_position, injury_status, last_updated)
+    VALUES (@name, @name_normalized, @position, @nfl_team, @sleeper_player_id,
+            @depth, @depthPos, @injury, @last_updated)
   `);
   const updateMeta = db.prepare(`
     UPDATE source_metadata SET last_fetched = ?, player_count = ?, status = ?, notes = ? WHERE source = 'sleeper'
@@ -58,7 +60,10 @@ async function fetchSleeper() {
   const bySleeperId = db.prepare('SELECT id, position FROM players WHERE sleeper_player_id = ?');
   const byNorm = db.prepare('SELECT id FROM players WHERE name_normalized = ? AND position = ?');
   const linkSleeperId = db.prepare(`
-    UPDATE players SET sleeper_player_id = @sid, nfl_team = COALESCE(@team, nfl_team), last_updated = @ts WHERE id = @id
+    UPDATE players SET sleeper_player_id = @sid, nfl_team = COALESCE(@team, nfl_team),
+      depth_chart_order = @depth, depth_chart_position = @depthPos,
+      injury_status = @injury, last_updated = @ts
+    WHERE id = @id
   `);
   const updateStats = db.prepare(`
     UPDATE players
@@ -112,10 +117,16 @@ async function fetchSleeper() {
         const sid = p.player_id ? String(p.player_id) : null;
         const team = p.team ? String(p.team).toUpperCase() : null;
 
+        // Sleeper's own depth chart: order 1 is the starter at that slot. It is the only
+        // live read on who is playing — usage history cannot know about an offseason move.
+        const depth = Number.isFinite(Number(p.depth_chart_order)) ? Number(p.depth_chart_order) : null;
+        const depthPos = p.depth_chart_position || null;
+        const injury = p.injury_status || null;
+
         const found = (sid && bySleeperId.get(sid)) || byNorm.get(normalizeName(name), p.position);
         const existing = found && claim(found.id, name) ? found : null;
         if (existing) {
-          linkSleeperId.run({ id: existing.id, sid, team, ts: now });
+          linkSleeperId.run({ id: existing.id, sid, team, depth, depthPos, injury, ts: now });
         } else {
           insertPlayer.run({
             name,
@@ -123,6 +134,7 @@ async function fetchSleeper() {
             position: p.position,
             nfl_team: team,
             sleeper_player_id: sid,
+            depth, depthPos, injury,
             last_updated: now,
           });
         }

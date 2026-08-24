@@ -174,6 +174,94 @@ const COLUMNS = {
     family: 'footballers',
     provider: 'The Fantasy Footballers, three-analyst projections',
   },
+  // This board's own expected-points model. Not a market and not a panel of experts:
+  // it is computed here from nflverse usage and betting-market team totals — see
+  // server/model/. It is registered under all four season-long views because the
+  // projection itself does not depend on league type; only value over replacement does,
+  // and that is derived per request.
+  //
+  // `consensus: false` is not a matter of taste. Averaging a projection into an ADP
+  // consensus would mix a points forecast with pick numbers, exactly the mistake the
+  // positional-rank column already refuses to make. It is displayed, sortable, and
+  // deliberately outside every average.
+  xfp_points: {
+    label: 'Expected Points', short: 'xFP', source: 'expectedpoints',
+    format: 'BB', league: '1QB', scoring: 'half', kind: 'model', consensus: false,
+    excludedReason: 'A points projection, not a pick number — and this board\'s own model, so averaging it into a market consensus would let the board vote on itself',
+    what: 'This board\'s own projection, not anyone else\'s. It works out how many half-PPR points each player should score from three things kept separate: the opportunity his role gives him, what he does per opportunity once the noise is regressed out, and how many points the betting market expects his offence to score. Backtested on a season it had never seen.',
+    family: 'expectedpoints',
+    provider: 'This board\'s model — nflverse usage × betting-market team totals',
+  },
+  xfp_points_bb_sf: {
+    label: 'Expected Points', short: 'xFP', source: 'expectedpoints',
+    format: 'BB', league: '2QB', scoring: 'half', kind: 'model', consensus: false,
+    excludedReason: 'A points projection, not a pick number',
+    what: 'The same expected-points projection, shown on the best-ball superflex board. The projection does not change with league type; what changes is value over replacement, because a superflex league starts far more quarterbacks.',
+    family: 'expectedpoints',
+    provider: 'This board\'s model — nflverse usage × betting-market team totals',
+  },
+  xfp_points_rd: {
+    label: 'Expected Points', short: 'xFP', source: 'expectedpoints',
+    format: 'RD', league: '1QB', scoring: 'half', kind: 'model', consensus: false,
+    excludedReason: 'A points projection, not a pick number',
+    what: 'The same expected-points projection, shown on the redraft board.',
+    family: 'expectedpoints',
+    provider: 'This board\'s model — nflverse usage × betting-market team totals',
+  },
+  xfp_points_rd_sf: {
+    label: 'Expected Points', short: 'xFP', source: 'expectedpoints',
+    format: 'RD', league: '2QB', scoring: 'half', kind: 'model', consensus: false,
+    excludedReason: 'A points projection, not a pick number',
+    what: 'The same expected-points projection, shown on the redraft superflex board.',
+    family: 'expectedpoints',
+    provider: 'This board\'s model — nflverse usage × betting-market team totals',
+  },
+  // What the betting market says each player will actually produce this season, scored
+  // under this league's rules. Sourced from BettingPros' season-long over/unders — see
+  // scrapers/marketprops.js for why only `consensus_line` is trusted.
+  //
+  // It is NOT the same quantity as the model's projection beside it, and the difference
+  // is the whole reason it is worth showing. A line of 1,300 receiving yards is an
+  // expected value that already prices in the games he is likely to miss; the model's
+  // number is deliberately a full seventeen, because it refuses to forecast injuries.
+  // So the market will read low on anyone the books think is fragile, and that gap is
+  // information rather than an error in either number.
+  //
+  // `consensus: false` for the same two reasons the model is excluded — a points total
+  // is not a pick number — plus a third: receptions have no published market, so the
+  // half-PPR reception term here is estimated rather than priced.
+  mkt_points: {
+    label: 'Market line', short: 'MKT', source: 'marketprops',
+    format: 'BB', league: '1QB', scoring: 'half', kind: 'market', consensus: false,
+    excludedReason: 'A points total, not a pick number — and an expected value that already prices in missed games, unlike every projection beside it',
+    what: 'The betting market\'s own season-long over/unders for this player — passing, rushing and receiving yards and touchdowns — added up under this board\'s scoring. Unlike an expert ranking this is a number people are staking money on, and unlike the model beside it, it already discounts for the games the books expect him to miss. Receptions are priced too, so every half-PPR category is a real line rather than an estimate — except interceptions, which no book prices for a season, so a quarterback\'s total here reads about two dozen points high. The books also price receiving for only the pass-catching running backs, so a back with no receiving line is marked partial rather than shown as a rushing-only total. Where a line sits at long odds it is converted to the median that price implies, using the distribution shape Polymarket\'s threshold ladders give — a line nobody expects to be reached is a threshold, not a forecast.',
+    family: 'marketprops',
+    provider: 'BettingPros consensus season props, ~23 books',
+  },
+  mkt_points_bb_sf: {
+    label: 'Market line', short: 'MKT', source: 'marketprops',
+    format: 'BB', league: '2QB', scoring: 'half', kind: 'market', consensus: false,
+    excludedReason: 'A points total, not a pick number',
+    what: 'The same market season totals, shown on the best-ball superflex board. Betting lines do not know what league you are in — only the value you place on a quarterback changes.',
+    family: 'marketprops',
+    provider: 'BettingPros consensus season props, ~23 books',
+  },
+  mkt_points_rd: {
+    label: 'Market line', short: 'MKT', source: 'marketprops',
+    format: 'RD', league: '1QB', scoring: 'half', kind: 'market', consensus: false,
+    excludedReason: 'A points total, not a pick number',
+    what: 'The same market season totals, shown on the redraft board.',
+    family: 'marketprops',
+    provider: 'BettingPros consensus season props, ~23 books',
+  },
+  mkt_points_rd_sf: {
+    label: 'Market line', short: 'MKT', source: 'marketprops',
+    format: 'RD', league: '2QB', scoring: 'half', kind: 'market', consensus: false,
+    excludedReason: 'A points total, not a pick number',
+    what: 'The same market season totals, shown on the redraft superflex board.',
+    family: 'marketprops',
+    provider: 'BettingPros consensus season props, ~23 books',
+  },
   fc_value: {
     label: 'FantasyCalc', short: 'FC', source: 'fantasycalc',
     format: 'DYN', league: '1QB', scoring: 'half', kind: 'value',
@@ -253,6 +341,8 @@ const KIND_LABEL = {
   ecr: 'Expert rankings',
   value: 'Trade values',
   posrank: 'Projection rank, by position',
+  model: 'This board\'s own model',
+  market: 'Betting market',
 };
 
 // Superflex dynasty columns are sent to the client under their base name, because a
@@ -260,6 +350,12 @@ const KIND_LABEL = {
 // player payload actually carries.
 const FIELD_ALIAS = {
   ff_pos_rank_rd: 'ff_pos_rank',
+  xfp_points_bb_sf: 'xfp_points',
+  xfp_points_rd: 'xfp_points',
+  xfp_points_rd_sf: 'xfp_points',
+  mkt_points_bb_sf: 'mkt_points',
+  mkt_points_rd: 'mkt_points',
+  mkt_points_rd_sf: 'mkt_points',
   ktc_value_sf: 'ktc_value',
   fc_value_sf: 'fc_value',
   ds_value_sf: 'ds_value',

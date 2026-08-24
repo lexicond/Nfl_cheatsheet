@@ -125,6 +125,39 @@ function buildDynastyRanks() {
   }
 }
 
+// How much of a flex spot each position actually takes. A flex is overwhelmingly a
+// back or a receiver, so splitting it evenly would set the tight-end bar far too high.
+const FLEX_SHARE = { RB: 0.4, WR: 0.45, TE: 0.15 };
+let ROUND_REPLACEMENT = {};
+
+/**
+ * The projection of the last player at each position worth starting in this league.
+ * Subtracting it is what makes a quarterback's points comparable with a running back's
+ * — at four-point passing touchdowns quarterbacks out-score everyone and are still not
+ * automatically the better pick.
+ *
+ * Mirrors replacementLevels in server/model/combine.js. Kept in step by hand because
+ * the sheet is a single standalone file with no imports; if one changes, change both.
+ */
+function replacementLevels(rows) {
+  const sf = state.leagueType === '2QB';
+  const slots = { QB: sf ? 1.7 : 1, RB: 2, WR: 3, TE: 1, FLEX: 1 };
+  const out = {};
+  for (const pos of POS) {
+    const flex = pos === 'QB' ? 0 : slots.FLEX * (FLEX_SHARE[pos] || 0);
+    const depth = Math.max(1, Math.round(state.teams * (slots[pos] + flex)));
+    const ranked = rows.filter(p => p.p === pos && p.xfp != null).sort((a, b) => b.xfp - a.xfp);
+    if (!ranked.length) { out[pos] = 0; continue; }
+    // Average a few either side of the boundary so one odd projection cannot move a
+    // whole position's value.
+    const band = ranked.slice(Math.max(0, depth - 2), Math.min(ranked.length, depth + 3));
+    out[pos] = band.length
+      ? band.reduce((a, p) => a + p.xfp, 0) / band.length
+      : ranked[ranked.length - 1].xfp;
+  }
+  return out;
+}
+
 // The ranked pool for the current format, with positional ranks attached.
 function pool() {
   buildDynastyRanks();
@@ -148,6 +181,17 @@ function pool() {
     p.spread = spreadOf(p);
     p.round = state.format === 'DYN' ? null : Math.ceil(p.h / state.teams);
   });
+
+  // Value over replacement, from the model's projection. Computed here rather than
+  // baked in by the generator because it moves with league size and with superflex,
+  // both of which the reader can change on the page — the same reason the app derives
+  // it per request instead of storing it.
+  const repl = replacementLevels(rows);
+  rows.forEach(p => {
+    p.xvor = (p.xfp != null && state.format !== 'DYN')
+      ? Math.round(p.xfp - (repl[p.p] || 0)) : null;
+  });
+  ROUND_REPLACEMENT = repl;
 
   // Sleeper gap: where Sleeper drafts him against where the consensus rates him.
   // Positive means he comes cheaper on Sleeper. Taken from Sleeper's own board whether
@@ -244,6 +288,10 @@ function renderBoard(rows) {
   const refs = (REFERENCE_SOURCES[key()] || []).filter(([f]) => !isOff(f));
   const cols = [...activeSources(), ...refs].map(([f, label]) => [label, p => p[f]]);
   const slProxy = state.format === 'BB';
+  // The model's derived columns ride with its source column: switching it off in the
+  // sources list takes the whole family away rather than leaving VOR with nothing
+  // behind it. Dynasty never shows them — this is a one-season projection.
+  const showModel = state.format !== 'DYN' && !isOff('xfp');
 
   // One table with one sticky header, rather than a fresh table per round — the header
   // has to stay put as you scroll a 240-row board mid-draft.
@@ -255,10 +303,12 @@ function renderBoard(rows) {
     ${state.format === 'DYN' ? '' : '<th>Rd</th>'}
     <th title="Places cheaper (+) or dearer (-) on Sleeper than the consensus${slProxy ? '. Sleeper publishes no best-ball board, so this is its half-PPR redraft ADP' : ''}">&Delta; SL</th>
     <th title="How many places apart your ticked sources are on him">Split</th>
+    ${showModel ? `<th title="Points above the last ${state.teams}-team ${state.leagueType === '2QB' ? 'superflex' : '1QB'} starter at his position, from this board's own model. The number to compare across positions — raw points are not comparable.">VOR</th>`
+      + '<th title="85th-percentile season from simulating the year week by week. Best ball starts your best players automatically, so the ceiling is closer to what you are buying than the average is.">Ceil</th>' : ''}
     <th>Proj</th><th>Proj rk</th>
   </tr></thead>`;
 
-  const colCount = 4 + cols.length + (state.format === 'DYN' ? 3 : 4) + 2;
+  const colCount = 4 + cols.length + (state.format === 'DYN' ? 3 : 4) + 2 + (showModel ? 2 : 0);
   // Round markers only mean anything while the board is in draft order. Under any other
   // sort they would interleave — Round 34, Round 19, Round 31 — so they are dropped and
   // the Rd column carries the round instead.
@@ -310,6 +360,8 @@ function renderBoard(rows) {
       ${state.format === 'DYN' ? '' : `<td class="dim">${p.round}</td>`}
       <td>${gap}</td>
       <td>${split}</td>
+      ${showModel ? `<td class="big">${p.xvor == null ? '&ndash;' : p.xvor}</td>`
+        + `<td class="dim">${p.xc == null ? '&ndash;' : p.xc.toFixed(0)}</td>` : ''}
       <td class="dim">${p.pr == null ? '&ndash;' : p.pr.toFixed(0)}</td>
       <td class="dim">${p.projRank != null ? p.p + p.projRank : '&ndash;'}</td>
     </tr>`;
@@ -416,6 +468,8 @@ function renderSortOptions() {
     ['__split', 'Most disagreement'],
     ...(state.format === 'DYN' ? [['__age', 'Age (youngest)']] : []),
     ['__proj', 'Projected points'],
+    ...(state.format !== 'DYN' && !isOff('xfp')
+      ? [['__vor', 'Value over replacement'], ['__ceil', 'Highest ceiling']] : []),
   ];
   const sel = document.getElementById('sortby');
   // Fall back to the consensus if the previously chosen source has been switched off.
@@ -438,8 +492,14 @@ function sortRows(rows) {
   if (k === '__split') return by(p => p.spread, 'desc');
   if (k === '__age') return by(p => p.age, 'asc');
   if (k === '__proj') return by(p => p.pr, 'desc');
+  if (k === '__vor') return by(p => p.xvor, 'desc');
+  if (k === '__ceil') return by(p => p.xc, 'desc');
   if (k && SOURCE_META[k]) {
-    return by(p => p[k], SOURCE_META[k].kind === 'value' ? 'desc' : 'asc');
+    // ADP and ranks count up from the best pick; trade values, projections and betting
+    // lines count down from it. Reading this the wrong way round does not error, it
+    // just quietly puts the worst player at the top of the board.
+    const desc = ['value', 'model', 'market'].includes(SOURCE_META[k].kind);
+    return by(p => p[k], desc ? 'desc' : 'asc');
   }
   return rows;
 }

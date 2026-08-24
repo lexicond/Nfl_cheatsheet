@@ -25,6 +25,13 @@ Concretely, this has already happened:
   empty. The live one is the season endpoint used in `scrapers/sleeper.js`.
 - Sleeper keeps historical ADP on unrostered players — Tom Brady still carries one. A
   null `team` is how it marks them, so ADP from a teamless player is discarded.
+- **nflverse's `player_stats` release is the archive; `stats_player` is the live one.**
+  Both answer 200, both parse, and both carry a file called `stats_player_week_2024.csv`
+  — at 6.8MB and 8.5MB respectively, because the archived cut has 114 columns and the
+  live one 150. The archive also simply stops: it has no 2025 at all. Pull the wrong tag
+  and the model projects a season on data a year out of date, with nothing in the
+  response to say so. `server/model/nflverse.js` pins `stats_player` and asserts the
+  columns it needs are present.
 
 After touching the draft sync, run `node server/scripts/validate-draft-sync.js` — it
 proves the season guard still refuses a stale draft, that picks land on the player they
@@ -50,6 +57,46 @@ and the per-request board call it, so they cannot drift.
 
 **Families, not columns.** A market's 1QB and Superflex boards share a family, so
 switching a source off survives flipping Superflex. Exclusions are always family names.
+
+`server/model/` is the expected-points model — the only column on this board that is
+computed here rather than fetched from somebody. It follows the decomposition the
+architecture doc asks for, one file per stage:
+
+| File | Stage |
+|---|---|
+| `nflverse.js` | Layer 0: weekly stats, schedules, and the gsis↔sleeper crosswalk |
+| `scoring.js` | The league's scoring, in one place |
+| `usage.js` | The per-player, per-season table Modules A and B share |
+| `stability.js` | Year-over-year reliability, **measured**, → shrinkage constants |
+| `volume.js` | Module A — opportunity |
+| `efficiency.js` | Module B — points per opportunity, regressed |
+| `environment.js` | Module C — implied team totals from betting lines |
+| `combine.js` | E[FP], availability, Monte Carlo, replacement levels |
+| `index.js` | Orchestration, rookies, and the tuned hyperparameters |
+
+It reaches the board through `scrapers/expectedpoints.js`, which is a source wrapper
+rather than a scraper, and it joins on **Sleeper's player id via the crosswalk** — so
+none of the name-matching traps below apply to it.
+
+`server/scrapers/marketprops.js` is its counterweight: the betting market's own season-long
+over/unders per player — seven markets, from `/v3/offers` rather than `/v3/props` — scored
+under the same rules into one `MKT` column. It joins on `fantasypros_id → sleeper_id` through
+the same crosswalk, so it too is free of name matching. It is displayed and sortable, and
+deliberately outside every average and outside the model. Only rows whose position has every
+scoring category priced (`mkt_complete`) are a season total; the rest are shown dimmed and
+compared with nothing.
+
+Three further market sources sit around it, each with one job and none of them a board column:
+
+| File | Role |
+|---|---|
+| `model/wintotals.js` | VegasInsider season win totals — the market on whole teams |
+| `scrapers/polymarket.js` | Threshold ladders → the distribution SHAPE nothing else publishes |
+| `scrapers/rotowire.js` | A second vendor on the same books, to check the first |
+
+After touching anything under `server/model/` **or any of the market sources above**, run
+`node server/scripts/validate-projections.js`. It backtests the model against a season
+it was never given and fails if it does not beat "repeat last season".
 
 ## Traps worth knowing
 
@@ -104,6 +151,297 @@ switching a source off survives flipping Superflex. Exclusions are always family
   takes the wrong man off the board mid-draft. Names legitimately differ across an id
   match (Kenneth vs Kenny Gainwell); `validate-draft-sync.js` polices the two paths
   separately for this reason.
+- **A naive CSV split silently destroys the model.** nflverse's `headshot_url` is a
+  quoted field containing a comma, so `line.split(',')` shifts every column after it by
+  one and `targets` starts reading somebody's air yards. Nothing throws; the numbers just
+  become confidently wrong. `parseCsv` in `model/nflverse.js` is quote-aware, and the
+  required columns are asserted before any of it is believed.
+- **`github.com/<org>/<repo>/raw/...` answers 403 through the egress proxy.**
+  `raw.githubusercontent.com` works. That is how the DynastyProcess crosswalk is fetched.
+- **Judge the model on VOR, never on one pooled ranking by raw points.** At four-point
+  passing touchdowns quarterbacks out-score everyone, so ranking every position together
+  by raw points mostly measures whether a model reproduces that offset — a question of
+  scale, not of ordering. Measured that way this model *loses* to "repeat last season"
+  (0.680 vs 0.706) while *beating* it at every single position. That is Simpson's paradox,
+  not a result. On value over replacement, which removes the offset by construction and
+  is what the board shows, it wins (0.703 vs 0.690). Both numbers are printed by the
+  validator; only the meaningful ones are assertions.
+- **Superflex LOWERS the replacement quarterback, and that is what makes quarterbacks
+  worth more.** When nearly every team starts two, the last startable QB is a far worse
+  player, so the bar each QB is measured against drops and value over it rises. Asserting
+  it the other way round looks obviously right and is wrong; there is a check for it in
+  `validate-projections.js` because the mistake was made.
+- **A rookie curve fitted only on rookies who played is fitted on the hits.** The busts
+  are exactly the players who never appear in a stats file. `buildRookieCurve` starts from
+  the draft and scores a drafted player with no rookie season as zero, and the projection
+  is then bounded by the picks the curve was actually fitted on and capped at the 95th
+  percentile of what rookies at that position really score. Without both, a pick-three
+  back projected above every veteran at his position.
+- **Favourites run, underdogs throw.** `mean_spread` is positive for a favourite, so the
+  pass lean derived from it is negated. Getting this backwards is invisible in the output
+  — it just quietly moves value from the right backfields to the wrong ones.
+- **Blending three seasons of usage ranked worse than using the latest one.** This was
+  the surprise of the tuning run and it is why `TUNING.recency` is `[1, 0, 0]`. Roles turn
+  over fast enough that a season two years back is mostly noise about this one, and the
+  shrinkage step already handles a thin recent sample. Older seasons still feed the
+  stability measurement and the FPOE talent prior. Re-run
+  `node server/scripts/tune-projections.js` before changing it — it selects on one season
+  and validates on a later one it never saw.
+- **Shrinkage toward a positional baseline is shrinkage toward a STARTER.** Every rate in
+  the model is per game, and the baselines are drawn from players who had a role — 30.4
+  pass attempts a game at quarterback. Regress a quarterback who threw two passes toward
+  that, multiply by an expected-games figure that pulls a one-game season up to 10.5, and
+  he projects about 145 points. Nathan Peterman projected 143 on two career opportunities;
+  Philip Rivers, retired since 2020, projected 146. Every quarterback who ever took a snap
+  sat on the same floor. `ROLE_GATE` in `model/index.js` refuses the question instead:
+  no recent role, no projection, and the board shows a dash.
+- **A player must still be on a team.** The role gate alone does not catch a retired
+  player — his usage history never expires, so Derek Carr cleared it on 2024 and projected
+  207. The crosswalk's current team is required, which also stops the environment layer
+  silently falling back to a league baseline for exactly the players it knows least about.
+- **A projection must be withdrawn, not just written.** `expectedpoints.js` nulls every
+  row it did not project this run. Without that a player the model has stopped believing
+  in keeps his last number for ever, and it reads as current because every column beside
+  it is. The board reported full coverage of the draftable range on 385 stale rows.
+- **Reaching back for an older season needs a discount or it makes things worse.** Letting
+  the role anchor use a season the player has not repeated keeps genuinely draftable
+  players on the board — Jayden Reed, Tank Dell and Braelon Allen all lost most of last
+  season — but at full strength it ranked *below* "repeat last season", because most
+  players who lose a role never get it back. At `staleDiscount` 0.55 the trade turns
+  positive. Both that and `maxAnchorBack` were selected on one season and validated on
+  another.
+- **An evaluation pool filtered to healthy players cannot see the model's worst failure.**
+  The backtest originally required six games in the season before the test, which excludes
+  the bounce-back — a starter two years ago who missed last season and is being drafted on
+  the older one. That is exactly where the recency weights decide the answer, so they were
+  being chosen without ever being tested on the players they matter most for. The pool now
+  takes either of the two prior seasons.
+- **Score the model and the benchmark on the same players.** Once the role gate started
+  refusing players, the tuner was scoring the model on what it could project and the
+  benchmark on the whole pool — crediting the benchmark with a set of easy cases the model
+  never saw. That moved the naive number by more than any hyperparameter did.
+- **Two rankings can only be subtracted if they rank the same people.** The arbitrage
+  column ranked value over replacement across 860 players and the market across 400, so
+  the difference was mostly the difference in denominators: median −19, range −672 to
+  +324. It is now computed over the players who have both, and only inside the range that
+  actually gets drafted — beyond that a deep ADP comes off a single ECR list that keeps
+  ordering players long after anyone is picking them, and every "biggest buy" was a player
+  both sides agreed to ignore.
+- **The crosswalk and nflverse spell nine teams differently.** DynastyProcess says `SFO`,
+  `GBP`, `NOS`, `LAR`, `KCC`, `TBB`, `NEP`, `LVR`, `JAC`; the schedule file says `SF`, `GB`,
+  `NO`, `LA`, `KC`, `TB`, `NE`, `LV`, `JAX`. The environment lookup simply missed for all of
+  them, so 138 of 475 projections — every player on nine teams — silently fell back to a
+  league-average scalar while the run still reported all 32 teams priced by the market.
+  `normaliseTeam` in `model/nflverse.js` maps them, and the validator now asserts that every
+  projection resolved an environment. Fixing it moved agreement with the posted spread from
+  rho 0.64 to 0.74.
+- **Nothing conserves playing time unless you make it.** Players are projected one at a time,
+  which is right for positions that share the field and wrong for quarterback, where one man
+  takes every snap. Unconstrained, 66 quarterbacks got 13.2 expected games each across 31
+  teams — 871 where 527 exist — and team pass attempts came out 49% high with passing
+  touchdowns 40% high, while targets and carries reconciled to within 3%. Games are now
+  shared out per team in proportion to each man's strongest recent claim on the job.
+- **Allocate the job by his best recent season, not his last one.** Joe Burrow's 2025 was
+  eight games, so on last season alone Joe Flacco outranked him and took the larger share of
+  Cincinnati. `qbClaimBasis: 'peak'` fixes it, and it also beat `'anchor'` in the backtest.
+- **Hedge the allocation; do not bet on a starter.** Giving the strongest claim everything he
+  is projected for reconciles the team perfectly and ranked quarterbacks *worse* than doing
+  nothing, because who wins a job is not something last season's snap count reliably predicts.
+  Sharing games in proportion to claim (`qbClaimPower`) is worth more than being right more
+  often about the starter.
+- **Three identities must hold and nothing in the model enforces them**: a team's targets
+  equal its pass attempts, its receiving yards equal its passing yards, and its receiving
+  touchdowns equal its passing touchdowns. Each side is built from different players'
+  histories, so they are the sharpest test that the parts fit together —
+  `validate-projections.js` asserts all three.
+- **Do not forecast injuries; the model projects a full season.** Weighting a player's own
+  availability history was the worst thing in this model. Measured, it barely works: model
+  games against games actually played came out at rho 0.25 overall and 0.17 for non-QBs,
+  while handing out a spread wide enough to dominate the projection (the median receiver
+  was on 9.5 games). And most of what looks like durability is role — games played
+  correlates 0.58 season to season, but hold role fixed and it falls to 0.28, and among
+  established starters missing most of a year costs 1.8 games the next. Everyone with a
+  role now gets seventeen games; role lives in the per-game rates.
+- **Judge the model on points per game, not season totals.** A season total is rate ×
+  games, and games is mostly injury, which the model deliberately declines to predict. So
+  a season-total metric grades it largely on a guess it refuses to make, and the naive
+  benchmark wins by carrying last season's games for free (0.58 vs 0.67). On the per-game
+  rate — the question the board is for — the model wins, +0.017 on the held-out season and
+  +0.016 across three. Both are printed; only the rate is asserted.
+- **Sleeper conserves team totals and so must this.** Summed over all 31 players a team
+  carries, Sleeper's projections come to 543 pass attempts and 454 carries against a real
+  team's 545 and 455. They are allocating within a budget, not projecting each player
+  independently. Doing it independently gave one team 611 targets against 496 attempts.
+- **Cap a backup on TOTAL opportunity, never metric by metric.** A per-metric cap erases
+  the thing a committee backfield is made of. Washington runs Jacory Croskey-Merritt and
+  gives Rachaad White the passing down; capping targets separately flattened White into a
+  generic second-stringer. Capping the sum keeps the mix he has earned and limits only its
+  size — the pass-game share now reads 0.12 / 0.27 / 0.38 down the depth chart.
+- **A backup's per-game rate is a starter's rate.** It was earned in games he started with
+  the man ahead of him hurt. Zach Charbonnet projected 170 points against Sleeper's 62
+  until his usage was shrunk toward the baseline for the rank he actually holds.
+- **`depth_chart_order` 0 means unranked, not first — but nor is it unknown.** Sleeper uses it
+  for players carried on the roster but not placed on the chart. Read as a starter it made
+  Chase Edmonds Washington's lead back; read as *no information* it let Raheem Mostert escape
+  the backup cap entirely and project 84 points against Sleeper's 10. In practice unranked
+  means deep, so it maps to `UNRANKED_DEPTH`. A player with no depth-chart entry at all is
+  still genuinely unknown, and that distinction is the whole point of the mapping.
+- **The depth allowance has to keep falling past third, not flatten.** `DEPTH_VOLUME` stops at
+  three and the lookup used to clamp to it, so a WR7 was handed a WR3's workload — Dont'e
+  Thornton and Noah Brown projected 43 and 34 points against Sleeper's 3.7 and 7.3. Those
+  phantom targets go into the team's total, and the conservation step then scales every
+  receiver on that team down to fit the budget, so the error made by the fringe players is
+  paid for by the starter. Fixing both leaks moved agreement with Sleeper from rho 0.82 to
+  0.88 and the held-out backtest edge from +0.017 to +0.021.
+- **A current injury is a fact, not a forecast.** IR, PUP, Sus and DNR mean he is not
+  playing and get no projection; Questionable and Doubtful are week-to-week noise and are
+  ignored. Charbonnet sat high on the board while on PUP with a repaired ACL.
+- **The backtest must be handed the depth chart or it tests a different model.** Role,
+  availability and the quarterback split all hang off it, and without it the validator was
+  quietly grading a code path the board does not run.
+- **The Odds API has no season-long player props and no team win totals** — checked with a
+  live key, not assumed. It exposes `americanfootball_nfl` (per-game) and
+  `americanfootball_nfl_super_bowl_winner` only. What it does have is a line on all 272
+  games where nflverse's schedule file carried 112, which took Module C from 41% coverage
+  to 100%. The key is optional and the model falls back to nflverse without it.
+- **The expected-points column is never averaged into anything.** It is this board's own
+  model; folding it into a market consensus would let the board vote on itself, on top of
+  the existing rule that a points projection is not a pick number. `consensus: false`, and
+  it is absent from dynasty entirely because a one-season projection cannot speak to a
+  keep-forever league.
+- **BettingPros' `/v3/props` answers 200 with an EMPTY LIST for markets that are alive on
+  `/v3/offers`.** `/props` is the obvious endpoint — one request, `limit=500` — and it is the
+  wrong one. Receptions (market 330) returned 0 props and 87 offers. Read as "the books do not
+  price receptions", that cost every receiver a third of his half-PPR season, and nothing in
+  the response said so: valid JSON, 200, an empty array. `/offers` is what bettingpros.com's
+  own pages are built on, it carries two more players on receiving yards as well, and it is
+  what `scrapers/marketprops.js` uses for all seven markets. **Its `limit` maxes out at 10**
+  and it must be paged — asking for more is a 400, which reads like the market being down.
+  Interceptions (303) genuinely is empty on both, so quarterback totals carry no interception
+  term and read about two dozen points high; that is stated on the column, not estimated away.
+- **On `/offers` the consensus is book id 0, not a `consensus_line` field.** That field does
+  not exist there. Each selection carries a list of books and book 0 is BettingPros' own
+  consensus pseudo-book, with the real books beside it. Reading a real book instead picks one
+  operator's shading at random.
+- **BettingPros' best-price `over` and `under` are usually DIFFERENT LINES.** They are best
+  prices across ~23 books, not two sides of one market: 74 of 107 receiving-yards offers had
+  them at different numbers, and George Pickens came back with an over at 599.5 (−809) against
+  an under at 1050.5 (−110). De-vigging that pair produces a confident number that is simply
+  wrong. The consensus book is two-sided at one number (98 of those same 107 agree), so it is
+  the only line read and no de-vigging happens at all.
+- **A line is only a median if it is priced like one, so the price is used and not just the
+  line.** Kyler Murray came back at 5.5 rushing touchdowns with the over near 28%; De'Zhaun
+  Stribling, a rookie receiver, at 74.5 receptions on +245 against −376. Read as medians those
+  are nonsense. Every line is converted to the median it implies —
+  `median = line × exp(−sigma × Φ⁻¹(1−p))` — which is a no-op at even money by construction,
+  so there is no threshold to tune and no cliff between a "fair" line and a "lopsided" one.
+  Checked against the model's independent estimate of the same statistic, it changes almost
+  nothing on the 430 already-fair offers (28.7% → 27.9% mean error) and moves the lopsided
+  ones a long way closer (278% → 197%). Only quotes past `PRICE_BAND` from even money are
+  still refused, where the fit would be extrapolating into a tail.
+- **The spread that conversion needs is the one thing no sportsbook publishes, and Polymarket
+  does.** Its threshold ladders are a survival function per player-stat — price *is*
+  probability there, since it charges on resolution rather than taking vig — so a lognormal
+  fitted through the rungs gives sigma straight from a market. The measured spreads order
+  themselves the way anyone who watches football would expect, which is the main reason to
+  believe them: passing yards 0.19, passing TDs 0.32, rushing yards 0.55, rushing TDs 0.60,
+  receiving yards 0.62, receiving TDs 0.76. Liquidity is thin ($300–$10k an event, rungs under
+  $50), so it is used for shape only and its own fitted median is recorded but never read.
+  Ladders are non-monotonic often enough that monotonicity has to be imposed before fitting.
+- **A lognormal fits a touchdown count badly, and left uncapped the correction ran away with
+  it.** TD lines are quoted in half-numbers on a base of about five, so most of the distance
+  between a posted `x.5` and the true median is the book rounding, not displacement. Uncapped,
+  Calvin Ridley's receiving touchdowns went from 4.5 to 3.1 while every book RotoWire could
+  see still said 4.5. The shift on a count is capped at half a step; yardage and receptions
+  are effectively continuous and are not capped.
+- **The consensus pseudo-book can contradict every book behind it.** Ashton Jeanty's rushing
+  yards showed a consensus of 574.5 while eleven of his twelve real books sat at 974.5–1000.5,
+  all flagged `is_off`, with one lone live outlier at 574.5 that the consensus was echoing.
+  Nothing about the offer looks broken — it parses, it is two-sided, and it is priced close
+  enough to even money to clear the band. So the consensus is also checked against the books it
+  claims to summarise (`MIN_BOOK_SUPPORT`), and where essentially none of them agree the books'
+  median is used instead. RotoWire, fetched independently in the validator, names the same
+  players from outside, which is the reason to believe the rule rather than the threshold.
+- **The books do not price every category for every player, so the totals are not all the same
+  quantity.** Receiving markets exist for the pass-catching backs and not the rest — 22 of 36
+  running backs had a rushing line and no receiving line at all — and adding up what is priced
+  gave them a season total missing a third of their scoring. Jonathan Taylor came out at 203
+  against the model's 310 almost entirely for that reason. Silence from the books means they
+  saw no liquidity, not that the player scores zero, so missing terms are neither estimated
+  nor treated as zero: `mkt_complete` marks the row, the board dims it and appends `*`, the
+  cheat sheet shows a dash because a printed page has nowhere to put the caveat, and the
+  validator compares only complete totals. Filtering to them moved model-vs-market agreement
+  from rho 0.775 to 0.846 and Sleeper's from 0.914 to 0.975 — most of the apparent
+  disagreement was the mismatched denominators, exactly as the arbitrage-column trap predicted.
+- **`components.basis` marks a player projected from draft capital, and it is NOT the same as
+  `is_rookie`.** Quinn Ewers and Cam Miller are in their second year with no NFL usage, so they
+  take the draft-capital path while `is_rookie` is false. The ledger filtered on `is_rookie`,
+  let them into the team totals, and put Miami on 43 quarterback games in a seventeen-game
+  season. Everything that aggregates by team must filter on `basis`, as `validate-projections`
+  does. Note also what that means for the model: quarterback-games conservation covers
+  quarterbacks with usage behind them, and a draft-capital quarterback sits outside the budget.
+- **`runModel`'s `depthChart` is Sleeper's map, keyed by sleeper id** — `sleeper_id -> {order,
+  team, injury}`, exactly as `scrapers/expectedpoints.js` builds it. Handing it nflverse's depth
+  chart instead is not a near-enough substitute: it is the wrong shape, every lookup misses
+  silently, and the model quietly runs as though no depth chart existed at all.
+- **`node server/scripts/build-ledger.js` regenerates the Projection Ledger artifact.** The page
+  is `server/ledger/template.html`; only `window.__DATA__` varies. It was originally written
+  around a pasted blob, which meant it went stale the moment the model changed with no way to
+  tell. It is not part of a refresh — it runs the model a second time and scrapes a page, and
+  nothing on the board depends on its output.
+- **VegasInsider's four books post DIFFERENT win-total lines, so the page cannot be
+  averaged.** Baltimore came back at o11.5 (+120) from one book and o10.5 (−150) from another.
+  Each quote is converted to the total it implies before anything is combined, and the two
+  Baltimore numbers then land within 0.01 of each other from lines a full win apart. Summing
+  all 32 gives 273.3 against the 272 a season hands out — but note honestly that averaging the
+  raw lines sums correctly too, because the price corrections cancel across the league; what
+  the identity really catches is taking the MEDIAN line, which sums to 278. The price
+  adjustment earns its place per team, not in aggregate: it moves the Rams by 0.64 wins.
+- **Only the over is published on win totals**, so there is no second side to de-vig against
+  and a standard two-way overround is assumed instead. It is worth about a tenth of a win and
+  is applied identically to every team, so it cannot reorder them.
+- **RotoWire's team, position and player id are not to be trusted** — the brief's Lamar Jackson
+  row came back a cornerback with a null team, and rows here really do disagree with the board.
+  Nothing is read from them: the join is an exact normalised name against players the board
+  already has, and a name matching more than one player is skipped rather than guessed.
+- **Circa is documented as the sharp reference and is currently absent**, along with BetMGM,
+  BetRivers, Hard Rock and theScore — all five return null on every RotoWire row. Only
+  DraftKings, Caesars and FanDuel carry lines today. Worth knowing before building anything on
+  "prefer Circa when present".
+- **RotoWire is deliberately not a board column.** It carries the same six markets from broadly
+  the same books, so publishing it beside `MKT` would put two renderings of one market on the
+  board and invite them to be read as two opinions. It runs in the validator instead, where it
+  independently catches the consensus coming adrift from the market — which is what settled
+  that Jeanty's 574.5 was wrong rather than early.
+- **The vendor cross-check compares RAW consensus lines, not what the board stores.** The
+  stored number is the median a line's price implies, which is deliberately a different
+  quantity from a posted line; checking it against RotoWire's posted lines reported every price
+  correction as a vendor disagreement and put the failure rate at 9.9% of nonsense instead of
+  8.5% of signal.
+- **`mkt_books` is the THINNEST of a player's lines, not the widest.** A total whose receiving
+  yards eight books agree on but whose receptions come from one is only as good as that one.
+  Taking the max read as broad agreement on players who had none.
+- **The BettingPros key is borrowed from their public frontend bundle, not issued to us**, and
+  may rotate without notice. Every failure path in `marketprops.js` is soft and the board
+  keeps what it had; `BETTINGPROS_KEY` overrides it without a deploy. Nothing downstream may
+  depend on it existing.
+- **A market line and a projection are not the same quantity.** The line already discounts the
+  games the books expect a player to miss; the model's number is a full seventeen on purpose,
+  because it refuses to forecast injuries. So `mkt_points` reads low on anyone thought
+  fragile, and the gap is information. It is shown beside the projection and never blended
+  into it — blending would need the availability gap reconciled first, and doing it carelessly
+  turns the projection back into an injury forecast.
+- **Sleeper tracks the betting market at rho 0.98; this model at 0.85** (on complete totals;
+  0.91 and 0.77 before that filter). Both are printed by
+  `validate-projections.js` every run rather than buried. The model is meant to be independent
+  and an edge requires disagreeing somewhere, so this is not asserted as a failure — but the
+  validator does fail below rho 0.6, because a model that has come loose from the market
+  entirely is broken rather than contrarian.
+- **A new column `kind` has to be added to the descending-sort set in two places** —
+  `sortSpec` in `routes/players.js` and `sortRows` in `cheatsheet/board.js`. ADP and ranks
+  count up from the best pick; trade values, projections and betting lines count down from it.
+  Reading it the wrong way round does not error, it silently puts the worst player at the top
+  of the board. `xfp_points` sorted ascending on the cheat sheet for exactly this reason.
 - **The stored picks are made to equal Sleeper's, not merely appended to.** A
   commissioner can undo a pick, and a player left marked taken never returns to the board
   on his own.

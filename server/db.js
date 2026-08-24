@@ -86,6 +86,25 @@ db.exec(`
     updated_at TEXT DEFAULT (datetime('now'))
   );
 
+  -- What each expected-points run was actually built from. The projection is the only
+  -- column on this board nobody else publishes, so there is no second opinion to catch
+  -- it being wrong — the provenance has to be recorded instead: which seasons fed it,
+  -- how much of the season the betting market had priced, and what the run warned about.
+  CREATE TABLE IF NOT EXISTS model_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ran_at TEXT,
+    target_season INTEGER,
+    history_seasons TEXT,
+    newest_season INTEGER,
+    players INTEGER,
+    rookies INTEGER,
+    matched INTEGER,
+    env_coverage REAL,
+    env_priced_games INTEGER,
+    warnings TEXT,
+    elapsed_ms INTEGER
+  );
+
   CREATE TABLE IF NOT EXISTS source_metadata (
     source TEXT PRIMARY KEY,
     last_fetched TEXT,
@@ -180,6 +199,54 @@ addColumnIfMissing('players', 'fp_tier', 'INTEGER');
 addColumnIfMissing('players', 'ff_pos_rank', 'INTEGER');
 addColumnIfMissing('players', 'ff_points', 'REAL');
 
+// The expected-points model's own output. Stored rather than computed per request
+// because a full run reads six seasons of nflverse and takes several seconds — far too
+// slow to sit in the path of a board that redraws every time a draft pick lands.
+// Value over replacement is NOT stored: it depends on league size and league type, so
+// it is derived per request in routes/players.js alongside the consensus.
+addColumnIfMissing('players', 'xfp_points', 'REAL');
+addColumnIfMissing('players', 'xfp_ppg', 'REAL');
+addColumnIfMissing('players', 'xfp_games', 'REAL');
+addColumnIfMissing('players', 'xfp_floor', 'REAL');
+addColumnIfMissing('players', 'xfp_ceiling', 'REAL');
+addColumnIfMissing('players', 'xfp_best_ball', 'REAL');
+addColumnIfMissing('players', 'xfp_confidence', 'TEXT');
+addColumnIfMissing('players', 'xfp_components', 'TEXT');
+
+// Sleeper's depth chart. This is the only live statement anywhere in the app about who
+// is actually starting — every other signal is last season's usage, which cannot know
+// that a quarterback changed teams in March. Order 1 is the starter at that slot.
+addColumnIfMissing('players', 'depth_chart_order', 'INTEGER');
+addColumnIfMissing('players', 'depth_chart_position', 'TEXT');
+// Sleeper's current injury designation. Knowing a player is on PUP with a repaired ACL
+// is not forecasting an injury — it is reading one that has already happened.
+addColumnIfMissing('players', 'injury_status', 'TEXT');
+
+// Season-long betting lines per player, and those lines scored under this league's rules.
+// Carried alongside the model's own projection, never blended into it — a market line is
+// an expected value that already prices in missed games, and the model's number
+// deliberately assumes a full season.
+addColumnIfMissing('players', 'mkt_pass_yards', 'REAL');
+addColumnIfMissing('players', 'mkt_rush_yards', 'REAL');
+addColumnIfMissing('players', 'mkt_rec_yards', 'REAL');
+addColumnIfMissing('players', 'mkt_pass_tds', 'REAL');
+addColumnIfMissing('players', 'mkt_rush_tds', 'REAL');
+addColumnIfMissing('players', 'mkt_rec_tds', 'REAL');
+addColumnIfMissing('players', 'mkt_receptions', 'REAL');
+addColumnIfMissing('players', 'mkt_points', 'REAL');
+// How many real books priced his THINNEST line. A total backed by one operator on any of
+// its terms is not the same claim as one eight books agree on, and receptions are thin
+// where yardage is deep, so the weakest term is the one worth reporting.
+addColumnIfMissing('players', 'mkt_books', 'INTEGER');
+// Whether the total covers every category the position scores in. The books price
+// receiving for the pass-catching backs and skip the rest, so a partial total is not a
+// season projection and must not be compared with one.
+addColumnIfMissing('players', 'mkt_complete', 'INTEGER');
+// How many of his lines were moved from the posted number to the median that number's price
+// implies. The one place a distribution assumption enters an otherwise pure market column,
+// so it is counted rather than hidden.
+addColumnIfMissing('players', 'mkt_adjusted', 'INTEGER');
+
 // Populate name_normalized for any rows missing it
 (function populateNameNormalized() {
   const missing = db.prepare('SELECT id, name FROM players WHERE name_normalized IS NULL').all();
@@ -196,13 +263,14 @@ addColumnIfMissing('players', 'ff_points', 'REAL');
 const initSource = db.prepare(`
   INSERT OR IGNORE INTO source_metadata (source, status) VALUES (?, 'never')
 `);
-['fantasypros', 'underdog', 'sleeper', 'ffc', 'market', 'dynastyprocess', 'dynastydaddy', 'fantasycalc', 'footballers'].forEach(s => initSource.run(s));
+['fantasypros', 'underdog', 'sleeper', 'ffc', 'market', 'dynastyprocess', 'dynastydaddy', 'fantasycalc', 'footballers', 'expectedpoints', 'marketprops'].forEach(s => initSource.run(s));
 
 // Lookup indexes for the matcher and the projection-rank subquery.
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_players_norm_pos ON players (name_normalized, position);
   CREATE INDEX IF NOT EXISTS idx_players_sleeper_id ON players (sleeper_player_id);
   CREATE INDEX IF NOT EXISTS idx_players_pos_proj ON players (position, projected_pts);
+  CREATE INDEX IF NOT EXISTS idx_players_pos_xfp ON players (position, xfp_points);
   CREATE INDEX IF NOT EXISTS idx_draft_picks_player ON draft_picks (player_id);
 `);
 

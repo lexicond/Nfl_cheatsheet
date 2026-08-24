@@ -1,0 +1,513 @@
+<title>Projection Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=swap">
+<style>
+:root{
+  --ground:#f4f6f8; --surface:#ffffff; --sunk:#eef1f5;
+  --line:#dde2ea; --line-strong:#c3cbd8;
+  --text:#161a22; --muted:#5d6577; --faint:#8d95a6;
+  --ok:#1c7a56; --warn:#9a6b12; --bad:#b03a30;
+  --ok-bg:#e3f3ec; --warn-bg:#faf0da; --bad-bg:#fbe6e3;
+  --accent:#2f5c9e;
+  --qb:#a3690a; --rb:#1c7a4a; --wr:#2f5c9e; --te:#a4501a;
+  --bar:#c8d3e4;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0f1117; --surface:#171a24; --sunk:#12141c;
+    --line:#262a38; --line-strong:#394054;
+    --text:#e8eaf0; --muted:#8b90a8; --faint:#646b82;
+    --ok:#4cc38a; --warn:#e0b155; --bad:#eb7a70;
+    --ok-bg:#12291f; --warn-bg:#2b2313; --bad-bg:#2c1815;
+    --accent:#7ba7e8;
+    --qb:#e0b155; --rb:#4cc38a; --wr:#7ba7e8; --te:#e08a4c;
+    --bar:#2e3548;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0f1117; --surface:#171a24; --sunk:#12141c;
+  --line:#262a38; --line-strong:#394054;
+  --text:#e8eaf0; --muted:#8b90a8; --faint:#646b82;
+  --ok:#4cc38a; --warn:#e0b155; --bad:#eb7a70;
+  --ok-bg:#12291f; --warn-bg:#2b2313; --bad-bg:#2c1815;
+  --accent:#7ba7e8;
+  --qb:#e0b155; --rb:#4cc38a; --wr:#7ba7e8; --te:#e08a4c;
+  --bar:#2e3548;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--text);
+  font-family:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:15px; line-height:1.55; -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1120px;margin:0 auto;padding:40px 24px 96px}
+h1,h2,h3{font-family:"IBM Plex Serif",Georgia,serif;text-wrap:balance;margin:0}
+h1{font-size:34px;font-weight:600;letter-spacing:-.015em;line-height:1.15}
+h2{font-size:21px;font-weight:600;letter-spacing:-.01em}
+h3{font-size:16px;font-weight:600}
+.num{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);
+  font-weight:600;font-family:"IBM Plex Sans",sans-serif}
+header{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:36px}
+.lede{color:var(--muted);max-width:64ch;margin-top:12px;font-size:16px}
+.meta{display:flex;flex-wrap:wrap;gap:8px 28px;margin-top:20px;font-size:12.5px;color:var(--faint)}
+.meta b{color:var(--muted);font-weight:500}
+section{margin-bottom:44px}
+.shead{display:flex;align-items:baseline;justify-content:space-between;gap:16px;
+  margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.note{color:var(--muted);font-size:13.5px;max-width:70ch;margin:0 0 18px}
+
+/* identity checks */
+.checks{display:flex;flex-direction:column;gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.check{display:grid;grid-template-columns:auto 1fr auto auto;gap:16px;align-items:center;
+  background:var(--surface);padding:15px 18px}
+.chip{font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;
+  padding:4px 9px;border-radius:3px;white-space:nowrap}
+.chip.ok{background:var(--ok-bg);color:var(--ok)}
+.chip.warn{background:var(--warn-bg);color:var(--warn)}
+.chip.bad{background:var(--bad-bg);color:var(--bad)}
+.check .what{font-weight:500}
+.check .what small{display:block;color:var(--muted);font-weight:400;font-size:12.5px;margin-top:2px}
+.check .val{font-size:22px;font-weight:500}
+.check .tgt{color:var(--faint);font-size:12.5px;text-align:right;min-width:74px}
+
+/* deviation table */
+.tblwrap{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th{text-align:left;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--faint);font-weight:600;padding:11px 12px;border-bottom:1px solid var(--line);
+  background:var(--sunk);position:sticky;top:0;white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--line)}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:var(--sunk)}
+td.n,th.n{text-align:right;font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+.dev{display:inline-flex;align-items:center;gap:8px;justify-content:flex-end;width:100%}
+.devbar{height:7px;border-radius:2px;flex:none}
+.devnum{min-width:46px;text-align:right;font-family:"IBM Plex Mono",monospace;
+  font-variant-numeric:tabular-nums;font-size:12.5px}
+.pos{display:inline-block;min-width:26px;text-align:center;font-size:10.5px;font-weight:600;
+  padding:2px 5px;border-radius:3px;font-family:"IBM Plex Mono",monospace}
+.pos.QB{color:var(--qb);background:color-mix(in srgb,var(--qb) 14%,transparent)}
+.pos.RB{color:var(--rb);background:color-mix(in srgb,var(--rb) 14%,transparent)}
+.pos.WR{color:var(--wr);background:color-mix(in srgb,var(--wr) 14%,transparent)}
+.pos.TE{color:var(--te);background:color-mix(in srgb,var(--te) 14%,transparent)}
+.share{position:relative;min-width:104px}
+/* The bar grows leftward from the figure it belongs to, so in a right-aligned numeric
+   column the number sits at the head of its own bar rather than across the cell from it. */
+.sharebar{position:absolute;right:12px;top:50%;transform:translateY(-50%);height:16px;
+  background:var(--bar);border-radius:2px;z-index:0}
+.share span{position:relative;z-index:1;font-family:"IBM Plex Mono",monospace;
+  font-variant-numeric:tabular-nums;padding-right:3px}
+
+/* tabs */
+.tabs{display:flex;gap:2px;margin-bottom:20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tab{appearance:none;border:none;background:none;cursor:pointer;font:inherit;font-size:13.5px;
+  font-weight:500;color:var(--muted);padding:10px 15px;border-bottom:2px solid transparent;
+  margin-bottom:-1px;border-radius:4px 4px 0 0}
+.tab:hover{color:var(--text);background:var(--sunk)}
+.tab[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent)}
+.tab:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.panel[hidden]{display:none}
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+select,input[type=search]{font:inherit;font-size:13px;padding:6px 10px;border-radius:4px;
+  border:1px solid var(--line-strong);background:var(--surface);color:var(--text)}
+input[type=search]{min-width:190px}
+select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.count{font-size:12.5px;color:var(--faint);margin-left:auto;font-family:"IBM Plex Mono",monospace}
+.flag{font-size:10.5px;color:var(--warn);border:1px solid var(--warn);border-radius:3px;
+  padding:1px 4px;margin-left:5px;white-space:nowrap}
+.caveat{background:var(--sunk);border-left:3px solid var(--warn);padding:14px 18px;
+  border-radius:0 5px 5px 0;font-size:13.5px;color:var(--muted);margin-top:18px}
+.caveat b{color:var(--text);font-weight:600}
+footer{margin-top:56px;padding-top:22px;border-top:1px solid var(--line);
+  font-size:12.5px;color:var(--faint);max-width:72ch}
+@media (max-width:640px){
+  .wrap{padding:28px 16px 72px}
+  h1{font-size:26px}
+  .check{grid-template-columns:auto 1fr;gap:10px}
+  .check .val{font-size:19px}
+  .check .tgt{grid-column:2;text-align:left}
+}
+</style>
+
+<script>window.__DATA__=
+__LEDGER_DATA__;
+</script>
+<div class="wrap">
+<header>
+  <div class="eyebrow">Expected-points model &middot; season <span id="season"></span></div>
+  <h1>Does the projection add up as a team?</h1>
+  <p class="lede">The model projects every player on his own. Nothing in it forces a team's
+  numbers to be possible &mdash; so the test is whether they are. Every passing yard is somebody's
+  receiving yard, every pass attempt is somebody's target, and a team has seventeen games of
+  quarterback to give.</p>
+  <div class="meta" id="meta"></div>
+</header>
+
+<section>
+  <div class="shead"><h2>The identities</h2><span class="eyebrow">must hold by definition</span></div>
+  <p class="note">These are not estimates that ought to be close &mdash; they are the same events
+  counted from two different ends of the model, built from different players' histories. If they
+  disagree, the parts do not fit together.</p>
+  <div class="checks" id="checks"></div>
+  <div class="caveat" id="qbnote"></div>
+</section>
+
+<section>
+  <div class="shead"><h2>League totals, per team</h2><span class="eyebrow">model vs 2025 actual</span></div>
+  <p class="note">What the model projects for an average team, against what an average team really
+  did last season. Last season is a yardstick, not a target &mdash; a projection should look like a
+  plausible NFL season, not reproduce one.</p>
+  <div class="tblwrap"><table>
+    <thead><tr><th>Measure</th><th class="n">Model</th><th class="n">Actual 2025</th><th class="n" style="width:180px">Deviation</th></tr></thead>
+    <tbody id="league"></tbody>
+  </table></div>
+</section>
+
+<section>
+  <div class="shead"><h2>Through the fixtures</h2><span class="eyebrow">the end-to-end test</span></div>
+  <p class="note">The hardest check available: turn the summed player projections back into team
+  scoring, run all 272 fixtures, and compare the resulting spreads against the ones the books have
+  actually posted. Defence is not modelled here at all &mdash; it is proxied from last season's
+  points allowed, regressed &mdash; so this measures the offence and little else.</p>
+  <div class="checks" id="fx"></div>
+  <div class="caveat" id="fxnote"></div>
+  <div class="controls" style="margin-top:22px"><span class="eyebrow">Projected wins, all 32 teams</span></div>
+  <div class="tblwrap"><table>
+    <thead><tr><th>Team</th><th class="n">Projected wins</th><th class="n">Market wins</th>
+      <th class="n">Model pts/g</th>
+      <th class="n">Market pts/g</th><th class="n" style="width:150px">Gap</th></tr></thead>
+    <tbody id="wins"></tbody>
+  </table></div>
+</section>
+
+<section>
+  <div class="shead"><h2>The market on whole teams</h2><span class="eyebrow">season win totals, four books</span></div>
+  <p class="note">The yardstick the fixture test was missing. VegasInsider publishes season win
+  totals across four books &mdash; and they post <em>different lines</em> for the same team, so the
+  page cannot be averaged. Baltimore came back at o11.5&nbsp;(+120) from one book and
+  o10.5&nbsp;(&minus;150) from another. Each quote is converted to the total it implies before
+  anything is combined; the two Baltimore numbers then land within 0.01 of each other.</p>
+  <div class="checks" id="wm"></div>
+  <div class="caveat" id="wmnote"></div>
+</section>
+
+<section>
+  <div class="shead"><h2>The market on individual players</h2><span class="eyebrow">what the books price, scored our way</span></div>
+  <p class="note">Season over/unders per player from BettingPros, scored under this league's rules
+  into the board's <span class="num">MKT</span> column. It is not the same quantity as the
+  projection beside it &mdash; a line already discounts the games the books expect a player to miss,
+  and the model assumes a full season on purpose &mdash; so the two are shown together and never
+  blended.</p>
+  <div class="checks" id="mk"></div>
+  <div class="caveat" id="mknote"></div>
+</section>
+
+<section>
+  <div class="shead"><h2>The breakdown</h2><span class="eyebrow">every team, every player</span></div>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" aria-selected="true" data-panel="p-team">By team</button>
+    <button class="tab" role="tab" aria-selected="false" data-panel="p-player">By player</button>
+  </div>
+
+  <div class="panel" id="p-team" role="tabpanel">
+    <p class="note">Each team's projected season, summed from its players. <b>Tgt/Att</b> and
+    <b>RecYd/PassYd</b> are the identities above, per team &mdash; both should sit near 1.00, and a
+    team far from it is one where the passing game and the receiving corps were projected from
+    inconsistent evidence.</p>
+    <div class="controls">
+      <select id="team-sort">
+        <option value="team">Sort: team</option>
+        <option value="att">Pass attempts</option>
+        <option value="tgt">Targets</option>
+        <option value="car">Carries</option>
+        <option value="passYd">Passing yards</option>
+        <option value="fpts">Projected fantasy points</option>
+        <option value="ratio">Worst Tgt/Att disagreement</option>
+      </select>
+      <span class="count" id="team-count"></span>
+    </div>
+    <div class="tblwrap"><table>
+      <thead><tr>
+        <th>Team</th><th class="n">Players</th><th class="n">Pass att</th><th class="n">Targets</th>
+        <th class="n">Tgt/Att</th><th class="n">Carries</th><th class="n">Pass yds</th>
+        <th class="n">Rec yds</th><th class="n">RecYd/PassYd</th><th class="n">Pass TD</th>
+        <th class="n">Rec TD</th><th class="n">Rush TD</th><th class="n">Implied pts/g</th>
+      </tr></thead>
+      <tbody id="teams"></tbody>
+    </table></div>
+  </div>
+
+  <div class="panel" id="p-player" role="tabpanel" hidden>
+    <p class="note"><b>Tgt%</b> is his share of his team's projected targets &mdash; the number that
+    decides most of a pass-catcher's season. Rows marked <span class="flag">capped</span> had
+    quarterback games taken back so the team's total came to seventeen; <span class="flag">draft</span>
+    rows are projected from draft capital alone and carry no opportunity of their own.</p>
+    <div class="controls">
+      <input type="search" id="q" placeholder="Search player or team" aria-label="Search player or team">
+      <select id="pos"><option value="">All positions</option><option>QB</option><option>RB</option><option>WR</option><option>TE</option></select>
+      <select id="p-sort">
+        <option value="points">Sort: projected points</option>
+        <option value="tgtShare">Target share</option>
+        <option value="tgt">Targets</option>
+        <option value="att">Pass attempts</option>
+        <option value="car">Carries</option>
+        <option value="td">Total TDs</option>
+        <option value="ceiling">Ceiling</option>
+      </select>
+      <span class="count" id="p-count"></span>
+    </div>
+    <div class="tblwrap"><table>
+      <thead><tr>
+        <th>Player</th><th>Pos</th><th>Team</th><th class="n">Games</th><th class="n">Pass att</th>
+        <th class="n">Targets</th><th class="n">Tgt%</th><th class="n">Carries</th>
+        <th class="n">Pass yds</th><th class="n">Rec yds</th><th class="n">Rush yds</th>
+        <th class="n">TDs</th><th class="n">Points</th><th class="n">Ceiling</th>
+      </tr></thead>
+      <tbody id="players"></tbody>
+    </table></div>
+  </div>
+</section>
+
+<footer id="foot"></footer>
+</div>
+<script>
+const D = window.__DATA__;
+const $ = s => document.querySelector(s);
+const fmt = (v,d=0) => v==null ? '&ndash;' : Number(v).toFixed(d);
+const S = D.summary;
+
+$('#season').textContent = S.targetSeason;
+$('#meta').innerHTML = [
+  ['Projected', S.projected + ' players'],
+  ['From draft capital', S.rookies],
+  ['Usage seasons', S.historySeasons.slice(0,3).join(', ')],
+  ['Games priced by the market', S.pricedGames + ' of ' + S.scheduledGames],
+  ['Built', new Date(S.generated).toISOString().slice(0,10)],
+].map(([k,v]) => '<span><b>' + k + '</b> &nbsp;' + v + '</span>').join('');
+
+/* ---- identities ---- */
+const teams = D.teams;
+const med = (arr) => { const a = arr.slice().sort((x,y)=>x-y); return a[Math.floor(a.length/2)]; };
+const ratios = (a,b,floor) => med(teams.filter(t=>t[b]>floor).map(t=>t[a]/t[b]));
+const CHECKS = [
+  {label:'Targets per pass attempt', sub:'every pass attempt is a target &mdash; bar the handful thrown away',
+   v:ratios('tgt','att',200), target:0.94, tol:0.18},
+  {label:'Receiving yards per passing yard', sub:'the same yard, counted at each end of the throw',
+   v:ratios('recYd','passYd',1500), target:1.00, tol:0.18},
+  {label:'Receiving TDs per passing TD', sub:'one touchdown, thrown and caught',
+   v:ratios('recTd','passTd',8), target:1.00, tol:0.20},
+];
+$('#checks').innerHTML = CHECKS.map(c=>{
+  const off = Math.abs(c.v - c.target);
+  const cls = off <= c.tol*0.55 ? 'ok' : off <= c.tol ? 'warn' : 'bad';
+  const word = cls==='ok' ? 'Reconciles' : cls==='warn' ? 'Close' : 'Off';
+  return '<div class="check"><span class="chip '+cls+'">'+word+'</span>'+
+    '<span class="what">'+c.label+'<small>'+c.sub+'</small></span>'+
+    '<span class="val num">'+c.v.toFixed(2)+'</span>'+
+    '<span class="tgt">should be<br>'+c.target.toFixed(2)+'</span></div>';
+}).join('');
+
+const qbG = {};
+D.players.filter(p=>p.pos==='QB'&&!p.fromDraft).forEach(p=>{qbG[p.team]=(qbG[p.team]||0)+p.games;});
+const worstQb = Object.entries(qbG).sort((a,b)=>b[1]-a[1])[0];
+$('#qbnote').innerHTML = '<b>Quarterback playing time is the one thing conserved outright.</b> ' +
+  'Left alone, the model handed 66 quarterbacks about 13 expected games each across 31 teams &mdash; ' +
+  '871 games where 527 exist &mdash; and team pass attempts came out 49% high. ' +
+  S.qbGamesReclaimed + ' games were reclaimed by sharing each team’s seventeen out in proportion to ' +
+  'each man’s claim on the job. The heaviest team now sits at ' + worstQb[1].toFixed(1) +
+  ' (' + worstQb[0] + '). ' +
+  '<br><br>The conservation covers quarterbacks with NFL usage behind them. A quarterback projected ' +
+  'from draft capital alone — no usage yet, which includes second-year players who never took a snap — ' +
+  'sits outside that budget and is projected on his own. Pittsburgh carries two, so its quarterback ' +
+  'games sum past seventeen once they are counted back in. They are excluded here, as they are from ' +
+  'every team total on this page.';
+
+/* ---- league table ---- */
+$('#league').innerHTML = S.league.map(r=>{
+  const dev = r.actual ? (r.model/r.actual - 1)*100 : 0;
+  const mag = Math.min(Math.abs(dev), 50) / 50 * 70;
+  const col = Math.abs(dev) <= 10 ? 'var(--ok)' : Math.abs(dev) <= 20 ? 'var(--warn)' : 'var(--bad)';
+  return '<tr><td>'+r.label+'</td><td class="n">'+r.model.toLocaleString()+'</td>'+
+    '<td class="n">'+r.actual.toLocaleString()+'</td><td class="n"><span class="dev">'+
+    '<span class="devbar" style="width:'+mag+'px;background:'+col+'"></span>'+
+    '<span class="devnum" style="color:'+col+'">'+(dev>0?'+':'')+dev.toFixed(0)+'%</span></span></td></tr>';
+}).join('');
+
+/* ---- team table ---- */
+function renderTeams(){
+  const k = $('#team-sort').value;
+  const rows = teams.slice().sort((a,b)=>{
+    if(k==='team') return a.team.localeCompare(b.team);
+    if(k==='ratio') return Math.abs(b.tgt/b.att-0.94) - Math.abs(a.tgt/a.att-0.94);
+    return b[k]-a[k];
+  });
+  $('#team-count').textContent = rows.length + ' teams';
+  $('#teams').innerHTML = rows.map(t=>{
+    const ta = t.att>0 ? t.tgt/t.att : null;
+    const yy = t.passYd>0 ? t.recYd/t.passYd : null;
+    const tone = v => v==null ? 'var(--faint)' : Math.abs(v-1)<=0.12 ? 'var(--text)'
+      : Math.abs(v-1)<=0.3 ? 'var(--warn)' : 'var(--bad)';
+    return '<tr><td><b>'+t.team+'</b></td><td class="n">'+t.n+'</td><td class="n">'+t.att.toLocaleString()+
+      '</td><td class="n">'+t.tgt.toLocaleString()+'</td>'+
+      '<td class="n" style="color:'+tone(ta)+'">'+fmt(ta,2)+'</td>'+
+      '<td class="n">'+t.car.toLocaleString()+'</td><td class="n">'+t.passYd.toLocaleString()+
+      '</td><td class="n">'+t.recYd.toLocaleString()+'</td>'+
+      '<td class="n" style="color:'+tone(yy)+'">'+fmt(yy,2)+'</td>'+
+      '<td class="n">'+fmt(t.passTd,1)+'</td><td class="n">'+fmt(t.recTd,1)+'</td>'+
+      '<td class="n">'+fmt(t.rushTd,1)+'</td>'+
+      '<td class="n">'+fmt(t.envTotal,1)+'</td></tr>';
+  }).join('');
+}
+
+/* ---- player table ---- */
+const maxShare = Math.max.apply(null, D.players.map(p=>p.tgtShare||0));
+function renderPlayers(){
+  const q = $('#q').value.trim().toLowerCase();
+  const pos = $('#pos').value;
+  const k = $('#p-sort').value;
+  let rows = D.players.filter(p =>
+    (!pos || p.pos===pos) &&
+    (!q || p.name.toLowerCase().includes(q) || p.team.toLowerCase().includes(q)));
+  rows.sort((a,b)=>{
+    if(k==='td') return (b.passTd+b.rushTd+b.recTd)-(a.passTd+a.rushTd+a.recTd);
+    return (b[k]||0)-(a[k]||0);
+  });
+  $('#p-count').textContent = rows.length + ' players';
+  $('#players').innerHTML = rows.slice(0,400).map(p=>{
+    const td = p.passTd+p.rushTd+p.recTd;
+    const w = p.tgtShare ? (p.tgtShare/maxShare)*84 : 0;
+    const flags = (p.capped?'<span class="flag">capped</span>':'') + (p.fromDraft?'<span class="flag">draft</span>':'');
+    return '<tr><td>'+p.name+flags+'</td><td><span class="pos '+p.pos+'">'+p.pos+'</span></td>'+
+      '<td class="num">'+p.team+'</td><td class="n">'+fmt(p.games,1)+'</td>'+
+      '<td class="n">'+(p.att||'&ndash;')+'</td><td class="n">'+(p.tgt||'&ndash;')+'</td>'+
+      '<td class="n share">'+(p.tgtShare?'<span class="sharebar" style="width:'+w+'px"></span><span>'+p.tgtShare.toFixed(1)+'</span>':'<span>&ndash;</span>')+'</td>'+
+      '<td class="n">'+(p.car||'&ndash;')+'</td><td class="n">'+(p.passYd?p.passYd.toLocaleString():'&ndash;')+'</td>'+
+      '<td class="n">'+(p.recYd?p.recYd.toLocaleString():'&ndash;')+'</td>'+
+      '<td class="n">'+(p.rushYd?p.rushYd.toLocaleString():'&ndash;')+'</td>'+
+      '<td class="n">'+fmt(td,1)+'</td><td class="n"><b>'+fmt(p.points,1)+'</b></td>'+
+      '<td class="n" style="color:var(--muted)">'+fmt(p.ceiling,0)+'</td></tr>';
+  }).join('') || '<tr><td colspan="14" style="color:var(--faint);padding:22px 12px">Nobody matches that.</td></tr>';
+}
+
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
+  document.querySelectorAll('.tab').forEach(x=>{
+    const on = x===t; x.setAttribute('aria-selected',on);
+    document.getElementById(x.dataset.panel).hidden = !on;
+  });
+}));
+$('#team-sort').addEventListener('change',renderTeams);
+['#q','#pos','#p-sort'].forEach(s=>$(s).addEventListener('input',renderPlayers));
+
+$('#foot').innerHTML = 'Built from the board’s own expected-points model &mdash; nflverse weekly ' +
+  'usage through ' + S.historySeasons[0] + ', scored at half-PPR with four-point passing touchdowns, ' +
+  'scaled by betting-market implied team totals. It is not a market and not a panel of experts, and ' +
+  'it is never averaged into the board’s consensus. Gated out of this run: ' +
+  S.gated.thinRole + ' with too little of a role last season, ' + S.gated.noLastSeason +
+  ' with no qualifying season, ' + S.gated.noTeam + ' no longer on a team.';
+
+/* ---- fixtures ---- */
+const F = S.fixtures;
+const FX = [
+  {label:'Agreement with the posted spread', sub:'correlation across the '+F.spreadN+' games the books have priced',
+   val:F.spreadRho.toFixed(3), good:F.spreadRho>=0.6, mid:F.spreadRho>=0.45, note:'1.00 would be perfect'},
+  {label:'Mean error against the spread', sub:'how far the model’s margin sits from the market’s, per game',
+   val:F.spreadMAE.toFixed(2)+' pts', good:F.spreadMAE<=3.5, mid:F.spreadMAE<=5, note:'lower is closer'},
+  {label:'Picks the same favourite', sub:F.sameFavourite+' of '+F.spreadN+' priced games',
+   val:Math.round(100*F.sameFavourite/F.spreadN)+'%', good:F.sameFavourite/F.spreadN>=0.75,
+   mid:F.sameFavourite/F.spreadN>=0.65, note:'coin-flip is 50%'},
+  {label:'Team scoring vs the market', sub:'correlation of bottom-up points per game with implied team totals',
+   val:F.teamScoringRho.toFixed(3), good:F.teamScoringRho>=0.6, mid:F.teamScoringRho>=0.4, note:'gap '+F.meanAbsGap+' pts/g'},
+];
+$('#fx').innerHTML = FX.map(c=>{
+  const cls = c.good ? 'ok' : c.mid ? 'warn' : 'bad';
+  const word = c.good ? 'Holds' : c.mid ? 'Loose' : 'Off';
+  return '<div class="check"><span class="chip '+cls+'">'+word+'</span>'+
+    '<span class="what">'+c.label+'<small>'+c.sub+'</small></span>'+
+    '<span class="val num">'+c.val+'</span><span class="tgt">'+c.note+'</span></div>';
+}).join('');
+
+$('#fxnote').innerHTML = '<b>Read this one with care &mdash; it is partly circular.</b> ' +
+  'The model already scales every projection by the market’s implied team total, so the ' +
+  '<em>ordering</em> of teams is inherited from the same prices it is being checked against. ' +
+  'What is not inherited is the <em>level</em>: the points here are built from the bottom up, out of ' +
+  'projected touchdowns, and nothing forces them to land anywhere near the market. They come in at ' +
+  F.modelMeanPPG + ' points a game against the market’s ' + F.marketMeanPPG + ' — about ' +
+  Math.abs(F.marketMeanPPG-F.modelMeanPPG).toFixed(1) + ' light, because the players the role gate ' +
+  'refuses still score, and because kicking and defensive scores are a flat league constant here ' +
+  'rather than anything the model knows. A genuine win total from a sportsbook is a better ' +
+  'yardstick than these spreads, and there is now one below.';
+
+$('#wins').innerHTML = S.wins.map(w=>{
+  const gap = w.marketPPG!=null ? w.modelPPG-w.marketPPG : null;
+  const mag = gap==null?0:Math.min(Math.abs(gap),8)/8*64;
+  const col = gap==null?'var(--faint)':Math.abs(gap)<=2?'var(--ok)':Math.abs(gap)<=4?'var(--warn)':'var(--bad)';
+  return '<tr><td><b>'+w.team+'</b></td><td class="n">'+w.wins.toFixed(1)+'</td>'+
+    '<td class="n">'+(w.marketWins!=null?w.marketWins.toFixed(1):'&ndash;')+'</td>'+
+    '<td class="n">'+w.modelPPG.toFixed(1)+'</td><td class="n">'+(w.marketPPG!=null?w.marketPPG.toFixed(1):'&ndash;')+'</td>'+
+    '<td class="n"><span class="dev"><span class="devbar" style="width:'+mag+'px;background:'+col+'"></span>'+
+    '<span class="devnum" style="color:'+col+'">'+(gap==null?'&ndash;':(gap>0?'+':'')+gap.toFixed(1))+'</span></span></td></tr>';
+}).join('');
+
+/* ---- the market on whole teams ---- */
+const WM = S.winMarket || {};
+if (WM.teams) {
+  $('#wm').innerHTML = [
+    {label:'Teams priced', sub:'every team, '+WM.books+' books each',
+     val:WM.teams+'/32', good:WM.teams===32, note:'all 32'},
+    {label:'Implied wins, summed', sub:'nothing in the scrape forces this &mdash; a season hands out exactly 272',
+     val:WM.impliedTotal, good:Math.abs(WM.impliedTotal-272)<=8, note:'272'},
+    {label:'Books reconciled', sub:'worst disagreement once each quote is converted to the total it implies',
+     val:WM.worstCrossBook+'w', good:WM.worstCrossBook<=1, note:'lines differ by a full win'},
+    {label:'Projected wins vs the market', sub:'correlation across all 32 teams',
+     val:WM.winsRho==null?'&ndash;':WM.winsRho.toFixed(3), good:WM.winsRho>=0.6, mid:WM.winsRho>=0.4,
+     note:'1.00 would be perfect'},
+  ].map(c=>{
+    const cls = c.good?'ok':(c.mid?'warn':'bad');
+    const word = c.good?'holds':(c.mid?'close':'off');
+    return '<div class="check"><span class="chip '+cls+'">'+word+'</span>'+
+      '<div class="what">'+c.label+'<small>'+c.sub+'</small></div>'+
+      '<div class="val num">'+c.val+'</div><div class="tgt">'+c.note+'</div></div>';
+  }).join('');
+  $('#wmnote').innerHTML = 'Read the correlation as a check on <em>ordering</em>, not on level. The ' +
+    'environment layer already scales every projection by the market&rsquo;s implied points a game, so ' +
+    'the model has seen what the books think of these offences. What it has not seen is the win total, ' +
+    'which prices defence and schedule too &mdash; and the model projects no defence at all. Summing the ' +
+    'implied totals to ' + WM.impliedTotal + ' against 272 is a real check on the scrape, though an ' +
+    'honest one has to add that averaging the raw lines sums correctly too; what it actually catches is ' +
+    'taking the <em>median</em> line, which comes out near 278.';
+}
+
+/* ---- the market on individual players ---- */
+const MK = S.market;
+if (MK) {
+  $('#mk').innerHTML = [
+    {label:'Players carrying a season line', sub:'joined on FantasyPros&rsquo; id through the crosswalk, no name matching',
+     val:MK.priced, good:MK.priced>=120, mid:MK.priced>=80, note:'of ~400 drafted'},
+    {label:'Totals covering the full position', sub:'the books price receiving for the pass-catching backs and skip the rest',
+     val:MK.complete, good:MK.complete>=80, mid:MK.complete>=50, note:'the rest read low'},
+    {label:'Lines read through their price', sub:'a line at long odds is a threshold, not an expectation',
+     val:MK.adjusted, good:true, note:'shape from Polymarket'},
+    {label:'Model vs market', sub:'rank correlation across the complete totals',
+     val:MK.modelRho==null?'&ndash;':MK.modelRho.toFixed(3), good:MK.modelRho>=0.6, mid:MK.modelRho>=0.45,
+     note:'Sleeper: '+(MK.sleeperRho==null?'&ndash;':MK.sleeperRho.toFixed(3))},
+  ].map(c=>{
+    const cls = c.good?'ok':(c.mid?'warn':'bad');
+    const word = c.good?'holds':(c.mid?'close':'off');
+    return '<div class="check"><span class="chip '+cls+'">'+word+'</span>'+
+      '<div class="what">'+c.label+'<small>'+c.sub+'</small></div>'+
+      '<div class="val num">'+c.val+'</div><div class="tgt">'+c.note+'</div></div>';
+  }).join('');
+  $('#mknote').innerHTML = 'Sleeper tracks the betting market more closely than this model does &mdash; ' +
+    (MK.sleeperRho==null?'':MK.sleeperRho.toFixed(3)+' against '+(MK.modelRho==null?'':MK.modelRho.toFixed(3))) +
+    '. That is not automatically a fault, since an edge requires disagreeing somewhere, but it is not a ' +
+    'result to be pleased about either. Both are printed by the validator every run rather than buried. ' +
+    'Only the complete totals are compared: a market total missing its receiving terms is not a season ' +
+    'projection, and correlating one against a model that projects the whole player measures the gap in ' +
+    'the denominators rather than any disagreement about the player.';
+}
+
+renderTeams(); renderPlayers();
+</script>

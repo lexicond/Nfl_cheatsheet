@@ -148,8 +148,68 @@ Plus the players whose projected positional rank disagrees most with what they c
 | **FantasyCalc** | Dynasty trade values, 1QB and superflex | FantasyCalc public API |
 | **DynastyProcess** | Dynasty values and player ages. Displayed but **not** averaged — see below | DynastyProcess daily CSV |
 | **The Fantasy Footballers** | Andy, Jason and Mike's statistical projections, averaged and ranked within each position. Displayed but **not** averaged — a positional rank is not a pick number | `window.udk.data` embedded in their free positional rankings pages |
+| **Expected Points** (`expectedpoints`) | This board's own projection — expected points, value over replacement, and a simulated ceiling. Displayed but **not** averaged | Computed here from nflverse usage and betting-market team totals — see below |
+| **Market line** (`marketprops`) | The betting market's own season-long over/unders per player — passing, rushing and receiving yards and touchdowns — added up under this board's scoring. Displayed but **not** averaged, and not fed into the model either | BettingPros season props, consensus line across ~23 books |
 
 If a source fails, existing data for that source is preserved — only a successful fetch updates the values.
+
+### The expected-points model
+
+Every other column above is somebody else's number. This one is worked out here, and it
+is the only column with no publisher behind it to check it against — so it is built to be
+argued with rather than believed.
+
+It projects each player's half-PPR season from three things kept deliberately separate:
+
+- **Opportunity** — targets, carries and pass attempts per game, from the last three
+  seasons of nflverse play-by-play, lightly regressed because roles repeat well.
+- **Efficiency** — yards per target, per carry, touchdown rates, regressed *hard* toward
+  positional baselines because they mostly do not repeat. How hard is not guessed: the
+  year-over-year reliability of every metric is measured from the data itself and turned
+  into an empirical-Bayes shrinkage weight.
+- **Team environment** — each team's implied points per game, from betting lines on the
+  coming season (`total / 2 ± spread / 2`). A team priced for 27 points a game is a better
+  place to score than one priced for 18.
+
+The season is then simulated week by week, including the games a player is likely to miss,
+which gives the floor, the ceiling, and a best-ball score that counts only his best weeks.
+
+**Four columns come out of it**, on best-ball and redraft boards only — a one-season
+projection has nothing to say about a keep-forever league:
+
+| Column | Meaning |
+|---|---|
+| **xFP** | Projected half-PPR points |
+| **VOR** | Points above the last startable player at his position. **This is the one to draft on** — raw points are not comparable across positions |
+| **Ceil** | 85th-percentile season |
+| **Edge** | How far the model and the market disagree, in draft places; positive means it would draft him earlier than the room is. Computed only inside the range that actually gets drafted |
+
+VOR and Edge are recomputed on every request because they move with league size and with
+superflex — a superflex league starts far more quarterbacks, so the bar each is measured
+against drops and every quarterback gains value.
+
+It is **never averaged into the consensus.** A points projection is not a pick number, and
+folding the board's own model into a market consensus would let the board vote on itself.
+
+Projections join the board on Sleeper's player id through the DynastyProcess crosswalk, so
+the name-matching heuristics used elsewhere are not involved.
+
+**It declines to answer where it has nothing to say.** A player with no recent role, or no
+current team, gets a dash rather than a number — without that guard a quarterback who threw
+two passes regressed onto a starter's workload and projected 145 points. Coverage inside the
+draftable range (ADP top 200) stays above 98%; beyond it, the gaps are the guard working.
+
+**Backtested before being trusted.** Projected onto 2025 having been given only 2024 and
+earlier, it beats "repeat last season" on value over replacement (Spearman 0.725 vs 0.694)
+and at every individual position. Run it yourself:
+
+```bash
+node server/scripts/validate-projections.js
+```
+
+The validator fails the build if the model stops beating that benchmark. See `HANDOVER.md`
+for the full numbers, including the one metric on which it loses and why that metric is the
+wrong question.
 
 ### How the consensus is built
 
@@ -260,7 +320,19 @@ behind it, so it has no live sync — use the app on draft day.
 │   │   ├── dynastydaddy.js KeepTradeCut + DynastySuperflex values, ages
 │   │   ├── dynastyprocess.js DynastyProcess values and ages
 │   │   ├── fantasycalc.js FantasyCalc dynasty values
+│   │   ├── expectedpoints.js Runs the model and writes its columns onto the board
+│   │   ├── marketprops.js Season-long betting over/unders, scored under this league
 │   │   └── seed.js        Hardcoded fallback, last resort only
+│   ├── model/             The expected-points model — the board's own projection
+│   │   ├── nflverse.js    Weekly stats, schedules, and the gsis↔sleeper crosswalk
+│   │   ├── scoring.js     The league's scoring rules, in one place
+│   │   ├── usage.js       Per-player, per-season usage table
+│   │   ├── stability.js   Measured year-over-year reliability → shrinkage weights
+│   │   ├── volume.js      Module A — opportunity
+│   │   ├── efficiency.js  Module B — points per opportunity, regressed
+│   │   ├── environment.js Module C — implied team totals from betting lines
+│   │   ├── combine.js     E[FP], availability, simulation, replacement levels
+│   │   └── index.js       Orchestration, rookies, tuned hyperparameters
 │   ├── utils/
 │   │   ├── http.js        Shared HTTP client + embedded-JSON extraction
 │   │   ├── match.js       Player name matching across sources
@@ -272,6 +344,8 @@ behind it, so it has no live sync — use the app on draft day.
 │       ├── validate-draft-sync.js Assert the live draft sync matches picks correctly
 │       ├── audit-matching.js  Find name-matching damage across sources
 │       ├── test-source-toggle.js Assert switching a source off changes the board
+│       ├── validate-projections.js Backtest the model on a season it never saw
+│       ├── tune-projections.js Select model hyperparameters out of sample
 │       ├── build-cheatsheet.js Render the standalone cheat sheet
 │       └── health-check.js Data health report
 ├── client/

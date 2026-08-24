@@ -2,25 +2,17 @@
 // Run every scraper against the live sources, then rebuild derived columns.
 // Usage: node server/scripts/refresh-all.js
 const { db } = require('../db');
-const { recomputeDerived } = require('../routes/refresh');
+// The source list comes from the route rather than a second copy kept here. The copy
+// that used to live in this file fell a source behind the moment one was added, so a
+// command-line refresh quietly skipped it while the UI refreshed everything.
+const { recomputeDerived, SCRAPERS } = require('../routes/refresh');
 
-const SCRAPERS = [
-  ['sleeper', () => require('../scrapers/sleeper').fetchSleeper()],
-  ['fantasypros', () => require('../scrapers/fantasypros').fetchFantasyPros()],
-  ['underdog', () => require('../scrapers/underdog').fetchUnderdog()],
-  ['ffc', () => require('../scrapers/ffc').fetchFFC()],
-  ['market', () => require('../scrapers/market').fetchMarket()],
-  ['dynastyprocess', () => require('../scrapers/dynastyprocess').fetchDynastyProcess()],
-  ['dynastydaddy', () => require('../scrapers/dynastydaddy').fetchDynastyDaddy()],
-  ['fantasycalc', () => require('../scrapers/fantasycalc').fetchFantasyCalc()],
-  ['footballers', () => require('../scrapers/footballers').fetchFootballers()],
-];
 
 (async () => {
   db.prepare('UPDATE players SET adp_consensus_prev = adp_consensus WHERE adp_consensus IS NOT NULL').run();
 
   const failures = [];
-  for (const [name, fn] of SCRAPERS) {
+  for (const [name, fn] of Object.entries(SCRAPERS)) {
     const started = Date.now();
     try {
       const r = await fn();

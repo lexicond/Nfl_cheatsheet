@@ -43,6 +43,7 @@ export default function App() {
     teamSize,
     setTeamSize,
     sleeperBaseline,
+    xfpReplacement,
     refetchQuiet,
     showToast,
   } = usePlayers();
@@ -190,6 +191,7 @@ export default function App() {
             excluded={excluded}
             sourceStatus={sourceStatus}
             sleeperBaseline={sleeperBaseline}
+            xfpReplacement={xfpReplacement}
             filterBarHeight={filterBarHeight}
             draftConnected={draft.connected}
             draftUrl={draft.draft?.url || null}
