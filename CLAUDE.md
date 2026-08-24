@@ -373,6 +373,51 @@ it was never given and fails if it does not beat "repeat last season".
   validator compares only complete totals. Filtering to them moved model-vs-market agreement
   from rho 0.775 to 0.846 and Sleeper's from 0.914 to 0.975 — most of the apparent
   disagreement was the mismatched denominators, exactly as the arbitrage-column trap predicted.
+- **The backup cap was designed on running backs and must not be aimed at receivers.** "You
+  cannot take a starter's touches while another man is listed ahead of you" is true of a
+  backfield and false of a receiving corps — a base offence plays two receivers and a slot at
+  once. Applied from rank two it pinned George Pickens, Tee Higgins, Jameson Williams and
+  Davante Adams at 3.2 targets a game, a fourth receiver's workload, and cost draftable
+  receivers 17% against Sleeper. `SIMULTANEOUS_STARTERS` now says how many a position plays at
+  once and the cap starts beyond that. Raising WR to 3 was tried and is worse than 2 — the
+  third receiver really is capped in practice — so the number is empirical, not anatomical.
+- **Shrinking a second receiver toward the FIRST receiver's baseline makes things worse, not
+  better.** It looks like the natural companion to the cap fix and it is not: inflating every
+  WR2 and WR3 pushes the team over its target budget, the conservation step scales everyone
+  back to fit, and the alpha pays for it — Justin Jefferson fell from 173 to 143. The rank's
+  own baseline stays the shrink target; only the hard cap moved.
+- **Every touchdown a quarterback throws is caught by somebody, and nothing made that true.**
+  The model produced 811 passing touchdowns against 742 receiving ones, so 69 of its own
+  thrown touchdowns landed on nobody. Passing touchdowns are the side to trust — 811 against
+  a real 811, and 4.66% per attempt against a real 4.65% — so the receiving side is now
+  reconciled to them per team. It is applied on top of the receiving scale rather than folded
+  into it, because yards and receptions are constrained by targets while touchdowns are
+  constrained by the throw: two budgets that happen to sit on the same players.
+- **A draft-capital quarterback needs ALL his budget rates, not just attempts.** Giving him
+  attempts alone left Las Vegas throwing 442 times for ONE touchdown — 0.22% per attempt
+  against a league 4.65% — and the receiving-touchdown reconciliation above then cut every
+  Raiders receiver by 30% to match a passing game that scored nothing. Brock Bowers paid for
+  it twice over. Attempts, passing yards and passing touchdowns all come from the rank
+  allowance and league rates; his own projection still comes from the rookie curve.
+- **Sleeper is not ground truth and reads high.** Its league totals come to 11,640 receptions,
+  129,683 receiving yards and 833 receiving touchdowns; the last two real seasons produced
+  11,130-11,563, 121,678-126,476 and about 801. On yardage this model's total is the closest
+  of the three.A gap against Sleeper is therefore not evidence of a fault on its own — check the
+  number against nflverse before chasing it.
+- **Correct the attempt LEVEL, never the spread — teams do not all throw the same.** Attempts
+  summed from whichever quarterbacks have usage history came to 496 a team against a real 545,
+  because backups take their share of the games at a backup's rate. Every target is derived
+  from that total, so every pass-catcher read about 9% light. But that shortfall is an
+  artefact of the games split and says nothing about any particular team, so only the level is
+  corrected — one scalar shared by all 32, which by construction cannot reorder them.
+  Replacing each team's attempts with `LEAGUE_PASS_ATTEMPTS × (1 + lean)` was tried and is
+  wrong: real teams ranged 397–800 last season (sd 73) and the constant collapsed the model's
+  spread to sd 24. A team with a poor quarterback throws less and his receivers catch fewer —
+  that is signal the model had and the constant deleted. It also tests worse on held-out data
+  (+0.0397 against +0.0411). The level-only correction lands the league at 545 with sd 46.
+- **Both sides of the attempt correction must move together.** Correcting only the targets put
+  512 targets against 496 attempts, which is not a projection but an impossibility: every
+  attempt is at most one target. Scaling the passing side too restores the identity at 0.94.
 - **`components.basis` marks a player projected from draft capital, and it is NOT the same as
   `is_rookie`.** Quinn Ewers and Cam Miller are in their second year with no NFL usage, so they
   take the draft-capital path while `is_rookie` is false. The ledger filtered on `is_rookie`,

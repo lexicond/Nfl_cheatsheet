@@ -1,5 +1,6 @@
 const { chromium } = require('playwright');
 const path = require('path');
+const { viewSources } = require('../../server/sources');
 
 // PLAYWRIGHT_CHROMIUM points at a prebuilt browser where one exists; otherwise
 // Playwright's own download is used. APP_URL overrides the server address.
@@ -21,7 +22,15 @@ let fails=0; const check=(n,c,d='')=>{console.log(`  ${c?'\x1b[32m✓\x1b[0m':'\
   const heads = async () => (await p.locator('#board thead th').allInnerTexts()).map(t=>t.trim());
   console.log('\nDefaults');
   check('only default sources shown', !(await heads()).includes('FFC'), (await heads()).join('|'));
-  check('2 source cards on best ball', await p.locator('.srccard').count() === 2);
+  // Counted from the registry rather than hardcoded, for the same reason cstoggle is:
+  // a literal here means every new source column breaks this suite for a reason that has
+  // nothing to do with what the suite is testing.
+  const bbCards = (() => {
+    const v = viewSources('BB', '1QB');
+    return v.consensus.length + v.reference.length;
+  })();
+  check('source cards match the registry', await p.locator('.srccard').count() === bbCards,
+    `${await p.locator('.srccard').count()} cards, registry says ${bbCards}`);
   check('Δ SL column present', (await heads()).some(h=>/SL/.test(h)));
   check('Split column present', (await heads()).includes('SPLIT'));
   check('Rd column present', (await heads()).includes('RD'));

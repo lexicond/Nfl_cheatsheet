@@ -463,7 +463,7 @@ it is good for. The model still invents its own spread there, and a market-impli
 per player is a better one — the work is fitting the per-stat ladders into a single fantasy
 points distribution, which the stats being correlated makes non-trivial.
 
-**2c. A draft-capital starting quarterback collapses his team's whole receiving corps.**
+**2c. FIXED — a draft-capital starting quarterback collapsed his team's whole receiving corps.**
 Found by asking why Brock Bowers — ADP 18, 9.0 targets a game in 2024 — projected 111 points
 against Sleeper's 202.
 
@@ -474,15 +474,34 @@ nothing: LV's budget is built from 305 attempts where a real team throws about 5
 Raiders pass-catcher is then scaled down to fit, and the scale clamps at its 0.6 floor. Bowers
 is collateral damage from his quarterback being a rookie.
 
-It is exactly one team today — LV is the only one with a draft-capital quarterback listed
-first, and the league median attempt budget is a healthy 513 — which is why it reads as a
-strange one-off rather than a systemic bias. The fix is not small: either draft-capital
-quarterbacks need an attempt rate so they enter the budget, or the attempt budget needs to come
-from conserved quarterback games at an environment-set rate rather than from whichever
-quarterbacks happen to have usage history. The second is closer to how carries already work,
-but it would make the targets-per-attempt identity a check that two constants were applied
-rather than that the parts agree, so it needs the backtest run before it goes anywhere near the
-board.
+Fixed by doing both of the things that were on the table. Draft-capital projections now run
+BEFORE the conservation steps rather than being appended after them, they carry the depth chart,
+and a draft-capital quarterback carries an attempt rate for his rank — so he enters the games
+allocation and the attempt budget instead of sitting outside both. Las Vegas had been projecting
+thirty quarterback games in a seventeen-game season.
+
+Separately, the attempt LEVEL is corrected — but deliberately not the spread. Summing a team's
+attempts from the quarterbacks the model projects came to 496 against a real 545, because a
+backup takes his share of the games at a backup's rate, and every target is derived from that
+total, so every pass-catcher read 9% light.
+
+The first attempt at this replaced each team's attempts with a league constant tilted by game
+script. That was wrong and the owner caught it: real teams ranged from 397 to 800 attempts last
+season, a standard deviation of 73, and the constant collapsed the model's spread to 24 — about
+two thirds of the genuine between-team variation deleted. A team with a poor quarterback really
+does throw less, and his receivers really do catch fewer.
+
+What ships instead is a single correction scalar shared by all 32 teams, so it moves the league
+onto a realistic scale and by construction cannot reorder anyone. The league lands at 545 with
+a spread of 46, and it tests better on held-out data than the constant did (+0.0411 against
++0.0397). Both sides still move together: correcting only the targets put 512 targets against
+496 attempts, which is an impossibility rather than a projection.
+
+**What that means for the two players who prompted this.** Bowers projects 172.6 against the
+betting market's 178.1 — the model and the books essentially agree, and Sleeper's 202.5 is the
+outlier. Jefferson projects 174.4 against the market's 201.9. Both are still below Sleeper, and
+that is now a position rather than a bug: the Raiders and Vikings quarterback rooms are priced
+in rather than averaged away.
 
 **3. No correlation in the simulation.** Each player's weeks are drawn independently, so a
 quarterback and his WR1 are uncorrelated when in reality they run about +0.5 together. That
