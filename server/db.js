@@ -232,7 +232,16 @@ addColumnIfMissing('players', 'mkt_rec_yards', 'REAL');
 addColumnIfMissing('players', 'mkt_pass_tds', 'REAL');
 addColumnIfMissing('players', 'mkt_rush_tds', 'REAL');
 addColumnIfMissing('players', 'mkt_rec_tds', 'REAL');
+addColumnIfMissing('players', 'mkt_receptions', 'REAL');
 addColumnIfMissing('players', 'mkt_points', 'REAL');
+// How many real books priced his THINNEST line. A total backed by one operator on any of
+// its terms is not the same claim as one eight books agree on, and receptions are thin
+// where yardage is deep, so the weakest term is the one worth reporting.
+addColumnIfMissing('players', 'mkt_books', 'INTEGER');
+// Whether the total covers every category the position scores in. The books price
+// receiving for the pass-catching backs and skip the rest, so a partial total is not a
+// season projection and must not be compared with one.
+addColumnIfMissing('players', 'mkt_complete', 'INTEGER');
 
 // Populate name_normalized for any rows missing it
 (function populateNameNormalized() {

@@ -46,9 +46,23 @@ function marketTitle(player) {
   add(player.mkt_rush_tds, 'rush TD');
   add(player.mkt_rec_yards, 'rec yds');
   add(player.mkt_rec_tds, 'rec TD');
+  add(player.mkt_receptions, 'rec');
   if (bits.length) parts.push(bits.join(' · '));
-  if (player.mkt_rec_yards != null) {
-    parts.push('receptions estimated — the books publish no season reception line');
+  if (!player.mkt_complete) {
+    // The books price receiving for the pass-catching backs and skip the rest, so this
+    // total is missing a category the player really scores in. Not an error and not a
+    // zero — the market simply saw no liquidity there.
+    parts.push('PARTIAL — the books price no season line for every category he scores in, '
+      + 'so this total is missing one and reads low. Not comparable with a full total');
+  }
+  if (player.mkt_books != null) {
+    parts.push(player.mkt_books >= 5
+      ? `every line here is priced by at least ${player.mkt_books} books`
+      : `one of these lines comes from just ${player.mkt_books} book${player.mkt_books === 1 ? '' : 's'} — a thin consensus`);
+  }
+  // The one category with no season market at all, and it only bites quarterbacks.
+  if (player.position === 'QB') {
+    parts.push('no interception market exists, so this reads about two dozen points high for a quarterback');
   }
   if (player.xfp_points != null) {
     const gap = player.xfp_points - player.mkt_points;
@@ -414,10 +428,10 @@ export default function PlayerRow({
       <td key="mkt_points" className={`${cellClass} w-16 font-mono text-right`}>
         {player.mkt_points != null ? (
           <span
-            className="text-[#8b90a8]"
+            className={player.mkt_complete ? 'text-[#8b90a8]' : 'text-[#555875] italic'}
             title={marketTitle(player)}
           >
-            {player.mkt_points.toFixed(0)}
+            {player.mkt_points.toFixed(0)}{player.mkt_complete ? '' : '*'}
           </span>
         ) : (
           <span

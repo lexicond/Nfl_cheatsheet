@@ -495,13 +495,36 @@ function rmse(pairs) {
   /* ------------------------------------------------- the per-player market */
   section('Against the betting market — the only per-player second opinion');
   if (db) {
+    // Only complete totals. A market total missing its receiving terms is not a season
+    // projection, and correlating one against a model that projects the whole player
+    // measures the gap in the denominators rather than any disagreement about the player.
     const mk = db.prepare(`
       SELECT position, xfp_points m, mkt_points k, projected_pts s FROM players
-      WHERE mkt_points IS NOT NULL AND xfp_points IS NOT NULL
+      WHERE mkt_points IS NOT NULL AND xfp_points IS NOT NULL AND mkt_complete = 1
     `).all();
     if (mk.length < 60) {
       warn(`only ${mk.length} players carry a season betting line — is marketprops refreshing?`);
     } else {
+      // Every scoring category the books price must actually be landing on rows. This is
+      // here because a market that answers with an empty list reads exactly like a market
+      // nobody bets: receptions looked unpriced for as long as it was fetched from the
+      // wrong endpoint, and a third of every receiver's half-PPR season went missing from
+      // this column without a single error being raised.
+      const term = c => db.prepare(`SELECT COUNT(*) n FROM players WHERE ${c} IS NOT NULL`).get().n;
+      const terms = {
+        'passing yards': ['mkt_pass_yards', 20], 'passing TDs': ['mkt_pass_tds', 20],
+        'rushing yards': ['mkt_rush_yards', 35], 'rushing TDs': ['mkt_rush_tds', 35],
+        'receiving yards': ['mkt_rec_yards', 60], 'receiving TDs': ['mkt_rec_tds', 60],
+        'receptions': ['mkt_receptions', 50],
+      };
+      const thin = Object.entries(terms).filter(([, [c, min]]) => term(c) < min);
+      if (thin.length === 0) {
+        ok(`all seven market terms are populated (${Object.entries(terms).map(([l, [c]]) => `${l} ${term(c)}`).join(', ')})`);
+      } else {
+        bad('market terms missing or thin: ' + thin.map(([l, [c, min]]) => `${l} ${term(c)} < ${min}`).join('; ')
+          + ' — check the /offers endpoint and its 10-row page cap before believing the books stopped pricing it');
+      }
+
       const rank = (arr, f) => {
         const o = arr.map((x, i) => [f(x), i]).sort((a, b) => a[0] - b[0]);
         const r = new Array(arr.length);
@@ -514,7 +537,7 @@ function rmse(pairs) {
       };
       const modelRho = rho(mk, x => x.m, x => x.k);
       const avg = f => mk.reduce((a, b) => a + f(b), 0) / mk.length;
-      console.log(`  ${mk.length} players priced. model vs market rho ${modelRho.toFixed(3)}, ` +
+      console.log(`  ${mk.length} players with a complete market total. model vs market rho ${modelRho.toFixed(3)}, ` +
         `levels ${(avg(x => x.m) / avg(x => x.k)).toFixed(2)}x`);
 
       const withSleeper = mk.filter(x => x.s != null);

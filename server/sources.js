@@ -234,7 +234,7 @@ const COLUMNS = {
     label: 'Market line', short: 'MKT', source: 'marketprops',
     format: 'BB', league: '1QB', scoring: 'half', kind: 'market', consensus: false,
     excludedReason: 'A points total, not a pick number — and an expected value that already prices in missed games, unlike every projection beside it',
-    what: 'The betting market\'s own season-long over/unders for this player — passing, rushing and receiving yards and touchdowns — added up under this board\'s scoring. Unlike an expert ranking this is a number people are staking money on, and unlike the model beside it, it already discounts for the games the books expect him to miss. Receptions are the one half-PPR category with no published line, so that term is estimated from his receiving-yards line.',
+    what: 'The betting market\'s own season-long over/unders for this player — passing, rushing and receiving yards and touchdowns — added up under this board\'s scoring. Unlike an expert ranking this is a number people are staking money on, and unlike the model beside it, it already discounts for the games the books expect him to miss. Receptions are priced too, so every half-PPR category is a real line rather than an estimate — except interceptions, which no book prices for a season, so a quarterback\'s total here reads about two dozen points high. The books also price receiving for only the pass-catching running backs, so a back with no receiving line gets no total at all rather than a rushing-only one.',
     family: 'marketprops',
     provider: 'BettingPros consensus season props, ~23 books',
   },

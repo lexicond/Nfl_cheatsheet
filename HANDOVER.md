@@ -186,36 +186,66 @@ separately flattened White into a generic second-stringer and erased the passing
 ## What the betting market told us
 
 Season-long over/unders are now fetched per player from BettingPros — passing, rushing and
-receiving yards and touchdowns — scored under this board's rules into a single `MKT` column
-beside the model's own. **171 players carry a line**, joined exactly on
-`fantasypros_id → sleeper_id` through the crosswalk, with no name matching anywhere in the
-path. `server/scrapers/marketprops.js`.
+receiving yards, passing, rushing and receiving touchdowns, **and receptions** — scored under
+this board's rules into a single `MKT` column beside the model's own. **158 players carry a
+line**, joined exactly on `fantasypros_id → sleeper_id` through the crosswalk, with no name
+matching anywhere in the path. `server/scrapers/marketprops.js`.
 
-**The documented parsing trap is real and worse than advertised.** The brief warned that
-`over.line` and `under.line` are best prices across ~23 books and frequently differ. In this
-pull they differed on **246 of about 400 props** — George Pickens came back with an over at
-599.5 (−809) and an under at 1050.5 (−110). De-vigging that pair produces confident nonsense.
-`consensus_line` is the only field used here, and no de-vigging is attempted at all.
+**The first version fetched from the wrong endpoint and lost a whole category.** `/v3/props`
+takes `limit=500` and answers in one request, which makes it the obvious choice; it also
+answers 200 with an empty list for markets that are perfectly alive on `/v3/offers`.
+Receptions returned **0 props and 87 offers**. Reading that empty list as "the books do not
+price receptions" took a third of every receiver's half-PPR season out of the column, with
+nothing in the response to say so. Everything now comes from `/offers`, which is what
+bettingpros.com's own pages use — and whose `limit` maxes out at **10**, so it has to be
+paged; asking for more is a 400 that reads like the market being down.
 
-**Market 330, receptions, answers 200 with an empty list.** That is the one half-PPR category
-with no published line, and it is worth a third of a receiver's season, so the reception term
-is estimated from his receiving-yards line at the position's typical yards per catch. It is
-the only estimated term in that column and the tooltip says so.
+Interceptions (market 303) really is empty on both endpoints. So quarterback totals carry no
+interception term and read roughly two dozen points high. That is said on the column rather
+than estimated away.
 
-**The humbling number.** Across the 168 players carrying both:
+**The documented parsing trap is real and worse than advertised.** The brief warned that the
+best `over` and `under` prices are drawn from ~23 books and frequently differ: **74 of 107**
+receiving-yards offers had them at different numbers, and George Pickens came back with an
+over at 599.5 (−809) against an under at 1050.5 (−110). The consensus is not a field on
+`/offers` at all — it is **book id 0**, a pseudo-book alongside the real ones — and it is
+two-sided at a single number on 98 of those same 107. That is the only line read, and no
+de-vigging is attempted.
+
+**A line is only a median if it is priced like one.** Book 68 alone posted De'Zhaun Stribling
+— a rookie receiver — at 74.5 receptions, over at +245 against under at −376: about a 27%
+chance of getting there, not an expectation of it. Read as a median it made him a top-20
+receiver. Only 3–8% of offers are lopsided like that, so they are rejected rather than
+corrected; recovering a median from a one-sided quote needs a distribution the market has not
+published, and a guessed number that looks like a market line is worse than none.
+
+**Not every total is the same quantity, and 60 of them say so.** The books price receiving
+markets for the pass-catching backs and skip the rest — 22 of 36 running backs had a rushing
+line and no receiving line at all — so adding up what is priced gave them a season total
+missing a third of their scoring. Jonathan Taylor came out at 203 against the model's 310
+almost entirely for that reason. Silence from a book means it saw no liquidity, not that the
+player scores zero, so nothing is estimated and nothing is zeroed: `mkt_complete` marks the
+row, the board dims it and appends `*`, the cheat sheet shows a dash because a printed page
+has nowhere to put the caveat, and the validator compares only complete totals.
+
+**The humbling number.** Across the 98 players carrying a complete market total:
 
 | | rho against the market |
 |---|---|
-| Sleeper's projections | **0.917** |
-| This model | 0.771 |
+| Sleeper's projections | **0.975** |
+| This model | 0.846 |
 
-Sleeper tracks the betting market considerably more closely than this model does. That is not
-automatically a fault — the model is meant to be an independent view and an edge requires
-disagreeing somewhere — but it is not a result to be pleased about either, and it is printed
-by the validator every run rather than buried. The validator fails only below rho 0.6: a model
-that has come loose from the market entirely is broken rather than contrarian.
+Both numbers rose sharply when the partial totals were filtered out — from 0.914 and 0.775 —
+which is the arbitrage-column lesson again: two rankings can only be compared if they cover
+the same categories, and most of the apparent disagreement was the mismatched denominators.
 
-Levels agree to 0.99×, which is the more reassuring half: the model and the market are pricing
+Sleeper still tracks the betting market considerably more closely than this model does. That
+is not automatically a fault — the model is meant to be an independent view and an edge
+requires disagreeing somewhere — but it is not a result to be pleased about either, and it is
+printed by the validator every run rather than buried. The validator fails only below rho 0.6:
+a model that has come loose from the market entirely is broken rather than contrarian.
+
+Levels agree to 0.96×, which is the more reassuring half: the model and the market are pricing
 the same amount of football, they disagree about who gets it.
 
 **The two columns are not the same quantity, and that is the point of showing both.** A market

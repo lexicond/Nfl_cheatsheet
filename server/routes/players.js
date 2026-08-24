@@ -385,7 +385,7 @@ const RESPONSE_FIELDS = [
   'xfp_confidence', 'xfp_components', 'xfp_pos_rank', 'xfp_vor', 'xfp_edge',
   'ktc_value', 'fc_value', 'ds_value', 'dp_value', 'adp_fp_dyn', 'adp_sl_dyn',
   'mkt_points', 'mkt_pass_yards', 'mkt_rush_yards', 'mkt_rec_yards',
-  'mkt_pass_tds', 'mkt_rush_tds', 'mkt_rec_tds',
+  'mkt_pass_tds', 'mkt_rush_tds', 'mkt_rec_tds', 'mkt_receptions', 'mkt_books', 'mkt_complete',
   'age', 'fp_tier', 'tier_auto', 'round', 'spread', 'sleeper_gap',
   'ff_pos_rank', 'ff_points',
   'personal_rank', 'tier', 'starred', 'flagged', 'drafted', 'drafted_manual',

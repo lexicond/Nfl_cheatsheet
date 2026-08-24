@@ -79,11 +79,14 @@ rather than a scraper, and it joins on **Sleeper's player id via the crosswalk**
 none of the name-matching traps below apply to it.
 
 `server/scrapers/marketprops.js` is its counterweight: the betting market's own season-long
-over/unders per player, scored under the same rules into one `MKT` column. It joins on
-`fantasypros_id → sleeper_id` through the same crosswalk, so it too is free of name matching.
-It is displayed and sortable, and deliberately outside every average and outside the model.
+over/unders per player — seven markets, from `/v3/offers` rather than `/v3/props` — scored
+under the same rules into one `MKT` column. It joins on `fantasypros_id → sleeper_id` through
+the same crosswalk, so it too is free of name matching. It is displayed and sortable, and
+deliberately outside every average and outside the model. Only rows whose position has every
+scoring category priced (`mkt_complete`) are a season total; the rest are shown dimmed and
+compared with nothing.
 
-After touching anything under `server/model/`, run
+After touching anything under `server/model/` **or `scrapers/marketprops.js`**, run
 `node server/scripts/validate-projections.js`. It backtests the model against a season
 it was never given and fails if it does not beat "repeat last season".
 
@@ -288,18 +291,48 @@ it was never given and fails if it does not beat "repeat last season".
   the existing rule that a points projection is not a pick number. `consensus: false`, and
   it is absent from dynasty entirely because a one-season projection cannot speak to a
   keep-forever league.
-- **BettingPros' `over.line` and `under.line` are usually DIFFERENT LINES.** They are best
-  prices across ~23 books, not two sides of one market: they disagreed on 246 of about 400
-  season props in one pull, and George Pickens came back with an over at 599.5 (−809) against
+- **BettingPros' `/v3/props` answers 200 with an EMPTY LIST for markets that are alive on
+  `/v3/offers`.** `/props` is the obvious endpoint — one request, `limit=500` — and it is the
+  wrong one. Receptions (market 330) returned 0 props and 87 offers. Read as "the books do not
+  price receptions", that cost every receiver a third of his half-PPR season, and nothing in
+  the response said so: valid JSON, 200, an empty array. `/offers` is what bettingpros.com's
+  own pages are built on, it carries two more players on receiving yards as well, and it is
+  what `scrapers/marketprops.js` uses for all seven markets. **Its `limit` maxes out at 10**
+  and it must be paged — asking for more is a 400, which reads like the market being down.
+  Interceptions (303) genuinely is empty on both, so quarterback totals carry no interception
+  term and read about two dozen points high; that is stated on the column, not estimated away.
+- **On `/offers` the consensus is book id 0, not a `consensus_line` field.** That field does
+  not exist there. Each selection carries a list of books and book 0 is BettingPros' own
+  consensus pseudo-book, with the real books beside it. Reading a real book instead picks one
+  operator's shading at random.
+- **BettingPros' best-price `over` and `under` are usually DIFFERENT LINES.** They are best
+  prices across ~23 books, not two sides of one market: 74 of 107 receiving-yards offers had
+  them at different numbers, and George Pickens came back with an over at 599.5 (−809) against
   an under at 1050.5 (−110). De-vigging that pair produces a confident number that is simply
-  wrong. `consensus_line` is the only field `scrapers/marketprops.js` reads, and it does not
-  de-vig at all.
-- **BettingPros market 330 (receptions) answers 200 with an empty list.** It is listed among
-  the season markets and returns nothing, so it is deliberately absent from `MARKETS` — a
-  market that parses to zero rows would otherwise read as "nobody has a reception line"
-  rather than "this market is broken". Receptions are worth a third of a receiver's half-PPR
-  season, so the term is estimated from his receiving-yards line at the position's typical
-  yards per catch. It is the only estimated term in `mkt_points`.
+  wrong. The consensus book is two-sided at one number (98 of those same 107 agree), so it is
+  the only line read and no de-vigging happens at all.
+- **A line is only a median if it is priced like one.** Book 68 alone posted De'Zhaun
+  Stribling — a rookie receiver — at 74.5 receptions, over at +245 against under at −376. That
+  is the market giving him about a 27% chance of getting there, not expecting him to; read as
+  a median it made him a top-20 receiver. Measured across all seven markets only 3–8% of
+  offers are lopsided like that (the median offer sits within 0.03 of even money), so
+  `PRICE_BAND` rejects them rather than correcting them: recovering a median from a one-sided
+  quote needs an assumed distribution the market has not published, and a guessed number that
+  looks like a market line is worse than no number.
+- **The books do not price every category for every player, so the totals are not all the same
+  quantity.** Receiving markets exist for the pass-catching backs and not the rest — 22 of 36
+  running backs had a rushing line and no receiving line at all — and adding up what is priced
+  gave them a season total missing a third of their scoring. Jonathan Taylor came out at 203
+  against the model's 310 almost entirely for that reason. Silence from the books means they
+  saw no liquidity, not that the player scores zero, so missing terms are neither estimated
+  nor treated as zero: `mkt_complete` marks the row, the board dims it and appends `*`, the
+  cheat sheet shows a dash because a printed page has nowhere to put the caveat, and the
+  validator compares only complete totals. Filtering to them moved model-vs-market agreement
+  from rho 0.775 to 0.846 and Sleeper's from 0.914 to 0.975 — most of the apparent
+  disagreement was the mismatched denominators, exactly as the arbitrage-column trap predicted.
+- **`mkt_books` is the THINNEST of a player's lines, not the widest.** A total whose receiving
+  yards eight books agree on but whose receptions come from one is only as good as that one.
+  Taking the max read as broad agreement on players who had none.
 - **The BettingPros key is borrowed from their public frontend bundle, not issued to us**, and
   may rotate without notice. Every failure path in `marketprops.js` is soft and the board
   keeps what it had; `BETTINGPROS_KEY` overrides it without a deploy. Nothing downstream may
@@ -310,7 +343,8 @@ it was never given and fails if it does not beat "repeat last season".
   fragile, and the gap is information. It is shown beside the projection and never blended
   into it — blending would need the availability gap reconciled first, and doing it carelessly
   turns the projection back into an injury forecast.
-- **Sleeper tracks the betting market at rho 0.92; this model at 0.77.** Both are printed by
+- **Sleeper tracks the betting market at rho 0.98; this model at 0.85** (on complete totals;
+  0.91 and 0.77 before that filter). Both are printed by
   `validate-projections.js` every run rather than buried. The model is meant to be independent
   and an edge requires disagreeing somewhere, so this is not asserted as a failure — but the
   validator does fail below rho 0.6, because a model that has come loose from the market

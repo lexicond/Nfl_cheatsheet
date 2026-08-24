@@ -128,9 +128,15 @@ const players = rows.filter(r => keep.has(r.id)).map(r => ({
   // as the app does per request. `xc` is the simulated ceiling, which is what best ball
   // actually pays for.
   xfp: num(r.xfp_points), xc: num(r.xfp_ceiling), xcf: r.xfp_confidence || null,
-  // The betting market's own season total, scored the same way. An expected value
-  // that already discounts missed games, unlike `xfp` beside it.
-  mkt: num(r.mkt_points),
+  // The betting market's own season total, scored the same way. Shown beside the model
+  // rather than blended into it — it is an expected value that already discounts for
+  // missed games, which the model deliberately does not.
+  //
+  // Only the totals covering a position's full scoring are carried. The books price no
+  // receiving market for most running backs, and a rushing-only total reads a third low;
+  // the app dims those and explains itself in a tooltip, but a printed sheet has nowhere
+  // to put the caveat, so it shows a dash instead of a number that means something else.
+  mkt: r.mkt_complete ? num(r.mkt_points) : null,
   sld: num(r.adp_sl_dyn), slds: num(r.adp_sl_dyn_sf),
   age: r.age == null ? null : Math.round(Number(r.age)),
   dy: num(r.dyn_rank_consensus), dys: num(r.dyn_rank_consensus_sf),
