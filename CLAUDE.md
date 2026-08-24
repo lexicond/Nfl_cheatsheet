@@ -363,6 +363,22 @@ it was never given and fails if it does not beat "repeat last season".
   validator compares only complete totals. Filtering to them moved model-vs-market agreement
   from rho 0.775 to 0.846 and Sleeper's from 0.914 to 0.975 — most of the apparent
   disagreement was the mismatched denominators, exactly as the arbitrage-column trap predicted.
+- **`components.basis` marks a player projected from draft capital, and it is NOT the same as
+  `is_rookie`.** Quinn Ewers and Cam Miller are in their second year with no NFL usage, so they
+  take the draft-capital path while `is_rookie` is false. The ledger filtered on `is_rookie`,
+  let them into the team totals, and put Miami on 43 quarterback games in a seventeen-game
+  season. Everything that aggregates by team must filter on `basis`, as `validate-projections`
+  does. Note also what that means for the model: quarterback-games conservation covers
+  quarterbacks with usage behind them, and a draft-capital quarterback sits outside the budget.
+- **`runModel`'s `depthChart` is Sleeper's map, keyed by sleeper id** — `sleeper_id -> {order,
+  team, injury}`, exactly as `scrapers/expectedpoints.js` builds it. Handing it nflverse's depth
+  chart instead is not a near-enough substitute: it is the wrong shape, every lookup misses
+  silently, and the model quietly runs as though no depth chart existed at all.
+- **`node server/scripts/build-ledger.js` regenerates the Projection Ledger artifact.** The page
+  is `server/ledger/template.html`; only `window.__DATA__` varies. It was originally written
+  around a pasted blob, which meant it went stale the moment the model changed with no way to
+  tell. It is not part of a refresh — it runs the model a second time and scrapes a page, and
+  nothing on the board depends on its output.
 - **VegasInsider's four books post DIFFERENT win-total lines, so the page cannot be
   averaged.** Baltimore came back at o11.5 (+120) from one book and o10.5 (−150) from another.
   Each quote is converted to the total it implies before anything is combined, and the two
