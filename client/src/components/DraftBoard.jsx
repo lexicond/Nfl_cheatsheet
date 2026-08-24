@@ -25,6 +25,7 @@ const COL_PX = {
   adp_espn: 64, adp_yahoo: 64,
   consensus: 100, projected_pts: 64, pos_rank: 64, age: 48,
   xfp_points: 64, xfp_ppg: 56, xfp_vor: 62, xfp_ceiling: 64, xfp_edge: 58,
+  mkt_points: 64,
   round: 44, sleeper_gap: 60, spread: 58,
   ktc_value: 80, fc_value: 80, ds_value: 80, dp_value: 80,
   tier: 56, flags: 64, status: 96, notes: 48, go: 36,

@@ -149,6 +149,7 @@ Plus the players whose projected positional rank disagrees most with what they c
 | **DynastyProcess** | Dynasty values and player ages. Displayed but **not** averaged — see below | DynastyProcess daily CSV |
 | **The Fantasy Footballers** | Andy, Jason and Mike's statistical projections, averaged and ranked within each position. Displayed but **not** averaged — a positional rank is not a pick number | `window.udk.data` embedded in their free positional rankings pages |
 | **Expected Points** (`expectedpoints`) | This board's own projection — expected points, value over replacement, and a simulated ceiling. Displayed but **not** averaged | Computed here from nflverse usage and betting-market team totals — see below |
+| **Market line** (`marketprops`) | The betting market's own season-long over/unders per player — passing, rushing and receiving yards and touchdowns — added up under this board's scoring. Displayed but **not** averaged, and not fed into the model either | BettingPros season props, consensus line across ~23 books |
 
 If a source fails, existing data for that source is preserved — only a successful fetch updates the values.
 
@@ -320,6 +321,7 @@ behind it, so it has no live sync — use the app on draft day.
 │   │   ├── dynastyprocess.js DynastyProcess values and ages
 │   │   ├── fantasycalc.js FantasyCalc dynasty values
 │   │   ├── expectedpoints.js Runs the model and writes its columns onto the board
+│   │   ├── marketprops.js Season-long betting over/unders, scored under this league
 │   │   └── seed.js        Hardcoded fallback, last resort only
 │   ├── model/             The expected-points model — the board's own projection
 │   │   ├── nflverse.js    Weekly stats, schedules, and the gsis↔sleeper crosswalk

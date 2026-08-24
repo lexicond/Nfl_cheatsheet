@@ -23,6 +23,7 @@ const DERIVED_SORTS = {
   xfp_vor:       { get: r => r.xfp_vor, dir: 'desc' },
   xfp_ceiling:   { get: r => r.xfp_ceiling, dir: 'desc' },
   xfp_edge:      { get: r => r.xfp_edge, dir: 'desc' },
+  mkt_points:    { get: r => r.mkt_points, dir: 'desc' },
   age:           { get: r => r.age, dir: 'asc' },
   spread:        { get: r => r.spread, dir: 'desc' },
   sleeper_gap:   { get: r => r.sleeper_gap, dir: 'desc' },
@@ -39,9 +40,12 @@ function sortSpec(key, allowedColumns) {
   if (DERIVED_SORTS[key]) return DERIVED_SORTS[key];
   const col = COLUMNS[key];
   if (!col || !allowedColumns.includes(key)) return null;
-  // A source column: values count down from the best (trade values) or up (ADP, ranks).
+  // A source column. ADP and ranks count up from the best pick; trade values, points
+  // projections and betting-market totals count down from it. Getting this wrong does
+  // not error — it silently orders the board worst-first.
   const field = FIELD_ALIAS[key] || key;
-  return { get: r => r[field], dir: col.kind === 'value' ? 'desc' : 'asc' };
+  const descending = col.kind === 'value' || col.kind === 'model' || col.kind === 'market';
+  return { get: r => r[field], dir: descending ? 'desc' : 'asc' };
 }
 
 // Every format defaults to its own headline number rather than a single source, so the
@@ -380,6 +384,8 @@ const RESPONSE_FIELDS = [
   'xfp_points', 'xfp_ppg', 'xfp_games', 'xfp_floor', 'xfp_ceiling', 'xfp_best_ball',
   'xfp_confidence', 'xfp_components', 'xfp_pos_rank', 'xfp_vor', 'xfp_edge',
   'ktc_value', 'fc_value', 'ds_value', 'dp_value', 'adp_fp_dyn', 'adp_sl_dyn',
+  'mkt_points', 'mkt_pass_yards', 'mkt_rush_yards', 'mkt_rec_yards',
+  'mkt_pass_tds', 'mkt_rush_tds', 'mkt_rec_tds',
   'age', 'fp_tier', 'tier_auto', 'round', 'spread', 'sleeper_gap',
   'ff_pos_rank', 'ff_points',
   'personal_rank', 'tier', 'starred', 'flagged', 'drafted', 'drafted_manual',

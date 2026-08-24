@@ -495,7 +495,11 @@ function sortRows(rows) {
   if (k === '__vor') return by(p => p.xvor, 'desc');
   if (k === '__ceil') return by(p => p.xc, 'desc');
   if (k && SOURCE_META[k]) {
-    return by(p => p[k], SOURCE_META[k].kind === 'value' ? 'desc' : 'asc');
+    // ADP and ranks count up from the best pick; trade values, projections and betting
+    // lines count down from it. Reading this the wrong way round does not error, it
+    // just quietly puts the worst player at the top of the board.
+    const desc = ['value', 'model', 'market'].includes(SOURCE_META[k].kind);
+    return by(p => p[k], desc ? 'desc' : 'asc');
   }
   return rows;
 }

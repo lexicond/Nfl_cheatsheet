@@ -33,7 +33,7 @@ router.get('/', (req, res) => {
     // Per-column coverage over the players carrying any market signal.
     const coverageCols = ['adp_underdog', 'adp_fantasypros', 'adp_ffc', 'adp_fp_rd', 'adp_fp_sf',
                           'adp_fp_dyn', 'adp_sl_rd', 'adp_sl_sf', 'adp_espn', 'adp_yahoo',
-                          'ktc_value', 'fc_value', 'bye_week', 'xfp_points'];
+                          'ktc_value', 'fc_value', 'bye_week', 'xfp_points', 'mkt_points'];
     const columnCoverage = {};
     for (const c of coverageCols) {
       columnCoverage[c] = db.prepare(`SELECT COUNT(*) AS n FROM players WHERE ${c} IS NOT NULL`).get().n;

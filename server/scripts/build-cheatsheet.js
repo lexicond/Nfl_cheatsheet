@@ -57,6 +57,8 @@ const PAYLOAD_KEY = {
   ff_pos_rank: 'ffb', ff_pos_rank_rd: 'ffb',
   xfp_points: 'xfp', xfp_points_bb_sf: 'xfp',
   xfp_points_rd: 'xfp', xfp_points_rd_sf: 'xfp',
+  mkt_points: 'mkt', mkt_points_bb_sf: 'mkt',
+  mkt_points_rd: 'mkt', mkt_points_rd_sf: 'mkt',
 };
 
 // Everything the page needs to describe and toggle its own sources, taken straight
@@ -78,6 +80,10 @@ for (const [format, leagueType] of FORMATS) {
     };
   }
 }
+
+// How many providers stand behind the sheet. Counted from the registry rather than
+// typed, because the hardcoded number had already drifted from the list in the footer.
+const SOURCE_COUNT = new Set(Object.values(COLUMNS).map(c => c.source)).size;
 
 // Payload key -> source family, so the sheet can hold one off-list across every view.
 const FAMILY_OF = {};
@@ -122,6 +128,9 @@ const players = rows.filter(r => keep.has(r.id)).map(r => ({
   // as the app does per request. `xc` is the simulated ceiling, which is what best ball
   // actually pays for.
   xfp: num(r.xfp_points), xc: num(r.xfp_ceiling), xcf: r.xfp_confidence || null,
+  // The betting market's own season total, scored the same way. An expected value
+  // that already discounts missed games, unlike `xfp` beside it.
+  mkt: num(r.mkt_points),
   sld: num(r.adp_sl_dyn), slds: num(r.adp_sl_dyn_sf),
   age: r.age == null ? null : Math.round(Number(r.age)),
   dy: num(r.dyn_rank_consensus), dys: num(r.dyn_rank_consensus_sf),
@@ -236,7 +245,7 @@ ${css}
     </div>
     <div class="stamp">
       Built <b>${builtAt}</b><br>
-      ${players.length} rostered players · 8 sources
+      ${players.length} rostered players · ${SOURCE_COUNT} sources
     </div>
   </header>
 
@@ -365,6 +374,8 @@ ${css}
       <li><b>FantasyCalc</b> — dynasty trade values, 1QB and superflex · ${fetchedAt('fantasycalc')}</li>
       <li><b>The Fantasy Footballers</b> — Andy, Jason and Mike's projections, averaged and ranked within each position on this board's scoring · ${fetchedAt('footballers')}</li>
       <li><b>DynastyProcess</b> — dynasty values and player ages; shown but not averaged, being FantasyPros-derived · ${fetchedAt('dynastyprocess')}</li>
+      <li><b>This board's own model</b> — expected points from nflverse usage, regressed efficiency and betting-market team totals; shown but not averaged · ${fetchedAt('expectedpoints')}</li>
+      <li><b>BettingPros</b> — season-long over/unders per player, consensus across ~23 books, scored under this board's rules; shown but not averaged · ${fetchedAt('marketprops')}</li>
     </ul>
     <p class="fine">
       Each format averages only the sources that publish that format, so redraft ADP never skews the best-ball

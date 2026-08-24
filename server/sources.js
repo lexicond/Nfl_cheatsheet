@@ -216,6 +216,52 @@ const COLUMNS = {
     family: 'expectedpoints',
     provider: 'This board\'s model — nflverse usage × betting-market team totals',
   },
+  // What the betting market says each player will actually produce this season, scored
+  // under this league's rules. Sourced from BettingPros' season-long over/unders — see
+  // scrapers/marketprops.js for why only `consensus_line` is trusted.
+  //
+  // It is NOT the same quantity as the model's projection beside it, and the difference
+  // is the whole reason it is worth showing. A line of 1,300 receiving yards is an
+  // expected value that already prices in the games he is likely to miss; the model's
+  // number is deliberately a full seventeen, because it refuses to forecast injuries.
+  // So the market will read low on anyone the books think is fragile, and that gap is
+  // information rather than an error in either number.
+  //
+  // `consensus: false` for the same two reasons the model is excluded — a points total
+  // is not a pick number — plus a third: receptions have no published market, so the
+  // half-PPR reception term here is estimated rather than priced.
+  mkt_points: {
+    label: 'Market line', short: 'MKT', source: 'marketprops',
+    format: 'BB', league: '1QB', scoring: 'half', kind: 'market', consensus: false,
+    excludedReason: 'A points total, not a pick number — and an expected value that already prices in missed games, unlike every projection beside it',
+    what: 'The betting market\'s own season-long over/unders for this player — passing, rushing and receiving yards and touchdowns — added up under this board\'s scoring. Unlike an expert ranking this is a number people are staking money on, and unlike the model beside it, it already discounts for the games the books expect him to miss. Receptions are the one half-PPR category with no published line, so that term is estimated from his receiving-yards line.',
+    family: 'marketprops',
+    provider: 'BettingPros consensus season props, ~23 books',
+  },
+  mkt_points_bb_sf: {
+    label: 'Market line', short: 'MKT', source: 'marketprops',
+    format: 'BB', league: '2QB', scoring: 'half', kind: 'market', consensus: false,
+    excludedReason: 'A points total, not a pick number',
+    what: 'The same market season totals, shown on the best-ball superflex board. Betting lines do not know what league you are in — only the value you place on a quarterback changes.',
+    family: 'marketprops',
+    provider: 'BettingPros consensus season props, ~23 books',
+  },
+  mkt_points_rd: {
+    label: 'Market line', short: 'MKT', source: 'marketprops',
+    format: 'RD', league: '1QB', scoring: 'half', kind: 'market', consensus: false,
+    excludedReason: 'A points total, not a pick number',
+    what: 'The same market season totals, shown on the redraft board.',
+    family: 'marketprops',
+    provider: 'BettingPros consensus season props, ~23 books',
+  },
+  mkt_points_rd_sf: {
+    label: 'Market line', short: 'MKT', source: 'marketprops',
+    format: 'RD', league: '2QB', scoring: 'half', kind: 'market', consensus: false,
+    excludedReason: 'A points total, not a pick number',
+    what: 'The same market season totals, shown on the redraft superflex board.',
+    family: 'marketprops',
+    provider: 'BettingPros consensus season props, ~23 books',
+  },
   fc_value: {
     label: 'FantasyCalc', short: 'FC', source: 'fantasycalc',
     format: 'DYN', league: '1QB', scoring: 'half', kind: 'value',
@@ -296,6 +342,7 @@ const KIND_LABEL = {
   value: 'Trade values',
   posrank: 'Projection rank, by position',
   model: 'This board\'s own model',
+  market: 'Betting market',
 };
 
 // Superflex dynasty columns are sent to the client under their base name, because a
@@ -306,6 +353,9 @@ const FIELD_ALIAS = {
   xfp_points_bb_sf: 'xfp_points',
   xfp_points_rd: 'xfp_points',
   xfp_points_rd_sf: 'xfp_points',
+  mkt_points_bb_sf: 'mkt_points',
+  mkt_points_rd: 'mkt_points',
+  mkt_points_rd_sf: 'mkt_points',
   ktc_value_sf: 'ktc_value',
   fc_value_sf: 'fc_value',
   ds_value_sf: 'ds_value',

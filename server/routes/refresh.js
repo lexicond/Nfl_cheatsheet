@@ -12,6 +12,7 @@ const { fetchFantasyCalc } = require('../scrapers/fantasycalc');
 const { fetchFootballers } = require('../scrapers/footballers');
 const { fetchMarket } = require('../scrapers/market');
 const { fetchExpectedPoints } = require('../scrapers/expectedpoints');
+const { fetchMarketProps } = require('../scrapers/marketprops');
 
 // Sleeper runs first on a full refresh: it owns the roster rows and the Sleeper
 // ids the other sources match against.
@@ -28,6 +29,8 @@ const SCRAPERS = {
   // Last on a full refresh: it reads nothing the other sources write, but it is the
   // slowest by an order of magnitude (six seasons of nflverse, a few seconds) and
   // running it last means a failure here still leaves every market column refreshed.
+  // Before the model, so a run can report the market alongside it.
+  marketprops: fetchMarketProps,
   expectedpoints: fetchExpectedPoints,
 };
 

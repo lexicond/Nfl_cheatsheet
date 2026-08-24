@@ -248,6 +248,14 @@ function rmse(pairs) {
     else bad(`${label} — the model is materially worse than doing nothing at ${pos}`);
   }
 
+  // The board's database, needed by several sections below. Absent in a bare checkout.
+  let db = null;
+  try {
+    ({ db } = require('../db'));
+  } catch (err) {
+    warn(`database unavailable (${err.message}) — skipping the checks that need it`);
+  }
+
   /* ------------------------------------------------------------- live sanity */
   section('Live run — structural sanity');
   const live = await runModel({ targetSeason: new Date().getFullYear(), iterations: 200 });
@@ -484,14 +492,51 @@ function rmse(pairs) {
   console.log(`  reclaimed ${live.meta.qb_conservation.games_reclaimed} QB games, ` +
     `dropped ${live.meta.qb_conservation.dropped} with no share of the job left`);
 
+  /* ------------------------------------------------- the per-player market */
+  section('Against the betting market — the only per-player second opinion');
+  if (db) {
+    const mk = db.prepare(`
+      SELECT position, xfp_points m, mkt_points k, projected_pts s FROM players
+      WHERE mkt_points IS NOT NULL AND xfp_points IS NOT NULL
+    `).all();
+    if (mk.length < 60) {
+      warn(`only ${mk.length} players carry a season betting line — is marketprops refreshing?`);
+    } else {
+      const rank = (arr, f) => {
+        const o = arr.map((x, i) => [f(x), i]).sort((a, b) => a[0] - b[0]);
+        const r = new Array(arr.length);
+        o.forEach(([, i], k2) => { r[i] = k2 + 1; });
+        return r;
+      };
+      const rho = (arr, f, g) => {
+        const a = rank(arr, f); const b = rank(arr, g);
+        return correlation(a.map((v, i) => [v, b[i]]));
+      };
+      const modelRho = rho(mk, x => x.m, x => x.k);
+      const avg = f => mk.reduce((a, b) => a + f(b), 0) / mk.length;
+      console.log(`  ${mk.length} players priced. model vs market rho ${modelRho.toFixed(3)}, ` +
+        `levels ${(avg(x => x.m) / avg(x => x.k)).toFixed(2)}x`);
+
+      const withSleeper = mk.filter(x => x.s != null);
+      if (withSleeper.length >= 40) {
+        const sleeperRho = rho(withSleeper, x => x.s, x => x.k);
+        console.log(`  Sleeper vs the same market: rho ${sleeperRho.toFixed(3)} — ` +
+          (sleeperRho > modelRho
+            ? 'Sleeper tracks the market more closely than this model does, which is worth knowing'
+            : 'this model tracks the market at least as closely as Sleeper'));
+      }
+
+      // Not a demand that the model agree with the market — it is meant to be an
+      // independent view, and an edge requires disagreeing somewhere. But a model that
+      // has come loose from the market entirely is broken rather than contrarian.
+      if (modelRho >= 0.6) ok(`model tracks the market at rho ${modelRho.toFixed(3)}`);
+      else bad(`model agrees with the market at only rho ${modelRho.toFixed(3)} — ` +
+        'that is not independence, it is a fault');
+    }
+  }
+
   /* ------------------------------------------------------------- board reach */
   section('Board coverage — can the projection actually land on rows?');
-  let db = null;
-  try {
-    ({ db } = require('../db'));
-  } catch (err) {
-    warn(`database unavailable (${err.message}) — skipping coverage`);
-  }
   if (db) {
     const have = new Set(P.filter(p => p.sleeper_id).map(p => String(p.sleeper_id)));
     const covered = (limit) => {

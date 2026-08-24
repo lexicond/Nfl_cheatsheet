@@ -30,6 +30,37 @@ function TrendIndicator({ trend }) {
  * is stored as JSON on the row, so a number nobody can interrogate never appears on the
  * board — this is the board's own model, with no second source to check it against.
  */
+/**
+ * The market's season line, spelled out. Worth showing the components rather than just
+ * the total, because the total is only as trustworthy as the lines behind it — a player
+ * priced for receiving yards but not touchdowns scores low here for a reason that has
+ * nothing to do with the market's opinion of him.
+ */
+function marketTitle(player) {
+  const parts = [`Betting market: ${player.mkt_points.toFixed(0)} half-PPR points from its season over/unders`];
+  const bits = [];
+  const add = (v, unit) => { if (v != null) bits.push(`${v} ${unit}`); };
+  add(player.mkt_pass_yards, 'pass yds');
+  add(player.mkt_pass_tds, 'pass TD');
+  add(player.mkt_rush_yards, 'rush yds');
+  add(player.mkt_rush_tds, 'rush TD');
+  add(player.mkt_rec_yards, 'rec yds');
+  add(player.mkt_rec_tds, 'rec TD');
+  if (bits.length) parts.push(bits.join(' · '));
+  if (player.mkt_rec_yards != null) {
+    parts.push('receptions estimated — the books publish no season reception line');
+  }
+  if (player.xfp_points != null) {
+    const gap = player.xfp_points - player.mkt_points;
+    parts.push(Math.abs(gap) < 15
+      ? 'the model agrees with it to within 15 points'
+      : `the model has him ${Math.abs(gap).toFixed(0)} points ${gap > 0 ? 'higher' : 'lower'}`
+        + ' — and note the market line already discounts for games it expects him to miss,'
+        + ' while the model assumes a full season');
+  }
+  return parts.join(' · ');
+}
+
 function xfpTitle(player) {
   let parts = [`Model projection: ${player.xfp_points?.toFixed(0)} half-PPR points`];
   if (player.xfp_pos_rank != null) parts[0] += ` (${player.position}${player.xfp_pos_rank})`;
@@ -371,6 +402,29 @@ export default function PlayerRow({
             {player.xfp_ppg.toFixed(1)}
           </span>
         ) : <span className="text-[#555875]">–</span>}
+      </td>
+    ),
+
+    // The betting market's own season total for him, scored under this league's rules.
+    // Deliberately shown next to the model rather than folded into it: this number is an
+    // expected value that already discounts the games the books think he will miss, and
+    // the model's is a full season on purpose. Where they diverge sharply, the books are
+    // usually saying something about availability rather than about talent.
+    mkt_points: (
+      <td key="mkt_points" className={`${cellClass} w-16 font-mono text-right`}>
+        {player.mkt_points != null ? (
+          <span
+            className="text-[#8b90a8]"
+            title={marketTitle(player)}
+          >
+            {player.mkt_points.toFixed(0)}
+          </span>
+        ) : (
+          <span
+            className="text-[#555875]"
+            title="No season-long betting line published for him. The books price roughly the top 100 skill players and 31 quarterbacks; everyone else is unpriced, which is itself a signal about how the market sees him."
+          >–</span>
+        )}
       </td>
     ),
 

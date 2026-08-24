@@ -78,6 +78,11 @@ It reaches the board through `scrapers/expectedpoints.js`, which is a source wra
 rather than a scraper, and it joins on **Sleeper's player id via the crosswalk** — so
 none of the name-matching traps below apply to it.
 
+`server/scrapers/marketprops.js` is its counterweight: the betting market's own season-long
+over/unders per player, scored under the same rules into one `MKT` column. It joins on
+`fantasypros_id → sleeper_id` through the same crosswalk, so it too is free of name matching.
+It is displayed and sortable, and deliberately outside every average and outside the model.
+
 After touching anything under `server/model/`, run
 `node server/scripts/validate-projections.js`. It backtests the model against a season
 it was never given and fails if it does not beat "repeat last season".
@@ -283,6 +288,38 @@ it was never given and fails if it does not beat "repeat last season".
   the existing rule that a points projection is not a pick number. `consensus: false`, and
   it is absent from dynasty entirely because a one-season projection cannot speak to a
   keep-forever league.
+- **BettingPros' `over.line` and `under.line` are usually DIFFERENT LINES.** They are best
+  prices across ~23 books, not two sides of one market: they disagreed on 246 of about 400
+  season props in one pull, and George Pickens came back with an over at 599.5 (−809) against
+  an under at 1050.5 (−110). De-vigging that pair produces a confident number that is simply
+  wrong. `consensus_line` is the only field `scrapers/marketprops.js` reads, and it does not
+  de-vig at all.
+- **BettingPros market 330 (receptions) answers 200 with an empty list.** It is listed among
+  the season markets and returns nothing, so it is deliberately absent from `MARKETS` — a
+  market that parses to zero rows would otherwise read as "nobody has a reception line"
+  rather than "this market is broken". Receptions are worth a third of a receiver's half-PPR
+  season, so the term is estimated from his receiving-yards line at the position's typical
+  yards per catch. It is the only estimated term in `mkt_points`.
+- **The BettingPros key is borrowed from their public frontend bundle, not issued to us**, and
+  may rotate without notice. Every failure path in `marketprops.js` is soft and the board
+  keeps what it had; `BETTINGPROS_KEY` overrides it without a deploy. Nothing downstream may
+  depend on it existing.
+- **A market line and a projection are not the same quantity.** The line already discounts the
+  games the books expect a player to miss; the model's number is a full seventeen on purpose,
+  because it refuses to forecast injuries. So `mkt_points` reads low on anyone thought
+  fragile, and the gap is information. It is shown beside the projection and never blended
+  into it — blending would need the availability gap reconciled first, and doing it carelessly
+  turns the projection back into an injury forecast.
+- **Sleeper tracks the betting market at rho 0.92; this model at 0.77.** Both are printed by
+  `validate-projections.js` every run rather than buried. The model is meant to be independent
+  and an edge requires disagreeing somewhere, so this is not asserted as a failure — but the
+  validator does fail below rho 0.6, because a model that has come loose from the market
+  entirely is broken rather than contrarian.
+- **A new column `kind` has to be added to the descending-sort set in two places** —
+  `sortSpec` in `routes/players.js` and `sortRows` in `cheatsheet/board.js`. ADP and ranks
+  count up from the best pick; trade values, projections and betting lines count down from it.
+  Reading it the wrong way round does not error, it silently puts the worst player at the top
+  of the board. `xfp_points` sorted ascending on the cheat sheet for exactly this reason.
 - **The stored picks are made to equal Sleeper's, not merely appended to.** A
   commissioner can undo a pick, and a player left marked taken never returns to the board
   on his own.

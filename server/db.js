@@ -222,6 +222,18 @@ addColumnIfMissing('players', 'depth_chart_position', 'TEXT');
 // is not forecasting an injury — it is reading one that has already happened.
 addColumnIfMissing('players', 'injury_status', 'TEXT');
 
+// Season-long betting lines per player, and those lines scored under this league's rules.
+// Carried alongside the model's own projection, never blended into it — a market line is
+// an expected value that already prices in missed games, and the model's number
+// deliberately assumes a full season.
+addColumnIfMissing('players', 'mkt_pass_yards', 'REAL');
+addColumnIfMissing('players', 'mkt_rush_yards', 'REAL');
+addColumnIfMissing('players', 'mkt_rec_yards', 'REAL');
+addColumnIfMissing('players', 'mkt_pass_tds', 'REAL');
+addColumnIfMissing('players', 'mkt_rush_tds', 'REAL');
+addColumnIfMissing('players', 'mkt_rec_tds', 'REAL');
+addColumnIfMissing('players', 'mkt_points', 'REAL');
+
 // Populate name_normalized for any rows missing it
 (function populateNameNormalized() {
   const missing = db.prepare('SELECT id, name FROM players WHERE name_normalized IS NULL').all();
@@ -238,7 +250,7 @@ addColumnIfMissing('players', 'injury_status', 'TEXT');
 const initSource = db.prepare(`
   INSERT OR IGNORE INTO source_metadata (source, status) VALUES (?, 'never')
 `);
-['fantasypros', 'underdog', 'sleeper', 'ffc', 'market', 'dynastyprocess', 'dynastydaddy', 'fantasycalc', 'footballers', 'expectedpoints'].forEach(s => initSource.run(s));
+['fantasypros', 'underdog', 'sleeper', 'ffc', 'market', 'dynastyprocess', 'dynastydaddy', 'fantasycalc', 'footballers', 'expectedpoints', 'marketprops'].forEach(s => initSource.run(s));
 
 // Lookup indexes for the matcher and the projection-rank subquery.
 db.exec(`

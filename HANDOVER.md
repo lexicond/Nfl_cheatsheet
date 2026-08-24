@@ -183,6 +183,51 @@ backups 0.80×. Josh Allen 361.5 against their 361.5; Gibbs 310 against 300.
 That only works because the backup cap is on **total** opportunity. Capping each metric
 separately flattened White into a generic second-stringer and erased the passing-down role.
 
+## What the betting market told us
+
+Season-long over/unders are now fetched per player from BettingPros — passing, rushing and
+receiving yards and touchdowns — scored under this board's rules into a single `MKT` column
+beside the model's own. **171 players carry a line**, joined exactly on
+`fantasypros_id → sleeper_id` through the crosswalk, with no name matching anywhere in the
+path. `server/scrapers/marketprops.js`.
+
+**The documented parsing trap is real and worse than advertised.** The brief warned that
+`over.line` and `under.line` are best prices across ~23 books and frequently differ. In this
+pull they differed on **246 of about 400 props** — George Pickens came back with an over at
+599.5 (−809) and an under at 1050.5 (−110). De-vigging that pair produces confident nonsense.
+`consensus_line` is the only field used here, and no de-vigging is attempted at all.
+
+**Market 330, receptions, answers 200 with an empty list.** That is the one half-PPR category
+with no published line, and it is worth a third of a receiver's season, so the reception term
+is estimated from his receiving-yards line at the position's typical yards per catch. It is
+the only estimated term in that column and the tooltip says so.
+
+**The humbling number.** Across the 168 players carrying both:
+
+| | rho against the market |
+|---|---|
+| Sleeper's projections | **0.917** |
+| This model | 0.771 |
+
+Sleeper tracks the betting market considerably more closely than this model does. That is not
+automatically a fault — the model is meant to be an independent view and an edge requires
+disagreeing somewhere — but it is not a result to be pleased about either, and it is printed
+by the validator every run rather than buried. The validator fails only below rho 0.6: a model
+that has come loose from the market entirely is broken rather than contrarian.
+
+Levels agree to 0.99×, which is the more reassuring half: the model and the market are pricing
+the same amount of football, they disagree about who gets it.
+
+**The two columns are not the same quantity, and that is the point of showing both.** A market
+line already discounts the games the books expect a player to miss. The model's number is a
+full seventeen on purpose. So the market reads low on anyone the books think is fragile, and
+the gap is information rather than an error in either number — the tooltip on `MKT` spells
+this out wherever the two differ by more than 15 points.
+
+**The key is borrowed.** It is lifted from BettingPros' own public frontend bundle, is not
+issued to us, and may rotate without notice. Every failure path is soft: no key, a 401, a thin
+response, and the board simply keeps what it had. Nothing downstream depends on it existing.
+
 ## Is it any good? — the evidence
 
 Backtested on **2025**, a season the model was never given, training only on 2024 and
@@ -249,8 +294,12 @@ npm run validate                              # sources + draft sync + projectio
 - **Expected fantasy points is an input, not an output.** The FPOE residual — how much a
   player has out-scored what his opportunities implied — is a shrunk, hard-capped talent
   multiplier on yardage rates. It is never the projection itself.
-- **Nobody is projected for 17 games.** Availability is sampled inside the simulation, which
-  is where a fragile player's ceiling gets capped and where best ball and redraft diverge.
+- **Everyone with a role is projected for 17 games.** Availability turned out to be the
+  worst-measured part of the model (rho 0.25 against games actually played), so it is no
+  longer forecast: the projection is a full season, PPG is the honest comparison between
+  two players, and a *current* injury is read off Sleeper rather than predicted. The
+  quarterback allocation is the one exception, and it shares out a job rather than
+  forecasting a wound.
 - **The simulation is seeded per player, not from `Math.random`.** Two refreshes over
   identical data return identical projections. A column that drifts when nothing changed
   reads as a model that cannot make its mind up, and this is the one column with no second
@@ -262,11 +311,21 @@ npm run validate                              # sources + draft sync + projectio
 season still projects on that season. The board rarely carries such players (it is seeded
 from Sleeper's active roster) but the model will happily rank one if it does.
 
-**2. Season-long player props are not wired in.** The architecture calls them the single
-best public forecast, and it is right, but no clean API exposes two-sided per-player season
-over/unders — they have to be scraped from RotoWire, BettingPros or OddsTrader. Anytime-TD
-props are the higher-value target: touchdown rate is the noisiest input in the whole model
-and a de-vigged market number would replace the weakest estimate it makes.
+**2. The market lines are shown, not used.** Season-long player props are now fetched and
+displayed (see the section above), but nothing in the model reads them. Blending them into
+the projection needs the availability gap reconciled first — a market line is an expected
+value that already discounts missed games and the projection deliberately is not — and doing
+that carelessly would turn the projection straight back into something that forecasts
+injuries. Touchdown rate remains the noisiest input in the model and the market's TD lines
+remain the best available replacement for it, so this is the highest-value thing still
+undone.
+
+**2b. Three of the four sources in the brief are still unread.** RotoWire (per-book detail
+including Circa, the sharp reference, for cross-checking BettingPros), Polymarket (threshold
+ladders, which give a *distribution* per player rather than a median — the natural input to
+the best-ball ceiling, where the model currently invents its own spread), and VegasInsider
+(multi-book win totals). DraftKings' own endpoints are Akamai-blocked and OddsTrader renders
+client-side; the brief says do not attempt either, and neither was attempted.
 
 **3. No correlation in the simulation.** Each player's weeks are drawn independently, so a
 quarterback and his WR1 are uncorrelated when in reality they run about +0.5 together. That
