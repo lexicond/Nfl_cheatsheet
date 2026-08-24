@@ -102,7 +102,10 @@ function ModelBreakdown({ player }) {
         <Row
           label="Projection"
           value={`${player.xfp_points.toFixed(0)} pts`}
-          note={player.xfp_games != null ? `over ${player.xfp_games.toFixed(1)} games` : null}
+          note={player.xfp_games != null
+            ? (player.xfp_games >= 16.9 ? 'a full season, if he holds the role'
+               : `over ${player.xfp_games.toFixed(1)} games — his share of the job`)
+            : null}
         />
         {player.xfp_vor != null && (
           <Row label="Value over replacement" value={`${player.xfp_vor.toFixed(0)} pts`}
@@ -112,7 +115,7 @@ function ModelBreakdown({ player }) {
           <Row
             label="Simulated season"
             value={`${player.xfp_floor != null ? player.xfp_floor.toFixed(0) : '?'} – ${player.xfp_ceiling != null ? player.xfp_ceiling.toFixed(0) : '?'}`}
-            note="floor to ceiling, 15th–85th percentile"
+            note="downside to upside, if he holds the role"
           />
         )}
         {player.xfp_best_ball != null && (

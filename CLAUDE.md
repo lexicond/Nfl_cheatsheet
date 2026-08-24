@@ -238,6 +238,46 @@ it was never given and fails if it does not beat "repeat last season".
   touchdowns equal its passing touchdowns. Each side is built from different players'
   histories, so they are the sharpest test that the parts fit together —
   `validate-projections.js` asserts all three.
+- **Do not forecast injuries; the model projects a full season.** Weighting a player's own
+  availability history was the worst thing in this model. Measured, it barely works: model
+  games against games actually played came out at rho 0.25 overall and 0.17 for non-QBs,
+  while handing out a spread wide enough to dominate the projection (the median receiver
+  was on 9.5 games). And most of what looks like durability is role — games played
+  correlates 0.58 season to season, but hold role fixed and it falls to 0.28, and among
+  established starters missing most of a year costs 1.8 games the next. Everyone with a
+  role now gets seventeen games; role lives in the per-game rates.
+- **Judge the model on points per game, not season totals.** A season total is rate ×
+  games, and games is mostly injury, which the model deliberately declines to predict. So
+  a season-total metric grades it largely on a guess it refuses to make, and the naive
+  benchmark wins by carrying last season's games for free (0.58 vs 0.67). On the per-game
+  rate — the question the board is for — the model wins, +0.017 on the held-out season and
+  +0.016 across three. Both are printed; only the rate is asserted.
+- **Sleeper conserves team totals and so must this.** Summed over all 31 players a team
+  carries, Sleeper's projections come to 543 pass attempts and 454 carries against a real
+  team's 545 and 455. They are allocating within a budget, not projecting each player
+  independently. Doing it independently gave one team 611 targets against 496 attempts.
+- **Cap a backup on TOTAL opportunity, never metric by metric.** A per-metric cap erases
+  the thing a committee backfield is made of. Washington runs Jacory Croskey-Merritt and
+  gives Rachaad White the passing down; capping targets separately flattened White into a
+  generic second-stringer. Capping the sum keeps the mix he has earned and limits only its
+  size — the pass-game share now reads 0.12 / 0.27 / 0.38 down the depth chart.
+- **A backup's per-game rate is a starter's rate.** It was earned in games he started with
+  the man ahead of him hurt. Zach Charbonnet projected 170 points against Sleeper's 62
+  until his usage was shrunk toward the baseline for the rank he actually holds.
+- **`depth_chart_order` 0 means unranked, not first.** Sleeper uses it for players carried
+  on the roster but not placed on the chart. Read as a starter it made Chase Edmonds
+  Washington's lead back.
+- **A current injury is a fact, not a forecast.** IR, PUP, Sus and DNR mean he is not
+  playing and get no projection; Questionable and Doubtful are week-to-week noise and are
+  ignored. Charbonnet sat high on the board while on PUP with a repaired ACL.
+- **The backtest must be handed the depth chart or it tests a different model.** Role,
+  availability and the quarterback split all hang off it, and without it the validator was
+  quietly grading a code path the board does not run.
+- **The Odds API has no season-long player props and no team win totals** — checked with a
+  live key, not assumed. It exposes `americanfootball_nfl` (per-game) and
+  `americanfootball_nfl_super_bowl_winner` only. What it does have is a line on all 272
+  games where nflverse's schedule file carried 112, which took Module C from 41% coverage
+  to 100%. The key is optional and the model falls back to nflverse without it.
 - **The expected-points column is never averaged into anything.** It is this board's own
   model; folding it into a market consensus would let the board vote on itself, on top of
   the existing rule that a points projection is not a pick number. `consensus: false`, and

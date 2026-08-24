@@ -98,30 +98,40 @@ function expectedPointsPerGame(volume, efficiency, envScalar) {
  */
 const POSITION_GAMES = { QB: 15.2, RB: 14.3, WR: 14.8, TE: 14.6 };
 
-function expectedGames(seasons, position, age) {
-  const norm = POSITION_GAMES[position] ?? 14.6;
-  const recent = seasons.slice(0, 3);
-  if (recent.length === 0) return norm;
+// A season is seventeen games and a team plays its best players. Anyone with a role is
+// projected for all of them.
+const FULL_SEASON = 17;
 
-  // Weight recent availability by recency; a season with no games played at all does
-  // not appear in the stats file, so absence is handled by the shrinkage below rather
-  // than being silently read as a full season.
-  const weights = [0.5, 0.3, 0.2];
-  let num = 0;
-  let den = 0;
-  recent.forEach((s, i) => { num += Math.min(s.games, 17) * weights[i]; den += weights[i]; });
-  const own = num / den;
-
-  // Shrink toward the positional norm: three seasons is thin evidence of durability.
-  const n = recent.length;
-  const w = n / (n + 2);
-  let games = own * w + norm * (1 - w);
-
-  // Running backs age badly, and the drop is sharp rather than gradual.
-  if (position === 'RB' && age != null && age >= 28) {
-    games -= Math.min(2.0, (age - 27) * 0.5);
-  }
-  return Math.max(6, Math.min(17, games));
+/**
+ * Expected games played — deliberately not a forecast.
+ *
+ * This used to weight each player's own recent availability and shrink it toward a
+ * positional norm. It was the worst part of the model and it had to go. Two reasons,
+ * one measured and one about what is knowable:
+ *
+ *   It does not work. Model games against games actually played came out at rho 0.25
+ *   overall and 0.17 for non-quarterbacks — next to nothing. Meanwhile it was handing
+ *   out a spread wide enough to dominate the projection: the median receiver was being
+ *   projected for 9.5 games and the tenth percentile for 4.7, so two players with the
+ *   same per-game rate could differ twofold on a component carrying no signal.
+ *
+ *   It is not knowable. An injury is close to random. What looks like durability is
+ *   mostly role: across 2021–25 games played correlates 0.58 season to season, but hold
+ *   role roughly fixed and it falls to 0.28, and among established starters having
+ *   missed most of a season costs 1.8 games the next. Weighting a man's own injury
+ *   history is fitting noise and quietly punishing players who got hurt once.
+ *
+ * So role decides who plays, and role is already in the per-game rates — a fourth
+ * receiver's low target count is his role. Games is a constant, which means it drops out
+ * of the ranking entirely and the ordering rests on the per-game rate, the part that
+ * does carry signal (rho 0.755 against 0.733 for last season's rate).
+ *
+ * Quarterback is the one exception, handled in index.js: a backup takes no snaps at all
+ * in a game he does not start, so a team's seventeen are shared out by depth chart. That
+ * is role again, not injury.
+ */
+function expectedGames() {
+  return FULL_SEASON;
 }
 
 /**
@@ -188,7 +198,36 @@ function hashSeed(str) {
   return h >>> 0;
 }
 
-function simulateSeason(ppg, games, cv, { iterations = 400, bestBallWeeks = 14, rng = null, seed = 1 } = {}) {
+/**
+ * How wide the season distribution has to be to be honest.
+ *
+ * Simulating only week-to-week scoring noise around a known mean produces a band far too
+ * narrow, because seventeen weeks average most of that noise away. Measured against five
+ * seasons of outcomes, a band advertised as the 15th-to-85th percentile actually covered
+ * 27% of them rather than 70%.
+ *
+ * What was missing is the uncertainty in the mean itself — whether the role holds, the
+ * offence is what the market thinks, the player is the player he was. That is the larger
+ * share of season-long spread and it does not shrink with more weeks. `seasonSigma` is a
+ * lognormal draw on the whole rate, once per simulated season, and `gamesSd` carries the
+ * availability that is deliberately not forecast per player but certainly happens. Both
+ * are set by calibration, not taste.
+ *
+ * What they are calibrated TO matters, and the honest statement is narrow. Against
+ * players who went on to play at least twelve games the band covers 72% of outcomes,
+ * against the 70% it advertises. Against everybody it covers 35%, because the projection
+ * is a full-season number and roughly half the pool does not get a full season. That gap
+ * is not a fault in the band, it is the deliberate choice not to forecast injuries: the
+ * projection says what a player scores if he holds his role and stays fit, and so does
+ * the band around it. Mean projected points run about 1.45x mean actual for that reason,
+ * which is the same property Sleeper's projections have.
+ */
+const SPREAD = { seasonSigma: 0.5, gamesSd: 3.0 };
+
+function simulateSeason(ppg, games, cv, {
+  iterations = 400, bestBallWeeks = 14, rng = null, seed = 1,
+  seasonSigma = SPREAD.seasonSigma, gamesSd = SPREAD.gamesSd,
+} = {}) {
   rng = rng || seededRng(hashSeed(seed));
   if (!(ppg > 0)) return null;
 
@@ -219,11 +258,16 @@ function simulateSeason(ppg, games, cv, { iterations = 400, bestBallWeeks = 14, 
   };
 
   for (let i = 0; i < iterations; i++) {
-    // Games played varies too — availability is a large part of season-long spread.
-    const played = Math.max(1, Math.round(games + normal() * 1.8));
+    // Availability. Not a per-player forecast — the model refuses to make one — but a
+    // season does get shortened and the distribution has to say so.
+    const played = Math.max(1, Math.round(games + normal() * gamesSd));
     const capped = Math.min(17, played);
+    // Uncertainty in the projection itself, drawn once for the whole season: the role
+    // may not hold, the offence may not be what the market thinks. This is what makes
+    // the band honest, and it is much the larger part of it.
+    const seasonScale = Math.exp(seasonSigma * normal() - (seasonSigma * seasonSigma) / 2);
     const weeks = [];
-    for (let w = 0; w < capped; w++) weeks.push(Math.exp(mu + sigma * normal()));
+    for (let w = 0; w < capped; w++) weeks.push(seasonScale * Math.exp(mu + sigma * normal()));
 
     totals.push(weeks.reduce((a, b) => a + b, 0));
     // Best ball scores a player only in the weeks his score is good enough to start,
@@ -294,6 +338,6 @@ function replacementLevels(players, { teams = 12, leagueType = '1QB', starters =
 
 module.exports = {
   expectedPointsPerGame, expectedGames, weeklyVolatility, simulateSeason,
-  replacementLevels, seededRng, hashSeed,
+  replacementLevels, seededRng, hashSeed, FULL_SEASON, SPREAD,
   ENV_EXPONENT, POSITION_GAMES, POSITION_CV, FLEX_SHARE,
 };

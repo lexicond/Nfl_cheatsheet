@@ -15,6 +15,7 @@ const { buildStability } = require('./stability');
 const { projectVolume, volumeBaselines } = require('./volume');
 const { projectEfficiency, fpoeResidual } = require('./efficiency');
 const { buildEnvironment } = require('./environment');
+const { loadOddsGames } = require('./odds');
 const {
   expectedPointsPerGame, expectedGames, weeklyVolatility, simulateSeason,
 } = require('./combine');
@@ -51,6 +52,10 @@ const STABILITY_SEASONS = 6;
  * inferring it from last season's volume. That is the right next step and is not built.
  */
 const ROLE_GATE = { QB: 100, RB: 60, WR: 35, TE: 25 };
+
+// Designations that mean he is not available for the season's start, as opposed to the
+// week-to-week churn of a Questionable tag.
+const OUT_INDEFINITELY = new Set(['IR', 'PUP', 'Sus', 'DNR', 'NA', 'Out']);
 
 /**
  * Hyperparameters, selected OUT OF SAMPLE by scripts/tune-projections.js: every
@@ -94,6 +99,14 @@ const TUNING = {
   // allocation handed Flacco the larger share of Cincinnati's year. A starter who missed
   // half a season still has the stronger claim on the job.
   qbClaimBasis: 'peak',
+  // How a team's seventeen quarterback games are split once the depth chart has named a
+  // starter. [100, 8, 2] gives the starter about 91% of them — roughly fifteen and a half
+  // games, which is a starter playing nearly every week rather than a forecast that he
+  // will be hurt. Sharper than this and the backup falls below a game and drops out of
+  // the projection set altogether, which backtested worse; softer and confirmed starters
+  // like Joe Burrow were being handed 13.9 games with the rest given to a backup nobody
+  // is drafting. Selected across 2022–24 with the depth chart supplied.
+  qbDepthWeights: [100, 8, 2],
   // Only the most recent season the player actually has carries weight. This was the
   // surprise of the tuning run and it is worth stating plainly: blending three seasons
   // of usage — which is what the architecture suggests and what the first version did —
@@ -228,6 +241,13 @@ async function runModel({
   //     that used it would place every player in the offence he joined afterwards.
   environmentMaxWeek = null,
   useHistoryTeam = false,
+  // Live-only inputs. Both are absent in a backtest: the betting API prices the coming
+  // season and nothing else, and Sleeper's depth chart is today's, not 2023's.
+  //   useOdds     — price the environment off every game a book has posted rather than
+  //                 the fraction nflverse's schedule file happens to carry
+  //   depthChart  — sleeper_id -> { order, team }, the only live read on who is starting
+  useOdds = true,
+  depthChart = null,
   // Model hyperparameters. Defaults are the values selected out of sample — see
   // TUNING below and scripts/tune-projections.js. Overridable so the tuner can sweep
   // them without editing the model.
@@ -260,6 +280,22 @@ async function runModel({
   const crosswalk = await nflverse.loadCrosswalk();
   const games = await nflverse.loadSchedules();
 
+  // Prefer the live market for the season being projected. nflverse's file carries a
+  // line only for the games a book had priced when it was cut — 112 of 272 for 2026 —
+  // and a team environment averaged over six games is a much weaker number than one
+  // averaged over seventeen. Never used in a backtest: these are today's prices.
+  let oddsMeta = null;
+  let pricedGames = games;
+  if (useOdds && environmentMaxWeek == null) {
+    const odds = await loadOddsGames(targetSeason);
+    if (odds.available) {
+      pricedGames = games.filter(g => g.season !== targetSeason).concat(odds.games);
+      oddsMeta = { source: 'the-odds-api', priced: odds.priced, mean_total: odds.meanTotal };
+    } else {
+      oddsMeta = { source: 'nflverse-schedules', reason: odds.reason };
+    }
+  }
+
   // --- Priors ----------------------------------------------------------------
   const fullHistory = buildUsageHistory(statSeasons);
   const stability = buildStability(fullHistory);
@@ -269,8 +305,8 @@ async function runModel({
 
   // --- Module C ---------------------------------------------------------------
   const envGames = environmentMaxWeek == null
-    ? games
-    : games.filter(g => g.season !== targetSeason || g.week <= environmentMaxWeek);
+    ? pricedGames
+    : pricedGames.filter(g => g.season !== targetSeason || g.week <= environmentMaxWeek);
   const environment = buildEnvironment(envGames, targetSeason, seasons);
   if (environment.coverage < 0.15) {
     warnings.push(
@@ -281,7 +317,8 @@ async function runModel({
 
   // --- Per player --------------------------------------------------------------
   const projections = [];
-  const gated = { noLastSeason: 0, thinRole: 0, noTeam: 0, noEnvironment: 0 };
+  const gated = { noLastSeason: 0, thinRole: 0, noTeam: 0, noEnvironment: 0, injured: 0 };
+  let startersRescued = 0;
 
   for (const [gsis, allSeasons] of fullHistory) {
     // Priors use the recent window only; the deeper history exists for stability.
@@ -290,6 +327,37 @@ async function runModel({
 
     const position = recent[0].position;
     if (!nflverse.POSITIONS.has(position)) continue;
+
+    const idEntry = crosswalk.byGsis.get(gsis);
+
+    // The depth chart, if we have one. Keyed on Sleeper's id for a live run and on
+    // gsis_id for a backtest, because that is what each source provides. Resolved here,
+    // above the role gate, because the gate consults it.
+    const depth = depthChart
+      ? (depthChart.get(String(idEntry?.sleeper_id)) || depthChart.get(gsis) || null)
+      : null;
+    const depthOrder = depth?.order ?? null;
+
+    // He has to be on a team. A retired player keeps his usage history for ever, so the
+    // role gate alone will happily project him: Derek Carr, retired, cleared it on his
+    // 2024 season and projected 207 points. There is also no team environment to place a
+    // free agent in, so the environment layer silently falls back to a league baseline
+    // for exactly the players it can say least about.
+    //
+    // Where the depth chart and the crosswalk disagree about the team the chart wins: it
+    // is today's, and the crosswalk can be a transfer window behind. That is what put
+    // Malik Willis in Miami.
+    // A player already ruled out is not a forecast, it is a fact. Season-ending or
+    // indefinite designations mean he is not playing, and a projection would be a
+    // statement the model has no business making — Zach Charbonnet sat high on the board
+    // while on PUP with a repaired ACL. Week-to-week noise (Questionable, Doubtful) is
+    // left alone: that is ordinary and unknowable.
+    if (depth?.injury && OUT_INDEFINITELY.has(depth.injury)) { gated.injured++; continue; }
+
+    const currentTeam = depth?.team || idEntry?.team;
+    if (!currentTeam) { gated.noTeam++; continue; }
+    if (!environment.table.has(currentTeam)) { gated.noEnvironment++; continue; }
+
 
     // The role gate: is there ANY season here with enough of a role to project from?
     //
@@ -302,8 +370,19 @@ async function runModel({
     const threshold = ROLE_GATE[position] ?? 30;
     const opportunityOf = s => s.attempts + s.carries + s.targets;
     const tune0 = { ...TUNING, ...tuning };
-    const anchorIndex = recent.findIndex(s =>
+    let anchorIndex = recent.findIndex(s =>
       opportunityOf(s) >= threshold && (newest - s.season) <= tune0.maxAnchorBack);
+
+    // A man the depth chart lists as his team's starter has a role whatever last season
+    // says, and refusing to project him is simply wrong — it is how Miami ended up with
+    // no quarterback at all and a projection of three and a half wins. The gate is there
+    // to catch players with no role, and the depth chart is better evidence of one than
+    // last season's snap count.
+    if (anchorIndex === -1 && depthOrder === 1) {
+      anchorIndex = 0;
+      startersRescued++;
+    }
+
     if (anchorIndex === -1) {
       if (recent[0].season !== newest) gated.noLastSeason++;
       else gated.thinRole++;
@@ -318,18 +397,6 @@ async function runModel({
     // claim — he has not held that role for a year — and the confidence says so below.
     const anchoredBack = newest - anchor.season;
 
-    const idEntry = crosswalk.byGsis.get(gsis);
-
-    // He has to be on a team. A retired player keeps his usage history for ever, so the
-    // role gate alone will happily project him: Derek Carr, retired, cleared it on his
-    // 2024 season and projected 207 points. There is also no team environment to place a
-    // free agent in, so the environment layer silently falls back to a league baseline
-    // for exactly the players it can say least about.
-    // Already normalised onto nflverse's abbreviations by the crosswalk loader, so this
-    // is only the "is he on a team at all" test.
-    const currentTeam = idEntry?.team;
-    if (!currentTeam) { gated.noTeam++; continue; }
-    if (!environment.table.has(currentTeam)) { gated.noEnvironment++; continue; }
     // The team he is on NOW, from the crosswalk, not the one he finished last season
     // with. A player who changed teams in the offseason is projected into his new
     // offence, which is the whole point of having an environment layer. A backtest
@@ -339,7 +406,7 @@ async function runModel({
 
     const fpoe = fpoeResidual(usable, position, rateBaselines);
     const tune = tune0;
-    const volume = projectVolume(usable, position, volBaselines, stability.table, env, tune);
+    const volume = projectVolume(usable, position, volBaselines, stability.table, env, tune, depthOrder);
     const efficiency = projectEfficiency(usable, position, rateBaselines, stability.table, fpoe, tune);
     let { ppg, breakdown, env_scalar_applied } =
       expectedPointsPerGame(volume, efficiency, env?.env_scalar ?? 1);
@@ -350,7 +417,9 @@ async function runModel({
     if (anchoredBack > 0) ppg *= tune0.staleDiscount;
 
     const age = idEntry?.age ?? null;
-    const gamesPlayed = expectedGames(usable, position, age);
+    // A full season for everyone with a role. Quarterbacks are re-cut below, where a
+    // team's seventeen games are shared out by depth chart.
+    const gamesPlayed = expectedGames();
     const cv = weeklyVolatility(usable, position, ppg);
     const sim = simulateSeason(ppg, gamesPlayed, cv, { iterations, seed: gsis });
 
@@ -387,6 +456,8 @@ async function runModel({
         fpoe: Math.round(fpoe * 1000) / 1000,
         talent_multiplier: efficiency.talent_multiplier,
         role_opportunity: roleOpportunity,
+        depth_order: depthOrder,
+        injury_status: depth?.injury ?? null,
         // The most he ever carried in the window, which is a better read on whose job it
         // is than the latest season alone: a starter who missed half of last year still
         // has the stronger claim on it.
@@ -416,7 +487,7 @@ async function runModel({
   // strongest claim to the job takes what he is projected for, and the next man gets only
   // what is left. This deliberately does not touch the other positions — two backs really
   // do play the same game, and their totals already reconcile.
-  const QB_GAMES_PER_TEAM = 17.5;   // 17 games, plus a little for mid-game changes
+  const QB_GAMES_PER_TEAM = 17;     // a season, shared out — not a durability forecast
 
   const qbsByTeam = new Map();
   for (const p of projections) {
@@ -440,10 +511,25 @@ async function runModel({
     // reconciliation gains. Sharing the games out in proportion to each man's claim,
     // raised to a power, hedges it: the power decides how sharp the bet is, and it was
     // chosen on one season and checked on another.
-    const claimBasis = (tuning.qbClaimBasis ?? TUNING.qbClaimBasis) === 'peak'
-      ? (p => p.components.peak_opportunity ?? p.components.role_opportunity ?? 0)
-      : (p => p.components.role_opportunity ?? 0);
-    const claim = qbs.map(p => Math.pow(Math.max(claimBasis(p), 1), tuning.qbClaimPower ?? TUNING.qbClaimPower));
+    // Whose job is it? If the depth chart says, believe it — that is a statement about
+    // this season, where opportunity is a statement about last one. Where it does not
+    // say, fall back to the most a man ever carried recently.
+    //
+    // The chart is not treated as certain even so. Two or three rooms a year are
+    // genuinely unsettled and the chart still names somebody, so the starter's claim is
+    // strong rather than absolute and the backup keeps a real share.
+    const hasDepth = qbs.some(p => p.components.depth_order != null);
+    const W = tuning.qbDepthWeights ?? TUNING.qbDepthWeights;
+    const claimBasis = hasDepth
+      ? (p => {
+        const o = p.components.depth_order;
+        return o == null ? W[2] : (o === 1 ? W[0] : o === 2 ? W[1] : W[2]);
+      })
+      : ((tuning.qbClaimBasis ?? TUNING.qbClaimBasis) === 'peak'
+        ? (p => p.components.peak_opportunity ?? p.components.role_opportunity ?? 0)
+        : (p => p.components.role_opportunity ?? 0));
+    const power = hasDepth ? 1 : (tuning.qbClaimPower ?? TUNING.qbClaimPower);
+    const claim = qbs.map(p => Math.pow(Math.max(claimBasis(p), 1), power));
     const claimTotal = claim.reduce((a, b) => a + b, 0) || 1;
 
     for (let i = 0; i < qbs.length; i++) {
@@ -471,6 +557,82 @@ async function runModel({
   }
   const dropped = projections.filter(p => p.drop).length;
   for (let i = projections.length - 1; i >= 0; i--) if (projections[i].drop) projections.splice(i, 1);
+
+  // --- Conservation: a team has only so many touches to give ------------------------
+  //
+  // The same problem as quarterback games, one step out. Every pass-catcher is now
+  // projected for a full season, but their per-game target rates were each measured over
+  // the games they actually played, and they were not all on the field together. Summed,
+  // a team came to 611 projected targets against 496 pass attempts — a ratio of 1.17
+  // where every pass attempt is one target and it should be about 0.94.
+  //
+  // So the receiving and rushing sides are scaled to what the team can actually produce.
+  // Pass attempts are already conserved, because quarterback games are; targets are
+  // scaled to them. Carries are scaled to a league-typical rushing load, tilted by the
+  // same game-script lean the environment layer derives — a team expected to trail
+  // throws more and runs less.
+  //
+  // Note what this costs: once the identities hold by construction they stop being an
+  // independent check that the parts agree, and become a check that the scaling ran.
+  // That is the right trade — better a board with numbers that add up than a test that
+  // fails honestly while the board misleads — but the validator says which it is.
+  const TARGETS_PER_ATTEMPT = 0.94;   // the rest are thrown away, spiked or sacked
+  const LEAGUE_RUSH_ATTEMPTS = 455;
+
+  const teamTotals = new Map();
+  for (const p of projections) {
+    if (p.components.basis) continue;
+    if (!teamTotals.has(p.team)) teamTotals.set(p.team, { att: 0, tgt: 0, car: 0 });
+    const t = teamTotals.get(p.team);
+    const g = p.games || 0;
+    t.att += (p.components.attempts_pg || 0) * g;
+    t.tgt += (p.components.targets_pg || 0) * g;
+    t.car += (p.components.carries_pg || 0) * g;
+  }
+
+  const scales = new Map();
+  for (const [team, t] of teamTotals) {
+    const env = environment.table.get(team);
+    const lean = env?.pass_lean ?? 0;
+    const targetTgt = t.att * TARGETS_PER_ATTEMPT;
+    const targetCar = LEAGUE_RUSH_ATTEMPTS * (1 - lean * 2);
+    scales.set(team, {
+      // Bounded: a scale far from 1 means something else is wrong and silently
+      // multiplying by it would hide that rather than fix it.
+      rec: t.tgt > 0 ? Math.max(0.6, Math.min(1.4, targetTgt / t.tgt)) : 1,
+      rush: t.car > 0 ? Math.max(0.6, Math.min(1.4, targetCar / t.car)) : 1,
+    });
+  }
+
+  for (const p of projections) {
+    const c = p.components;
+    if (c.basis) continue;
+    const sc = scales.get(p.team);
+    if (!sc) continue;
+    if (Math.abs(sc.rec - 1) < 0.001 && Math.abs(sc.rush - 1) < 0.001) continue;
+
+    const recPts = (c.receiving || 0) * sc.rec;
+    const rushPts = (c.rushing || 0) * sc.rush;
+    const newPpg = recPts + rushPts + (c.passing || 0);
+    if (!(newPpg > 0)) continue;
+
+    for (const [k, f] of [['targets_pg', sc.rec], ['receptions_pg', sc.rec], ['rec_yards_pg', sc.rec],
+                          ['rec_tds_pg', sc.rec], ['carries_pg', sc.rush], ['rush_yards_pg', sc.rush],
+                          ['rush_tds_pg', sc.rush]]) {
+      if (c[k] != null) c[k] = Math.round(c[k] * f * 1000) / 1000;
+    }
+    c.receiving = Math.round(recPts * 100) / 100;
+    c.rushing = Math.round(rushPts * 100) / 100;
+    c.total_tds_pg = Math.round(((c.rec_tds_pg || 0) + (c.rush_tds_pg || 0) + (c.pass_tds_pg || 0)) * 1000) / 1000;
+    c.team_scale = { receiving: Math.round(sc.rec * 1000) / 1000, rushing: Math.round(sc.rush * 1000) / 1000 };
+
+    p.ppg = Math.round(newPpg * 100) / 100;
+    const sim = simulateSeason(p.ppg, p.games, p.volatility, { iterations, seed: p.gsis_id });
+    p.points = sim ? Math.round(sim.mean * 10) / 10 : Math.round(p.ppg * p.games * 10) / 10;
+    p.floor = sim ? Math.round(sim.floor * 10) / 10 : null;
+    p.ceiling = sim ? Math.round(sim.ceiling * 10) / 10 : null;
+    p.best_ball = sim ? Math.round(sim.best_ball * 10) / 10 : null;
+  }
 
   // --- Draft-capital projections -------------------------------------------------
   // True rookies have no history at all. Second-year players who failed the role gate
@@ -540,6 +702,7 @@ async function runModel({
       prior_seasons: PRIOR_SEASONS,
       players: projections.length,
       rookies: rookieCount,
+      odds: oddsMeta,
       environment: {
         coverage: environment.coverage,
         priced_games: environment.priced_games,
@@ -548,6 +711,7 @@ async function runModel({
         league_mean_scoring: environment.league_mean_scoring,
       },
       stability_measured: stability.measured.length,
+      depth_chart: depthChart ? { players: depthChart.size, starters_rescued: startersRescued } : null,
       qb_conservation: {
         games_reclaimed: Math.round(qbGamesReclaimed * 10) / 10,
         dropped: dropped,

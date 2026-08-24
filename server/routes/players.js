@@ -19,6 +19,7 @@ const DERIVED_SORTS = {
   adp_consensus: { get: r => r.adp_consensus, dir: 'asc' },
   projected_pts: { get: r => r.projected_pts, dir: 'desc' },
   xfp_points:    { get: r => r.xfp_points, dir: 'desc' },
+  xfp_ppg:       { get: r => r.xfp_ppg, dir: 'desc' },
   xfp_vor:       { get: r => r.xfp_vor, dir: 'desc' },
   xfp_ceiling:   { get: r => r.xfp_ceiling, dir: 'desc' },
   xfp_edge:      { get: r => r.xfp_edge, dir: 'desc' },

@@ -118,6 +118,71 @@ props would have to be scraped.
 the role gate, so the team is hollow rather than bad. Any team whose new starter was gated
 looks far worse than it is.
 
+## A third pass: adversarial testing, and a change of claim
+
+Asked to attack it, and the attacks landed. Two of them changed what the model claims.
+
+**The tests were checked before the model.** Shuffled projections score 0.05 and a
+reversed model −0.63, so the metric does discriminate. But a harder benchmark — last
+season's points per game — beat the model outright, which sent the search in the right
+direction.
+
+**The edge is real but small, and not significant on one season.** Bootstrapping the
+paired difference against "repeat last season" across five seasons puts it at **+0.009,
+95% interval [−0.015, +0.032]**. It wins four seasons in five and loses 2022. Any single
+season's margin is inside the noise, so the validator no longer demands a win every year —
+it fails only on a regression beyond the noise band, and prints the pooled figure.
+
+**Availability was the worst part of the model, and it is gone.** Model games against
+games actually played: rho 0.25 overall, 0.17 for non-quarterbacks. Meanwhile the median
+receiver was being projected for 9.5 games — a twofold spread on a component with no
+signal. Most of what looks like durability is role: games played correlates 0.58 season to
+season, 0.28 once role is held fixed, and among established starters missing most of a
+year costs 1.8 games the next. Everyone with a role now gets seventeen.
+
+**So the claim changed.** The model is a better **points-per-game** projection, not a
+better season-total one:
+
+| held-out 2025 | model | naive |
+|---|---|---|
+| **Points per game** | **0.7272** | 0.7107 |
+| QB / RB / TE | **0.669 / 0.744 / 0.718** | 0.592 / 0.703 / 0.587 |
+| WR | 0.672 | 0.698 |
+| season totals (VOR) | 0.582 | 0.673 |
+
+A season total is rate × games and games is mostly injury, so that last row grades the
+model on a guess it refuses to make. The board shows both, and **PPG is now a column**.
+
+**The band was badly miscalibrated and is now honest.** Advertised as the 15th–85th
+percentile, it covered 27% of outcomes. Widening alone could not fix it — the projection
+is a full-season number, so half the pool never gets a full season. It now covers **70%
+of outcomes among players who went on to play 12+ games**, which is what it actually
+claims, and the labels say so. Mean projected runs 1.16× mean actual: the same
+"if healthy" premium Sleeper's projections carry.
+
+## What Sleeper told us
+
+Checked whether Sleeper's own totals are physically possible. **They are** — 543 pass
+attempts and 454 carries per team against a real 545 and 455, summed over all 31 players
+they carry. Sleeper allocates within a team budget rather than projecting players
+independently, which is why their backups are low. That validated the conservation work
+and exposed the remaining error: backups were getting a full season at rates they earned
+while starting.
+
+Agreement with Sleeper is now **rho 0.82**, and by role: starters 0.96× their number,
+backups 0.80×. Josh Allen 361.5 against their 361.5; Gibbs 310 against 300.
+
+**Committee nuance survives.** Washington's backfield reads as it should:
+
+| | depth | carries/g | targets/g | pass-game share |
+|---|---|---|---|---|
+| Croskey-Merritt | 1 | 8.37 | 1.18 | 0.12 |
+| Rachaad White | 2 | 4.78 | 1.79 | 0.27 |
+| McNichols | 3 | 2.40 | 1.44 | 0.38 |
+
+That only works because the backup cap is on **total** opportunity. Capping each metric
+separately flattened White into a generic second-stringer and erased the passing-down role.
+
 ## Is it any good? — the evidence
 
 Backtested on **2025**, a season the model was never given, training only on 2024 and

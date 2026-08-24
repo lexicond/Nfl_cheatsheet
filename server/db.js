@@ -213,6 +213,15 @@ addColumnIfMissing('players', 'xfp_best_ball', 'REAL');
 addColumnIfMissing('players', 'xfp_confidence', 'TEXT');
 addColumnIfMissing('players', 'xfp_components', 'TEXT');
 
+// Sleeper's depth chart. This is the only live statement anywhere in the app about who
+// is actually starting — every other signal is last season's usage, which cannot know
+// that a quarterback changed teams in March. Order 1 is the starter at that slot.
+addColumnIfMissing('players', 'depth_chart_order', 'INTEGER');
+addColumnIfMissing('players', 'depth_chart_position', 'TEXT');
+// Sleeper's current injury designation. Knowing a player is on PUP with a repaired ACL
+// is not forecasting an injury — it is reading one that has already happened.
+addColumnIfMissing('players', 'injury_status', 'TEXT');
+
 // Populate name_normalized for any rows missing it
 (function populateNameNormalized() {
   const missing = db.prepare('SELECT id, name FROM players WHERE name_normalized IS NULL').all();

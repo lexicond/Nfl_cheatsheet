@@ -18,6 +18,7 @@
  */
 const { db } = require('../db');
 const { runModel } = require('../model');
+const { normaliseTeam } = require('../model/nflverse');
 
 const SEASON_YEAR = new Date().getFullYear();
 
@@ -32,9 +33,30 @@ async function fetchExpectedPoints({ targetSeason = SEASON_YEAR } = {}) {
     WHERE source = 'expectedpoints'
   `);
 
+  // Sleeper's depth chart, keyed by the id the crosswalk carries. This is the only live
+  // statement in the app about who is starting; everything else in the model is last
+  // season's usage, which cannot know about an offseason move.
+  const depthChart = new Map();
+  for (const row of db.prepare(`
+    SELECT sleeper_player_id, nfl_team, depth_chart_order, injury_status FROM players
+    WHERE sleeper_player_id IS NOT NULL AND depth_chart_order IS NOT NULL AND nfl_team IS NOT NULL
+  `).all()) {
+    depthChart.set(String(row.sleeper_player_id), {
+      // Sleeper uses 0 for players carried on the roster but not placed on the chart.
+      // Treated as a starter it made Chase Edmonds Washington's lead back; it means the
+      // opposite, so it is read as "no rank known".
+      order: row.depth_chart_order > 0 ? row.depth_chart_order : null,
+      // Sleeper has its own team spellings, and they are not nflverse's either. The same
+      // mismatch already cost nine teams their environment once; normalise on the way in
+      // rather than discovering it again downstream.
+      team: normaliseTeam(row.nfl_team),
+      injury: row.injury_status || null,
+    });
+  }
+
   let result;
   try {
-    result = await runModel({ targetSeason });
+    result = await runModel({ targetSeason, depthChart: depthChart.size ? depthChart : null });
   } catch (err) {
     updateMeta.run(now, 0, 'error', err.message);
     console.error('[ExpectedPoints] Model run failed:', err.message);

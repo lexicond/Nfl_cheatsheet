@@ -30,6 +30,7 @@ function getSortOptions(view, excluded, format) {
       { value: 'xfp_edge', label: 'Biggest edge vs market' },
       { value: 'xfp_ceiling', label: 'Highest ceiling' },
       { value: 'xfp_points', label: 'Expected points' },
+      { value: 'xfp_ppg', label: 'Points per game' },
     ] : []),
     ...(format === 'DYN' ? [{ value: 'age', label: 'Age (youngest)' }] : []),
     ...SORT_COMMON,

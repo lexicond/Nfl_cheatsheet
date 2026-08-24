@@ -35,6 +35,7 @@ const SOURCES = {
   // The maintained release. Not `player_stats` — see the header comment.
   stats: season => `${RELEASE}/stats_player/stats_player_week_${season}.csv`,
   schedules: () => `${RELEASE}/schedules/games.csv`,
+  depthCharts: season => `${RELEASE}/depth_charts/depth_charts_${season}.csv`,
   // The crosswalk lives in the DynastyProcess repo. github.com/.../raw/... answers 403
   // through the egress proxy; raw.githubusercontent.com is the path that works.
   ids: () => 'https://raw.githubusercontent.com/dynastyprocess/data/master/files/db_playerids.csv',
@@ -52,6 +53,12 @@ const REQUIRED = {
   schedules: ['game_id', 'season', 'week', 'game_type', 'away_team', 'home_team',
               'spread_line', 'total_line', 'away_score', 'home_score'],
   ids: ['gsis_id', 'sleeper_id', 'position', 'team', 'name', 'draft_year', 'draft_ovr'],
+  // Two schemas exist. Through 2024 the file is one row per player per week
+  // (`club_code`, `week`, `depth_team`, `position`); from 2025 it is a timestamped
+  // snapshot feed (`team`, `pos_rank`, `pos_abb`, `dt`) with no week column at all.
+  // Only gsis_id is common to both, so that is all this asserts and the reader below
+  // detects which shape it got.
+  depth: ['gsis_id'],
 };
 
 /**
@@ -254,9 +261,13 @@ const TEAM_ALIASES = {
   CLV: 'CLE', HST: 'HOU', WSH: 'WAS',
 };
 
+// Codes that mean "no team" rather than a team. Sleeper uses both.
+const NO_TEAM = new Set(['NA', 'FA', 'FA*', 'UNS', 'NONE', '']);
+
 function normaliseTeam(team) {
-  if (!team || team === 'NA' || team === 'FA' || team === 'FA*') return null;
+  if (!team) return null;
   const t = String(team).toUpperCase();
+  if (NO_TEAM.has(t)) return null;
   return TEAM_ALIASES[t] || t;
 }
 
@@ -298,6 +309,61 @@ async function loadCrosswalk() {
   return { bySleeper, byGsis, count: rows.length };
 }
 
+/**
+ * Week-one depth charts for a season, as `gsis_id -> { order, team, position }`.
+ *
+ * This is the only statement in the whole model about who is actually starting.
+ * Everything else is last season's usage, which cannot know that a quarterback changed
+ * teams in March — it is why the model had Malik Willis nowhere near Miami's job.
+ *
+ * Week one rather than a later week: the question is who was expected to start, and a
+ * mid-season chart has already absorbed the injuries and benchings the projection is
+ * supposed to be uncertain about. It is a shade ahead of an August draft, and that is
+ * the one respect in which a backtest using it flatters the model.
+ */
+async function loadDepthChart(season) {
+  const { rows } = await fetchCsv(`depth_${season}`, SOURCES.depthCharts(season), {
+    maxAgeHours: 24 * 7,
+    kind: 'depth',
+  });
+  const out = new Map();
+  const modern = rows.length > 0 && rows[0].pos_rank !== undefined;
+
+  if (modern) {
+    // Snapshot feed: many datetimes, no weeks. Take the earliest snapshot of the season,
+    // which is the closest thing it has to a week-one chart.
+    const stamps = [...new Set(rows.map(r => r.dt).filter(Boolean))].sort();
+    const first = stamps[0];
+    for (const r of rows) {
+      if (r.dt !== first) continue;
+      const pos = r.pos_abb;
+      const gsis = r.gsis_id;
+      const order = num(r.pos_rank);
+      if (!gsis || order == null || order < 1 || !POSITIONS.has(pos)) continue;
+      const prev = out.get(gsis);
+      if (prev && prev.order <= order) continue;
+      out.set(gsis, { order, team: normaliseTeam(r.team), position: pos });
+    }
+  } else {
+    for (const r of rows) {
+      if (Number(r.week) !== 1 || r.game_type !== 'REG') continue;
+      if (!POSITIONS.has(r.position)) continue;
+      const gsis = r.gsis_id;
+      const order = num(r.depth_team);
+      if (!gsis || order == null || order < 1) continue;
+      // A player can appear at more than one slot; keep his best listed rank.
+      const prev = out.get(gsis);
+      if (prev && prev.order <= order) continue;
+      out.set(gsis, { order, team: normaliseTeam(r.club_code), position: r.position });
+    }
+  }
+
+  if (out.size < 200) {
+    throw new Error(`depth chart for ${season} yielded only ${out.size} players — schema may have changed again`);
+  }
+  return out;
+}
+
 /** Game schedules, including the closing spread and total each game was priced at. */
 async function loadSchedules() {
   const { rows } = await fetchCsv('schedules', SOURCES.schedules(), { maxAgeHours: 6, kind: 'schedules' });
@@ -319,5 +385,5 @@ async function loadSchedules() {
 module.exports = {
   SOURCES, REQUIRED, CACHE_DIR, POSITIONS, TEAM_ALIASES, normaliseTeam,
   parseCsv, assertColumns, num, num0,
-  fetchCsv, availableSeasons, loadSeasonStats, loadCrosswalk, loadSchedules,
+  fetchCsv, availableSeasons, loadSeasonStats, loadCrosswalk, loadSchedules, loadDepthChart,
 };

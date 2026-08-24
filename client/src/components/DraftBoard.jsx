@@ -24,7 +24,7 @@ const COL_PX = {
   adp_sl_rd: 64, adp_sl_sf: 64,
   adp_espn: 64, adp_yahoo: 64,
   consensus: 100, projected_pts: 64, pos_rank: 64, age: 48,
-  xfp_points: 64, xfp_vor: 62, xfp_ceiling: 64, xfp_edge: 58,
+  xfp_points: 64, xfp_ppg: 56, xfp_vor: 62, xfp_ceiling: 64, xfp_edge: 58,
   round: 44, sleeper_gap: 60, spread: 58,
   ktc_value: 80, fc_value: 80, ds_value: 80, dp_value: 80,
   tier: 56, flags: 64, status: 96, notes: 48, go: 36,
@@ -97,6 +97,10 @@ function buildColumns(format, view, excluded, narrow, draftConnected) {
   // league, and showing it there would invite exactly that reading.
   const modelOn = !excluded.includes('expectedpoints') && format !== 'DYN';
   const modelCols = modelOn ? [
+    // Per game sits beside the season total deliberately: the season number assumes a
+    // full seventeen games because the model does not forecast injuries, so the rate is
+    // the part that is actually being predicted.
+    { label: 'PPG', key: 'xfp_ppg' },
     { label: 'VOR', key: 'xfp_vor' },
     { label: 'Ceil', key: 'xfp_ceiling' },
     { label: 'Edge', key: 'xfp_edge' },

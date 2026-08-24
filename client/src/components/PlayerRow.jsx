@@ -33,7 +33,12 @@ function TrendIndicator({ trend }) {
 function xfpTitle(player) {
   let parts = [`Model projection: ${player.xfp_points?.toFixed(0)} half-PPR points`];
   if (player.xfp_pos_rank != null) parts[0] += ` (${player.position}${player.xfp_pos_rank})`;
-  if (player.xfp_games != null) parts.push(`over ${player.xfp_games.toFixed(1)} expected games`);
+  // A full season unless the depth chart splits the job, which is only quarterbacks.
+  if (player.xfp_games != null) {
+    parts.push(player.xfp_games >= 16.9
+      ? 'over a full season — the model does not forecast injuries'
+      : `over ${player.xfp_games.toFixed(1)} games, his share of the job on the depth chart`);
+  }
 
   let c = null;
   try {
@@ -303,13 +308,15 @@ export default function PlayerRow({
           <span
             className="text-[#8b90a8]"
             title={
-              `85th-percentile season: ${player.xfp_ceiling.toFixed(0)} points, against a projection of `
-              + `${player.xfp_points != null ? player.xfp_points.toFixed(0) : '?'} and a floor of `
+              `Upside season: ${player.xfp_ceiling.toFixed(0)} points, against a projection of `
+              + `${player.xfp_points != null ? player.xfp_points.toFixed(0) : '?'} and a downside of `
               + `${player.xfp_floor != null ? player.xfp_floor.toFixed(0) : '?'}`
               + (player.xfp_best_ball != null
                 ? `. Counting only his best weeks, as best ball does: ${player.xfp_best_ball.toFixed(0)}`
                 : '')
-              + '. From simulating the season week by week, including the games he is likely to miss.'
+              + '. From simulating the season week by week. Read it as the range if he holds '
+              + 'his role — the model does not forecast who gets injured, so this is not a '
+              + 'percentile of every outcome.'
             }
           >
             {player.xfp_ceiling.toFixed(0)}
@@ -346,6 +353,24 @@ export default function PlayerRow({
             {player.xfp_edge > 0 ? `+${player.xfp_edge}` : player.xfp_edge}
           </span>
         )}
+      </td>
+    ),
+
+    // Points per game — the model's real claim. The season total is this times a full
+    // season, so this is the number that is free of any assumption about availability.
+    xfp_ppg: (
+      <td key="xfp_ppg" className={`${cellClass} w-14 font-mono text-right`}>
+        {player.xfp_ppg != null ? (
+          <span
+            className={player.xfp_confidence === 'low' ? 'text-[#8b90a8] italic' : `pos-text-${player.position}`}
+            title={`${player.xfp_ppg.toFixed(1)} half-PPR points per game he plays. `
+              + 'The season figure beside it is this over a full seventeen games — the model '
+              + 'does not try to predict who gets injured, so the rate is the honest comparison '
+              + 'between two players.'}
+          >
+            {player.xfp_ppg.toFixed(1)}
+          </span>
+        ) : <span className="text-[#555875]">–</span>}
       </td>
     ),
 
