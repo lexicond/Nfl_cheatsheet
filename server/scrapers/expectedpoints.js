@@ -54,9 +54,31 @@ async function fetchExpectedPoints({ targetSeason = SEASON_YEAR } = {}) {
     });
   }
 
+  // The betting market's own season totals per player, as marketprops.js wrote them.
+  // Read here rather than inside the model for the same reason the depth chart is: it is
+  // a live input that exists only for the coming season, and a backtest must not see it.
+  // marketprops runs before this scraper in the refresh order, so the rows are current.
+  //
+  // Every failure path is soft — the key is borrowed from BettingPros' public frontend
+  // and may rotate without notice. No lines simply means the model runs without them.
+  const marketLines = new Map();
+  for (const row of db.prepare(`
+    SELECT sleeper_player_id, mkt_pass_yards, mkt_rush_yards, mkt_rec_yards,
+           mkt_pass_tds, mkt_rush_tds, mkt_rec_tds, mkt_receptions, mkt_books
+    FROM players
+    WHERE sleeper_player_id IS NOT NULL AND mkt_books IS NOT NULL
+      AND (mkt_rec_yards IS NOT NULL OR mkt_rush_yards IS NOT NULL OR mkt_pass_yards IS NOT NULL)
+  `).all()) {
+    marketLines.set(String(row.sleeper_player_id), row);
+  }
+
   let result;
   try {
-    result = await runModel({ targetSeason, depthChart: depthChart.size ? depthChart : null });
+    result = await runModel({
+      targetSeason,
+      depthChart: depthChart.size ? depthChart : null,
+      marketLines: marketLines.size ? marketLines : null,
+    });
   } catch (err) {
     updateMeta.run(now, 0, 'error', err.message);
     console.error('[ExpectedPoints] Model run failed:', err.message);

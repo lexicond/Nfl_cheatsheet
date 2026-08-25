@@ -13,6 +13,7 @@ const nflverse = require('./nflverse');
 const { buildUsageHistory, positionalBaselines } = require('./usage');
 const { buildStability } = require('./stability');
 const { buildAgeCurves, ageMultiplier } = require('./age');
+const { applyMarketPrior } = require('./marketprior');
 const { projectVolume, volumeBaselines, depthAllowance, UNRANKED_DEPTH } = require('./volume');
 const { RULES } = require('./scoring');
 const { projectEfficiency, fpoeResidual } = require('./efficiency');
@@ -108,6 +109,12 @@ const TUNING = {
   // against the benchmark averaged -0.063 across the selection seasons; at power 1 it is
   // +0.059.
   qbClaimPower: 2,
+  // How far a player carrying a betting line is moved toward it, relative to his
+  // team-mates. Scaled per player by how many books stand behind his thinnest line, and
+  // 0 disables the market entirely. This is the ONE number in this file that was not
+  // chosen against a held-out season, because season-long props exist for the coming
+  // season only — see model/marketprior.js.
+  marketWeight: 0.5,
   // Whether the measured ageing curve is applied at all. Off, the model has no way to
   // tell a 30-year-old coming off a good season from a 25-year-old — see model/age.js.
   useAgeCurve: true,
@@ -274,6 +281,11 @@ async function runModel({
   //   depthChart  — sleeper_id -> { order, team }, the only live read on who is starting
   useOdds = true,
   depthChart = null,
+  //   marketLines — sleeper_id -> the board's mkt_* fields, the betting market's own
+  //                 season totals per player. Used ONLY to move a player relative to his
+  //                 team-mates; see model/marketprior.js, including why it cannot be
+  //                 backtested and is therefore absent here by default.
+  marketLines = null,
   // Model hyperparameters. Defaults are the values selected out of sample — see
   // TUNING below and scripts/tune-projections.js. Overridable so the tuner can sweep
   // them without editing the model.
@@ -659,6 +671,30 @@ async function runModel({
     rookieCount++;
   }
 
+  // --- Module D: the market's opinion on share --------------------------------------
+  //
+  // Runs after every player has a projection and BEFORE conservation, which is the whole
+  // design. The market moves a player relative to his team-mates; the conservation step
+  // then puts his team back on its budget, so what survives is a transfer of share and
+  // not a change in level. Reversing the order would let three priced players drag a
+  // whole team's volume around, and per-team market aggregates are far too thin for that.
+  const marketPrior = applyMarketPrior(projections, marketLines, {
+    weight: tuning.marketWeight ?? TUNING.marketWeight,
+  });
+  if (marketPrior.players > 0) {
+    // Re-simulate: ppg moved, so the floor, ceiling and best-ball numbers built off it
+    // are stale until they are rebuilt.
+    for (const p of projections) {
+      if (p.components?.market_weight == null) continue;
+      const sim = simulateSeason(p.ppg, p.games, p.volatility, { iterations, seed: p.gsis_id });
+      if (!sim) continue;
+      p.points = Math.round(sim.mean * 10) / 10;
+      p.floor = Math.round(sim.floor * 10) / 10;
+      p.ceiling = Math.round(sim.ceiling * 10) / 10;
+      p.best_ball = Math.round(sim.best_ball * 10) / 10;
+    }
+  }
+
   // --- Conservation: a team only has one quarterback job ---------------------------
   //
   // Every player is projected independently, which is right for positions that genuinely
@@ -1004,6 +1040,9 @@ async function runModel({
         games_reclaimed: Math.round(qbGamesReclaimed * 10) / 10,
         dropped: dropped,
       },
+      // Reported every run rather than buried, because it is the one input here that no
+      // backtest can vouch for.
+      market_prior: marketPrior,
       // Players the role gate refused. Reported rather than silently dropped: a
       // projection that is absent is a claim too, and it should be a visible one.
       gated,

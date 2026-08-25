@@ -269,6 +269,25 @@ router.get('/', (req, res) => {
     // Restricted to the players who have both, a rank means the same thing on each side
     // and the edge is bounded by the size of that pool.
     if (format !== 'DYN') {
+      // WHOSE market? The room you actually draft in, not the publishing consensus.
+      //
+      // Edge is an arbitrage against behaviour, not against a forecast — which is exactly
+      // why the betting market can be an INPUT to the projection (model/marketprior.js)
+      // without eating the column that measures it. The two are different objects and the
+      // numbers say so: over the players carrying both, the market's own season totals
+      // correlate 0.486 with consensus ADP. A draft board is not a forecast; it carries
+      // name recognition, last season's finish and rookie hype, and that gap is the edge.
+      //
+      // Sleeper's own ADP for the active format is the closest thing to the room. Be
+      // honest about what this switch is worth, though: Sleeper ADP and the consensus
+      // correlate 0.983, so it moves almost nothing. It is here because measuring against
+      // the room you are actually in is the right object, not because it changes the
+      // answer. Consensus is the fallback when Sleeper has not priced a player.
+      const roomAdp = isSF
+        ? (p => p.adp_sl_sf ?? p.adp_consensus)
+        : format === 'BB'
+          ? (p => p.adp_sl_bb ?? p.adp_consensus)
+          : (p => p.adp_sl_rd ?? p.adp_consensus);
       // Only over the range that actually gets drafted. Beyond it both rankings are
       // nearly arbitrary — a deep ADP comes off a single ECR list that keeps ordering
       // players long after anybody is picking them — so rank gaps out there are large,
@@ -278,20 +297,20 @@ router.get('/', (req, res) => {
       // firmly. Twenty rounds is past the end of any league played here.
       const draftableTo = teamSize * 20;
       const comparable = enriched.filter(p =>
-        p.xfp_vor != null && p.adp_consensus != null && p.adp_consensus <= draftableTo);
+        p.xfp_vor != null && roomAdp(p) != null && roomAdp(p) <= draftableTo);
 
       const vorRank = new Map();
       comparable.slice().sort((a, b) => b.xfp_vor - a.xfp_vor)
         .forEach((p, i) => vorRank.set(p.id, i + 1));
 
-      const marketRank = new Map();
-      comparable.slice().sort((a, b) => a.adp_consensus - b.adp_consensus)
-        .forEach((p, i) => marketRank.set(p.id, i + 1));
+      const roomRank = new Map();
+      comparable.slice().sort((a, b) => roomAdp(a) - roomAdp(b))
+        .forEach((p, i) => roomRank.set(p.id, i + 1));
 
       for (const p of enriched) {
         const v = vorRank.get(p.id);
-        const m = marketRank.get(p.id);
-        // Positive means the model ranks him higher than the market drafts him.
+        const m = roomRank.get(p.id);
+        // Positive means the model ranks him higher than the room is drafting him.
         p.xfp_edge = v != null && m != null ? m - v : null;
       }
     } else {

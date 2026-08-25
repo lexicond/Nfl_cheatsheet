@@ -113,3 +113,40 @@ Anything aimed at within-team share has to start by fixing that: nflverse publis
 actually joined using only what was known in August. Until it does, a share feature can be
 built but not believed, and this repo's whole convention is that a number nobody can check
 is a number that is silently wrong.
+
+
+## Does a head-coaching change shift the pass/run mix?
+
+```
+node server/scripts/experiments/coaching-and-pass-rate.js
+```
+
+Widely believed, and worth testing rather than assuming, because if true it is the one
+team-level input that would be both forward-looking and free — the head coach is already in
+the schedules file the model downloads.
+
+Over 320 team-seasons, 2016-25. League pass rate averages 56.2% with a spread across teams
+of 5.2pp.
+
+| | n | median absolute year-on-year change | persistence |
+|---|---|---|---|
+| same head coach | 215 | 3.48pp | r=0.33 |
+| head coach CHANGED | 72 | 3.54pp | r=0.23 |
+
+**A team's pass rate moves a lot — and a coaching change does not explain it.** The
+year-to-year swing (sd 6pp) is larger than the entire spread between teams (5.2pp), so the
+instinct that this is a real, reasonably-sized effect is correct. What is not correct is
+attributing it to the coach: teams that kept theirs moved 3.48pp and teams that changed
+moved 3.54pp, which is the same number.
+
+And when a new coach does arrive, his own pass rate at his previous stop predicts his new
+team's almost nothing — r=0.088, against r=0.368 for simply carrying forward what the team
+did last year. On n=12 that is a weak test and should be read as suggestive rather than
+settled. The likelier explanation is that nflverse carries the HEAD COACH and the play
+caller is often the offensive coordinator, whom it does not carry at all.
+
+Either way it does not change what to build, because the ceiling analysis above already
+bounds it: perfect foreknowledge of every team's pass and run volume is worth +0.005
+Spearman. An input that cannot be predicted, aimed at a stage that is already solved, is
+not worth the fetch. The market prices coordinator hires into its team totals and its
+player props, and the model reads both.

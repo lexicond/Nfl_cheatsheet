@@ -69,6 +69,7 @@ architecture doc asks for, one file per stage:
 | `usage.js` | The per-player, per-season table Modules A and B share |
 | `stability.js` | Year-over-year reliability, **measured**, → shrinkage constants |
 | `age.js` | The ageing curve, **measured**, split into a volume half and an efficiency half |
+| `marketprior.js` | Module D — the betting market's opinion on **share**, never on level |
 | `volume.js` | Module A — opportunity |
 | `efficiency.js` | Module B — points per opportunity, regressed |
 | `environment.js` | Module C — implied team totals from betting lines |
@@ -553,6 +554,60 @@ defect, A/B it across 2023–25 and look for a gain in *every* season, not in th
   shrinkage step already handles it; applying it again would quietly shave every player on
   the board. Only the DIFFERENCE between ages is used, normalised so the average player is
   exactly 1.0.
+- **The betting market is an INPUT to share and never to level, and the two must not be
+  confused.** A line already discounts the games the books expect a man to miss; the model's
+  number is a full seventeen on purpose. Blending them raw drags every covered player down
+  by that difference — and the covered players are the high-volume ones, so the conservation
+  step then scales the whole team back up and hands the difference to the fringe players
+  nobody prices. `marketprior.js` de-biases the market to the model's own level per
+  component first (measured at 1.04–1.11 on the live board), so what is left is a statement
+  about share alone.
+- **Module D runs BEFORE conservation, and the order is the design.** The market moves a
+  player relative to his team-mates; conservation then puts his team back on its budget, so
+  the net effect is a transfer of share. Run it afterwards and three priced players drag a
+  whole team's volume around — which would be fatal, because per-team market aggregates do
+  not survive inspection: Cleveland's priced receivers are quoted for 133% of its priced
+  passing yards and Miami's for 27%, since only three to seven players a team carry lines
+  and which three is arbitrary.
+- **The market prior is the one thing here that NO backtest can vouch for.** BettingPros
+  publishes the coming season only; there is no archive of what the books thought in August
+  2023. The backtest is untouched (the market is absent from it by construction) and stays
+  at +0.058 on the held-out season, so a green validator says nothing about this change.
+  What is provable is that it is share-neutral: team totals do not move (562 attempts, 537
+  targets, 458 carries before and after) and all three identities still hold.
+  `TUNING.marketWeight` turns it off.
+- **Importing the market did NOT collapse the model into Sleeper, which was the fear.**
+  Sleeper tracks the market at 0.970, so pulling toward the market looks like pulling toward
+  Sleeper. Measured across weights 0 → 0.7, agreement with Sleeper moves 0.906 → 0.909 while
+  agreement with the market moves 0.884 → 0.913. The blend touches 132 players and only
+  their share within a team, which is not where Sleeper and this model mostly differ.
+- **`mkt_books` is a minimum across all SEVEN markets, and Module D blends ONE component at
+  a time.** A receiver whose receiving lines eight books agree on but whose rushing-touchdown
+  line comes from one is recorded at 1, so the part that is well supported is barely moved.
+  `BOOKS_FOR_FULL_WEIGHT` is set to 3 rather than 5 to blunt this; the clean fix is for
+  `marketprops.js` to store a book count per component.
+- **A head-coaching change does NOT predictably shift the pass/run mix — this was measured,
+  because it is widely believed.** Over 320 team-seasons a team's pass rate swings more year
+  to year (sd 6pp) than teams differ from each other (5.2pp), so the instinct that it is a
+  real, sizeable effect is right. Attributing it to the coach is not: teams keeping their
+  coach moved 3.48pp and teams changing moved 3.54pp. An incoming coach's rate at his
+  previous stop predicts his new team's at r=0.088 against r=0.368 for simply carrying the
+  team forward — on n=12, so suggestive rather than settled, and note nflverse carries the
+  HEAD COACH while the play caller is often the coordinator, whom it does not carry at all.
+  It does not change what to build either way: perfect foreknowledge of team volume is worth
+  +0.005 (see below).
+- **The error is in WHO gets the touches, not in how much a team plays.** Hand the model
+  perfect team volume and it gains +0.005 Spearman; hand it perfect within-team share and it
+  gains +0.15. On opportunity the log-error standard deviations are 0.08 against 0.89. Team
+  volume barely varies — real teams ran 366–547 times in 2025 around a mean of 455 — and the
+  implied totals plus the conservation constants already land inside 8%. Any scheme, pace or
+  personnel feature aims at the stage that is not broken.
+- **Edge measures the model against BEHAVIOUR, which is why the market can be an input to
+  the projection without eating the column.** A draft board is not a forecast: over the
+  players carrying both, the market's own season totals correlate just 0.486 with consensus
+  ADP. Edge now ranks against Sleeper's ADP for the active format — the room actually being
+  drafted in — but be honest about what that switch is worth: Sleeper ADP and the consensus
+  correlate 0.983, so it is the right object rather than a different answer.
 - **An age curve has to be fitted monotone or the thin cells invent penalties for being
   young.** Raw, tight ends came out at 0.95 for a 22-year-old against 1.08 for a 24-year-old
   on eight players, which put Harold Fannin below men four years older. Monotone
