@@ -56,3 +56,60 @@ The sensible use is therefore not to replace the model but to replace a STAGE of
 Module A — next season's targets, carries and attempts per game — is a clean supervised
 problem, it is where the hand-set shrinkage constants live, and a learned version of it
 would leave the identities, the simulation, the rookie path and the explanations intact.
+
+
+## Where is the error — team volume, or who gets the touches?
+
+```
+node server/scripts/experiments/where-is-the-error.js
+```
+
+A projection is (team volume) x (his share of it) x (efficiency). Handing the model
+PERFECT knowledge of one of those and leaving the rest alone bounds what improving that
+stage could ever be worth. Over 2023-25, points per game, Spearman:
+
+| | 2023 | 2024 | 2025 |
+|---|---|---|---|
+| repeat last season | 0.676 | 0.704 | 0.693 |
+| the model | 0.687 | 0.715 | 0.730 |
+| + perfect TEAM volume | 0.693 | 0.719 | 0.730 |
+| + perfect WITHIN-TEAM share | **0.839** | **0.866** | **0.819** |
+
+Log-error standard deviation, on opportunity: team volume **0.08**, within-team share
+**0.89**. An order of magnitude apart.
+
+**Team volume is already solved and is not worth another input.** Perfect foreknowledge of
+how much every team will throw and run — pace, scheme, personnel groupings, play mix, all
+of it — is worth +0.005 Spearman, and in 2025 nothing at all. That is not because the
+question does not matter but because the answer barely varies: real teams ran 366-547 times
+in 2025 against a mean of 455, and the implied team totals plus the conservation constants
+already land inside 8% of the truth. Building a scheme or pace feature is polishing the
+stage that is not broken.
+
+**Everything that is left is who gets the touches**, and it is worth up to +0.15.
+
+Two structured candidates for it were measured and mostly do not deliver:
+
+- **Snap share** — the continuous version of the depth-chart rank the model already uses.
+  Predicting next season's share of a team's positional budget, opportunity share alone
+  correlates 0.69-0.74; snap share adds a partial correlation of 0.05-0.13 on top. Nearly
+  nothing, because the two say the same thing.
+- **Vacated opportunity** — how much of a team's last-season workload belonged to men no
+  longer on its week-one chart. Real but modest, and monotone: in the top quartile
+  (42-86% vacated) the model under-projects the survivors by 17%, against 5-6% in the
+  bottom two quartiles.
+
+### The blocker, before any of this can be built
+
+`runModel`'s backtest sets `useHistoryTeam: true`, which places every player on the team he
+finished the PREVIOUS season with. That is correct and deliberate — the crosswalk is always
+current, so using it would put every player in the offence he joined afterwards, which is
+lookahead. But the consequence is that **the backtest contains no players who changed teams
+at all** (fewer than 20 across three seasons), and a team-change or incoming-competition
+feature is therefore unfalsifiable against it.
+
+Anything aimed at within-team share has to start by fixing that: nflverse publishes
+`rosters` and `weekly_rosters` per season, so a backtest can place a player on the team he
+actually joined using only what was known in August. Until it does, a share feature can be
+built but not believed, and this repo's whole convention is that a number nobody can check
+is a number that is silently wrong.
