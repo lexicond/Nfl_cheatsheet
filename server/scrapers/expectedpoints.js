@@ -64,7 +64,8 @@ async function fetchExpectedPoints({ targetSeason = SEASON_YEAR } = {}) {
   const marketLines = new Map();
   for (const row of db.prepare(`
     SELECT sleeper_player_id, mkt_pass_yards, mkt_rush_yards, mkt_rec_yards,
-           mkt_pass_tds, mkt_rush_tds, mkt_rec_tds, mkt_receptions, mkt_books
+           mkt_pass_tds, mkt_rush_tds, mkt_rec_tds, mkt_receptions,
+           mkt_books, mkt_books_rec, mkt_books_rush, mkt_books_pass
     FROM players
     WHERE sleeper_player_id IS NOT NULL AND mkt_books IS NOT NULL
       AND (mkt_rec_yards IS NOT NULL OR mkt_rush_yards IS NOT NULL OR mkt_pass_yards IS NOT NULL)

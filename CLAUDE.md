@@ -581,11 +581,16 @@ defect, A/B it across 2023–25 and look for a gain in *every* season, not in th
   Sleeper. Measured across weights 0 → 0.7, agreement with Sleeper moves 0.906 → 0.909 while
   agreement with the market moves 0.884 → 0.913. The blend touches 132 players and only
   their share within a team, which is not where Sleeper and this model mostly differ.
-- **`mkt_books` is a minimum across all SEVEN markets, and Module D blends ONE component at
-  a time.** A receiver whose receiving lines eight books agree on but whose rushing-touchdown
-  line comes from one is recorded at 1, so the part that is well supported is barely moved.
-  `BOOKS_FOR_FULL_WEIGHT` is set to 3 rather than 5 to blunt this; the clean fix is for
-  `marketprops.js` to store a book count per component.
+- **`mkt_books` is a minimum across all SEVEN markets and must never weight ONE component.**
+  A receiver whose receiving lines eight books agree on but whose rushing-touchdown line
+  comes from one is recorded at 1, so the part of him that is best supported was the part
+  that barely moved. `marketprops.js` therefore also stores `mkt_books_rec`, `_rush` and
+  `_pass` — the thinnest line *within* each scoring component — and Module D weights on
+  those. It is not a rounding difference: the median jumps from 2 to 6 on rushing and 2 to 8
+  on passing, so quarterbacks and backs were being trusted at a quarter of the support they
+  actually had. Receiving stays at 2, because receptions is the thin market. `mkt_books`
+  remains the right thing to show beside a season total, and the fallback for a row written
+  before the split.
 - **A head-coaching change does NOT predictably shift the pass/run mix — this was measured,
   because it is widely believed.** Over 320 team-seasons a team's pass rate swings more year
   to year (sd 6pp) than teams differ from each other (5.2pp), so the instinct that it is a

@@ -246,6 +246,15 @@ addColumnIfMissing('players', 'mkt_complete', 'INTEGER');
 // implies. The one place a distribution assumption enters an otherwise pure market column,
 // so it is counted rather than hidden.
 addColumnIfMissing('players', 'mkt_adjusted', 'INTEGER');
+// Book support per SCORING COMPONENT, not just the one minimum across all seven markets.
+// mkt_books is the thinnest line a player carries anywhere, which is the right thing to
+// report beside a season total but the wrong thing to weight a single component by: a
+// receiver whose receiving lines eight books agree on but whose rushing-touchdown line
+// comes from one was recorded at 1, and model/marketprior.js then barely moved the part
+// of him that was well supported.
+addColumnIfMissing('players', 'mkt_books_rec', 'INTEGER');
+addColumnIfMissing('players', 'mkt_books_rush', 'INTEGER');
+addColumnIfMissing('players', 'mkt_books_pass', 'INTEGER');
 
 // Populate name_normalized for any rows missing it
 (function populateNameNormalized() {

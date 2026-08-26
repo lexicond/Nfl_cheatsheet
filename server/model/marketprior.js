@@ -56,24 +56,29 @@ const SEASON_GAMES = 17;
 /**
  * How much a line is believed, by how many books stand behind it.
  *
- * mkt_books is the THINNEST of a player's lines, not the widest — a total whose receiving
- * yards eight books agree on but whose receptions come from one is only as good as that
- * one. The median is 2 and the minimum is 1, so this matters: a lone book is one
- * operator's shading, not a market.
+ * Book support is read PER COMPONENT, not per player, and the difference is not small.
+ * `mkt_books` is the thinnest line a player carries anywhere across all seven markets —
+ * the right thing to report beside a season total, and the wrong thing to weight a single
+ * component by. A receiver whose receiving lines eight books agree on but whose
+ * rushing-touchdown line comes from one was recorded at 1, so the part of him that was
+ * best supported was the part that barely moved. `mkt_books_rec`, `_rush` and `_pass` are
+ * the thinnest line WITHIN each component, which is the quantity this blend actually
+ * needs; `mkt_books` remains the fallback for a row written before those existed.
  *
- * KNOWN FLAW, and the threshold is set low to blunt it rather than to hide it. That
- * minimum is taken across all SEVEN markets a player may carry, while the blend below is
- * applied one component at a time. A receiver whose receiving lines eight books agree on
- * but whose rushing-touchdown line comes from one is recorded at 1, and his RECEIVING
- * share — the part that is well supported — is then barely moved. The clean fix is for
- * marketprops.js to store a book count per component instead of one minimum per player;
- * until it does, three books rather than five buys back some of what the minimum throws
- * away. It is a compromise, not a calibration, and nothing here was fitted.
+ * The threshold itself is a judgement, not a calibration — nothing here was fitted,
+ * because nothing here can be (see the header). Five books is roughly where a consensus
+ * stops being one operator's shading, and the median line carries two.
  */
-const BOOKS_FOR_FULL_WEIGHT = 3;
+const BOOKS_FOR_FULL_WEIGHT = 5;
 function bookFactor(books) {
   if (!Number.isFinite(books) || books < 1) return 0;
   return Math.min(1, books / BOOKS_FOR_FULL_WEIGHT);
+}
+
+/** Books behind one component, falling back to the player-wide minimum. */
+function componentBooks(line, spec) {
+  const own = line[spec.books];
+  return Number.isFinite(own) && own >= 1 ? own : line.mkt_books;
 }
 
 // The three budgets, each with the market fields it needs and the component it moves.
@@ -87,11 +92,13 @@ const COMPONENTS = {
       + m.mkt_receptions * RULES.receptions
       + m.mkt_rec_tds * RULES.receiving_tds,
     metrics: ['targets_pg', 'receptions_pg', 'rec_yards_pg', 'rec_tds_pg'],
+    books: 'mkt_books_rec',
   },
   rushing: {
     fields: ['mkt_rush_yards', 'mkt_rush_tds'],
     points: m => m.mkt_rush_yards * RULES.rushing_yards + m.mkt_rush_tds * RULES.rushing_tds,
     metrics: ['carries_pg', 'rush_yards_pg', 'rush_tds_pg'],
+    books: 'mkt_books_rush',
   },
   passing: {
     // No interception term: market 303 is genuinely empty on both BettingPros endpoints,
@@ -100,6 +107,7 @@ const COMPONENTS = {
     fields: ['mkt_pass_yards', 'mkt_pass_tds'],
     points: m => m.mkt_pass_yards * RULES.passing_yards + m.mkt_pass_tds * RULES.passing_tds,
     metrics: ['attempts_pg', 'pass_yards_pg', 'pass_tds_pg'],
+    books: 'mkt_books_pass',
   },
 };
 
@@ -121,9 +129,7 @@ function applyMarketPrior(projections, lines, { weight = 0.5 } = {}) {
     if (p.components?.basis) continue;
     const m = p.sleeper_id != null ? lines.get(String(p.sleeper_id)) : null;
     if (!m) continue;
-    const w = weight * bookFactor(m.mkt_books);
-    if (!(w > 0)) { summary.skipped_thin++; continue; }
-    covered.push({ p, m, w });
+    covered.push({ p, m });
   }
   if (!covered.length) return summary;
 
@@ -146,9 +152,11 @@ function applyMarketPrior(projections, lines, { weight = 0.5 } = {}) {
     summary.debias[name] = factors[name] == null ? null : Math.round(factors[name] * 1000) / 1000;
   }
 
-  for (const { p, m, w } of covered) {
+  for (const { p, m } of covered) {
     const c = p.components;
     let touched = false;
+    let heaviest = 0;
+    let heaviestBooks = null;
 
     for (const [name, spec] of Object.entries(COMPONENTS)) {
       const f = factors[name];
@@ -156,6 +164,13 @@ function applyMarketPrior(projections, lines, { weight = 0.5 } = {}) {
       if (spec.fields.some(field => m[field] == null)) continue;
       const modelPg = c[name] || 0;
       if (!(modelPg > 0)) continue;
+
+      // Weighted by the books behind THIS component, not by the thinnest line he carries
+      // anywhere. That distinction is the whole point of the per-component counts.
+      const books = componentBooks(m, spec);
+      const w = weight * bookFactor(books);
+      if (!(w > 0)) { summary.skipped_thin++; continue; }
+      if (w > heaviest) { heaviest = w; heaviestBooks = books; }
 
       // The market's per-game claim about him, on the model's level.
       const marketPg = (spec.points(m) * f) / SEASON_GAMES;
@@ -176,8 +191,10 @@ function applyMarketPrior(projections, lines, { weight = 0.5 } = {}) {
 
     if (!touched) continue;
     c.total_tds_pg = Math.round(((c.rec_tds_pg || 0) + (c.rush_tds_pg || 0) + (c.pass_tds_pg || 0)) * 1000) / 1000;
-    c.market_weight = Math.round(w * 1000) / 1000;
-    c.market_books = m.mkt_books ?? null;
+    // Reported for the component the market moved hardest, since that is the one a reader
+    // looking at this player's number is being asked to trust.
+    c.market_weight = Math.round(heaviest * 1000) / 1000;
+    c.market_books = heaviestBooks;
     p.ppg = Math.round(((c.receiving || 0) + (c.rushing || 0) + (c.passing || 0)) * 100) / 100;
     summary.players++;
   }
@@ -185,4 +202,4 @@ function applyMarketPrior(projections, lines, { weight = 0.5 } = {}) {
   return summary;
 }
 
-module.exports = { applyMarketPrior, bookFactor, COMPONENTS, BOOKS_FOR_FULL_WEIGHT, SEASON_GAMES };
+module.exports = { applyMarketPrior, bookFactor, componentBooks, COMPONENTS, BOOKS_FOR_FULL_WEIGHT, SEASON_GAMES };
