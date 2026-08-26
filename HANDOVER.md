@@ -1,3 +1,91 @@
+# Handover — 24 August 2026
+
+Branch: `claude/fantasy-points-prediction-review-tw9vif`. Read `CLAUDE.md` first; it holds
+the traps that will otherwise cost you hours. The previous handover, covering the
+expected-points model as it was first built, is below this section and still describes the
+architecture accurately.
+
+## Why this branch exists
+
+Two things looked wrong on the board and both turned out to be symptoms rather than
+opinions: Christian McCaffrey was RB1 by 23 points at thirty years old, and Brock Bowers
+was TE11 at twenty-three. The complaint behind them — that the projection reads like a
+description of last season rather than a forecast of this one — was measurable, and true.
+Against last season's points per game the model's projections correlated 0.925; Sleeper's,
+on the same players, 0.868. It was more anchored on last season than the market-tracking
+baseline it is supposed to add something to.
+
+## What changed
+
+**The model now knows how old players are.** It did not. The crosswalk carries an age for
+all 456 projected players and no part of the model read it, which is most of the McCaffrey
+answer. `server/model/age.js` measures the curve from consecutive-season pairs and splits it
+in two, because the decline is not one thing: the larger half is losing the job — a
+29-year-old back keeps 81% of his touches — and goes to Module A, and the smaller half is
+what he does with what he keeps and goes to Module B. Putting it on volume rather than on
+the finished number matters, because the conservation step then sees the touches an ageing
+player gives up and hands them to the men actually taking them.
+
+Two properties of that curve are load-bearing and both are documented in `CLAUDE.md`: its
+LEVEL is regression to the mean and is divided out, and it is fitted monotone because the
+raw cells are thin enough to invent a penalty for being young.
+
+**Four holes in the team budget**, all the same family as the quarterback one already
+documented, none of them fixed by it, and together they are the Bowers answer:
+
+1. A draft-capital player contributed nothing to his team's budget unless he was a
+   quarterback. Seattle's carry budget came to 160 against a real 455.
+2. The scale was solved as `target / total` with those players in the divisor and out of
+   the numerator, so it overshot and stayed pinned at the cap.
+3. Targets were scaled to the attempts a team was *aimed at* rather than the ones it got.
+   Las Vegas finished with 464 targets against 450 attempts.
+4. The quarterback-games allocation capped but never filled, so Las Vegas played 14.2
+   quarterback games in a seventeen-game season and its whole receiving corps was fed from
+   a budget a hundred attempts short.
+
+## What it is worth
+
+Held out, per game, against "repeat last season":
+
+| | before | after |
+|---|---|---|
+| validator's test season | +0.0414 | **+0.0579** |
+| mean over 2023–25 | +0.014 | **+0.022** |
+| RB / WR / TE | 0.758 / 0.712 / 0.705 | **0.778 / 0.736 / 0.729** |
+| MAE (season totals) | 48.6 | **44.6** |
+| agreement with the betting market | 0.85 | **0.887** |
+
+The ageing curve is most of that, and unusually for anything tried on this model it gained
+in all three seasons rather than on average.
+
+## What did NOT work, and is recorded so it is not retried
+
+Preserving the model's own team RUSHING spread and correcting only the level — the
+obviously symmetric counterpart to what the passing side does — is **worse**. The model's
+team carry sum is not a projection of how much a team runs, it is an artefact of how many
+of its backs clear the role gate: sd 116–127 against a real 44–56, and less correlated with
+reality (0.16–0.29) than the constant it would replace (0.21–0.33). `TUNING.carryBudget`
+keeps both settings and the comment says which evidence settled it.
+
+## What is still true and was not fixed
+
+**The model is still just as anchored on last season.** After all of the above the
+correlation with last season's points per game is 0.925, essentially unchanged. The ageing
+curve made it more accurate without making it more forward-looking, because age is a smooth
+function that mostly reorders within a cohort. The remaining anchoring is by design —
+`TUNING.recency` is `[0.85, 0.15, 0]`, selected out of sample — plus the plain absence of
+offseason information. The model has exactly two forward-looking inputs: Sleeper's depth
+chart, and the betting market's implied team totals. It knows nothing about a team change,
+a coaching change, a vacated target share, or a contract.
+
+That is the open work, and it is a features problem rather than a modelling one. See
+`server/scripts/experiments/README.md`, which tests whether gradient boosting would do
+better and finds that its advantage is fitted weights on the same three or four inputs, not
+new signal — and that blending it with the structured model beats either alone in all three
+seasons.
+
+---
+
 # Handover — 23 August 2026
 
 Branch: `claude/expected-points-predictor-uuj2z3`. Read `CLAUDE.md` first; it holds the

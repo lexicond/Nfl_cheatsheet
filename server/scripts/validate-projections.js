@@ -215,17 +215,20 @@ function rmse(pairs) {
   console.log(`    naive  VOR ${naiveVor.toFixed(4)}   raw ${spearman(naivePairs).toFixed(4)}   MAE ${mae(naivePairs).toFixed(1)}`);
 
   // Tolerant of one season's noise, by necessity. Bootstrapping the paired difference
-  // puts a single season's margin well inside +/-0.05, and over 2023-25 the model's
-  // per-game edge averages +0.016 while individual seasons swing either side of zero. A
-  // gate demanding a win every year would fail at random; this one catches a real
-  // regression.
+  // puts a single season's margin well inside +/-0.05, and a gate demanding a win every
+  // year would fail at random; this one catches a real regression.
+  //
+  // Over 2023-25 the model's per-game edge now averages +0.021, up from +0.014 before the
+  // ageing curve went in — and unlike most of what has been tried here, that one gained in
+  // all three seasons rather than on average (+0.0046 -> +0.0107, +0.0056 -> +0.0114,
+  // +0.0317 -> +0.0400).
   const ppgMargin = modelPpg - naivePpg;
   if (ppgMargin > 0) {
     ok(`model out-ranks the benchmark on points per game by ${ppgMargin.toFixed(4)} Spearman ` +
-       '(three-season mean +0.016)');
+       '(three-season mean +0.021)');
   } else if (ppgMargin > -0.05) {
     warn(`model is ${Math.abs(ppgMargin).toFixed(4)} behind on points per game this season — ` +
-         'inside the noise band (three-season mean is +0.016), but watch it');
+         'inside the noise band (three-season mean is +0.021), but watch it');
   } else {
     bad(`model is materially worse than "repeat last season" on points per game ` +
         `(${modelPpg.toFixed(4)} vs ${naivePpg.toFixed(4)}) — the projection is not adding anything`);

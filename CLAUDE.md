@@ -68,6 +68,8 @@ architecture doc asks for, one file per stage:
 | `scoring.js` | The league's scoring, in one place |
 | `usage.js` | The per-player, per-season table Modules A and B share |
 | `stability.js` | Year-over-year reliability, **measured**, → shrinkage constants |
+| `age.js` | The ageing curve, **measured**, split into a volume half and an efficiency half |
+| `marketprior.js` | Module D — the betting market's opinion on **share**, never on level |
 | `volume.js` | Module A — opportunity |
 | `efficiency.js` | Module B — points per opportunity, regressed |
 | `environment.js` | Module C — implied team totals from betting lines |
@@ -97,6 +99,11 @@ Three further market sources sit around it, each with one job and none of them a
 After touching anything under `server/model/` **or any of the market sources above**, run
 `node server/scripts/validate-projections.js`. It backtests the model against a season
 it was never given and fails if it does not beat "repeat last season".
+
+One season cannot settle anything at these sample sizes — a Spearman difference below about
+0.02 on n≈300 is noise, and several plausible-looking changes have moved it by less than that
+in both directions. For a change that is meant to improve the ranking rather than fix a
+defect, A/B it across 2023–25 and look for a gain in *every* season, not in the mean.
 
 ## Traps worth knowing
 
@@ -181,7 +188,7 @@ it was never given and fails if it does not beat "repeat last season".
   pass lean derived from it is negated. Getting this backwards is invisible in the output
   — it just quietly moves value from the right backfields to the wrong ones.
 - **Blending three seasons of usage ranked worse than using the latest one.** This was
-  the surprise of the tuning run and it is why `TUNING.recency` is `[1, 0, 0]`. Roles turn
+  the surprise of the tuning run and it is why `TUNING.recency` is `[0.85, 0.15, 0]`. Roles turn
   over fast enough that a season two years back is mostly noise about this one, and the
   shrinkage step already handles a thin recent sample. Older seasons still feed the
   stability measurement and the FPOE talent prior. Re-run
@@ -490,6 +497,128 @@ it was never given and fails if it does not beat "repeat last season".
 - **The stored picks are made to equal Sleeper's, not merely appended to.** A
   commissioner can undo a pick, and a player left marked taken never returns to the board
   on his own.
+- **A draft-capital player must contribute to his team's budget at EVERY position, not just
+  quarterback.** The rule "a draft-capital quarterback needs all his budget rates" was fixed
+  for quarterbacks and left unfixed everywhere else, and the hole is the same shape: a
+  drafted running back listed first contributed no carries, so his team's remaining backs
+  were scaled up to fill a gap that was not there. Seattle's carry budget came to 160
+  against a real 455 because Jadarian Price is its listed starter and simply was not in it;
+  the rush scale pinned at the 1.40 cap and Emanuel Wilson, a third-string back, projected
+  99 points on carries that belong to Price. Arizona, Tennessee and the Jets had the same
+  hole. Every draft-capital player now carries the depth allowance for his listed rank, with
+  receiving yards and receiving touchdowns derived from it at league rates for the same
+  reason the passing ones are.
+- **A conservation scale must be solved on the part it can actually move.** Draft-capital
+  players are counted into the team totals but never scaled — their points come from the
+  rookie curve, not from those rates. So the scale is `(target − fixed) / (total − fixed)`,
+  not `target / total`; with a rookie starter in the divisor but out of the numerator the
+  latter overshoots, and Seattle stayed pinned at the cap even after Price began
+  contributing.
+- **Targets are scaled to the attempts a team ACTUALLY gets, never to the ones it was aimed
+  at.** The two are identical only while the pass scale is unclamped. Las Vegas, whose
+  attempts are almost entirely one rookie quarterback's and therefore unmovable, sat at the
+  1.40 cap and finished with 464 targets against 450 attempts — a ratio of 1.03 where every
+  attempt is at most one target. The validator checks the MEDIAN team ratio, so it read a
+  clean 0.94 while a real team on the board was broken.
+- **The quarterback-games allocation caps but must also FILL.** It only ever took games
+  away, so a team whose starter begins below his entitled share never got them back: the
+  rookie block hands a draft-capital starter a flat 13.0 games, Las Vegas came to 14.2
+  quarterback games in a seventeen-game season and threw 450 times against a real 545, and
+  because every target is derived from those attempts its whole receiving corps was fed from
+  a budget a hundred attempts short. Brock Bowers read about 9% light for that alone. Filling
+  is applied only to a draft-capital starter — never to a veteran who simply projects for
+  fewer games than his share, since nothing there knows better than he does.
+- **Preserving the model's own team RUSHING spread is worse than replacing it with a
+  constant, and this is the opposite of the passing lesson.** It looks like the obviously
+  symmetric fix and it is not, because the premise does not hold: the model's team carry sum
+  is not a projection of how much a team runs, it is an artefact of how many of its backs
+  clear the role gate. Measured against what teams actually did, the team's own spread comes
+  out at sd 116–127 against a real 44–56 and correlates 0.16–0.29 with reality, where the
+  constant gives sd 35–62 at 0.21–0.33. It is wider AND less correlated — preserving it
+  preserves noise. The backtest cannot separate the two at all (+0.0130 against +0.0128), so
+  this one is settled on calibration, not on the backtest. `TUNING.carryBudget` keeps both.
+- **Nothing knew how old anybody was.** The crosswalk carries an age for all 456 projected
+  players and no part of the model read it, which is most of why a thirty-year-old back
+  coming off a good season projected like a twenty-five-year-old. `model/age.js` measures the
+  curve from consecutive-season pairs and splits it in two, because the decline is not one
+  thing: the larger half is losing the job (a 29-year-old back keeps 81% of his touches) and
+  goes to Module A, the smaller half is what he does with what he keeps and goes to Module B.
+  Putting it on volume rather than on the finished number matters — the conservation step then
+  SEES the touches an ageing player gives up and hands them to the men actually taking them.
+  Worth +0.007 Spearman on the held-out season and, unusually for anything tried here, it
+  gained in all three seasons rather than on average.
+- **The LEVEL of a measured age curve is regression to the mean and must be divided out.**
+  The median next-season ratio is below 1 at every age, including 22 — a 21-24 running back
+  comes out at 0.93. That is not decline, it is that pairs are selected on holding a role in
+  both seasons and a season good enough to notice tends to be followed by a worse one. The
+  shrinkage step already handles it; applying it again would quietly shave every player on
+  the board. Only the DIFFERENCE between ages is used, normalised so the average player is
+  exactly 1.0.
+- **The betting market is an INPUT to share and never to level, and the two must not be
+  confused.** A line already discounts the games the books expect a man to miss; the model's
+  number is a full seventeen on purpose. Blending them raw drags every covered player down
+  by that difference — and the covered players are the high-volume ones, so the conservation
+  step then scales the whole team back up and hands the difference to the fringe players
+  nobody prices. `marketprior.js` de-biases the market to the model's own level per
+  component first (measured at 1.04–1.11 on the live board), so what is left is a statement
+  about share alone.
+- **Module D runs BEFORE conservation, and the order is the design.** The market moves a
+  player relative to his team-mates; conservation then puts his team back on its budget, so
+  the net effect is a transfer of share. Run it afterwards and three priced players drag a
+  whole team's volume around — which would be fatal, because per-team market aggregates do
+  not survive inspection: Cleveland's priced receivers are quoted for 133% of its priced
+  passing yards and Miami's for 27%, since only three to seven players a team carry lines
+  and which three is arbitrary.
+- **The market prior is the one thing here that NO backtest can vouch for.** BettingPros
+  publishes the coming season only; there is no archive of what the books thought in August
+  2023. The backtest is untouched (the market is absent from it by construction) and stays
+  at +0.058 on the held-out season, so a green validator says nothing about this change.
+  What is provable is that it is share-neutral: team totals do not move (562 attempts, 537
+  targets, 458 carries before and after) and all three identities still hold.
+  `TUNING.marketWeight` turns it off.
+- **Importing the market did NOT collapse the model into Sleeper, which was the fear.**
+  Sleeper tracks the market at 0.970, so pulling toward the market looks like pulling toward
+  Sleeper. Measured across weights 0 → 0.7, agreement with Sleeper moves 0.906 → 0.909 while
+  agreement with the market moves 0.884 → 0.913. The blend touches 132 players and only
+  their share within a team, which is not where Sleeper and this model mostly differ.
+- **`mkt_books` is a minimum across all SEVEN markets and must never weight ONE component.**
+  A receiver whose receiving lines eight books agree on but whose rushing-touchdown line
+  comes from one is recorded at 1, so the part of him that is best supported was the part
+  that barely moved. `marketprops.js` therefore also stores `mkt_books_rec`, `_rush` and
+  `_pass` — the thinnest line *within* each scoring component — and Module D weights on
+  those. It is not a rounding difference: the median jumps from 2 to 6 on rushing and 2 to 8
+  on passing, so quarterbacks and backs were being trusted at a quarter of the support they
+  actually had. Receiving stays at 2, because receptions is the thin market. `mkt_books`
+  remains the right thing to show beside a season total, and the fallback for a row written
+  before the split.
+- **A head-coaching change does NOT predictably shift the pass/run mix — this was measured,
+  because it is widely believed.** Over 320 team-seasons a team's pass rate swings more year
+  to year (sd 6pp) than teams differ from each other (5.2pp), so the instinct that it is a
+  real, sizeable effect is right. Attributing it to the coach is not: teams keeping their
+  coach moved 3.48pp and teams changing moved 3.54pp. An incoming coach's rate at his
+  previous stop predicts his new team's at r=0.088 against r=0.368 for simply carrying the
+  team forward — on n=12, so suggestive rather than settled, and note nflverse carries the
+  HEAD COACH while the play caller is often the coordinator, whom it does not carry at all.
+  It does not change what to build either way: perfect foreknowledge of team volume is worth
+  +0.005 (see below).
+- **The error is in WHO gets the touches, not in how much a team plays.** Hand the model
+  perfect team volume and it gains +0.005 Spearman; hand it perfect within-team share and it
+  gains +0.15. On opportunity the log-error standard deviations are 0.08 against 0.89. Team
+  volume barely varies — real teams ran 366–547 times in 2025 around a mean of 455 — and the
+  implied totals plus the conservation constants already land inside 8%. Any scheme, pace or
+  personnel feature aims at the stage that is not broken.
+- **Edge measures the model against BEHAVIOUR, which is why the market can be an input to
+  the projection without eating the column.** A draft board is not a forecast: over the
+  players carrying both, the market's own season totals correlate just 0.486 with consensus
+  ADP. Edge now ranks against Sleeper's ADP for the active format — the room actually being
+  drafted in — but be honest about what that switch is worth: Sleeper ADP and the consensus
+  correlate 0.983, so it is the right object rather than a different answer.
+- **An age curve has to be fitted monotone or the thin cells invent penalties for being
+  young.** Raw, tight ends came out at 0.95 for a 22-year-old against 1.08 for a 24-year-old
+  on eight players, which put Harold Fannin below men four years older. Monotone
+  non-increasing is the one thing actually known about ageing in advance, so the measured
+  cells are fitted with pool-adjacent-violators rather than believed one at a time. It also
+  tested better (+0.0221 against +0.0207).
 
 ## Conventions
 

@@ -143,14 +143,18 @@ const SUPPORT_TOLERANCE_FLOOR = 0.5;
 // projection that does score them. That is stated on the column rather than papered over
 // with an estimate. Market ids 47-57 are multi-way LEADER markets ("most passing yards")
 // and must never be mixed in — they are not two-sided over/unders at all.
+// `group` is the scoring component the market belongs to. It exists so book support can
+// be reported per component as well as per player: the model blends receiving, rushing and
+// passing separately, and weighting each by the thinnest line a player carries ANYWHERE
+// throws away most of what the books actually agree on.
 const MARKETS = [
-  { id: 300, column: 'mkt_pass_yards', label: 'passing yards', min: 25 },
-  { id: 301, column: 'mkt_rush_yards', label: 'rushing yards', min: 40 },
-  { id: 302, column: 'mkt_rec_yards', label: 'receiving yards', min: 60 },
-  { id: 304, column: 'mkt_pass_tds', label: 'passing TDs', min: 25 },
-  { id: 305, column: 'mkt_rush_tds', label: 'rushing TDs', min: 40 },
-  { id: 306, column: 'mkt_rec_tds', label: 'receiving TDs', min: 60 },
-  { id: 330, column: 'mkt_receptions', label: 'receptions', min: 50 },
+  { id: 300, column: 'mkt_pass_yards', label: 'passing yards', min: 25, group: 'pass' },
+  { id: 301, column: 'mkt_rush_yards', label: 'rushing yards', min: 40, group: 'rush' },
+  { id: 302, column: 'mkt_rec_yards', label: 'receiving yards', min: 60, group: 'rec' },
+  { id: 304, column: 'mkt_pass_tds', label: 'passing TDs', min: 25, group: 'pass' },
+  { id: 305, column: 'mkt_rush_tds', label: 'rushing TDs', min: 40, group: 'rush' },
+  { id: 306, column: 'mkt_rec_tds', label: 'receiving TDs', min: 60, group: 'rec' },
+  { id: 330, column: 'mkt_receptions', label: 'receptions', min: 50, group: 'rec' },
 ];
 
 // A line outside these bounds is not a season total for that stat, whatever the API says.
@@ -161,6 +165,9 @@ const PLAUSIBLE = {
 };
 
 const COLUMNS = MARKETS.map(m => m.column);
+// The per-component book-count columns, in the order the write below expects them.
+const BOOK_GROUPS = ['rec', 'rush', 'pass'];
+const BOOK_COLUMNS = BOOK_GROUPS.map(g => `mkt_books_${g}`);
 
 // What a position has to have priced before its total can be read as a season projection.
 //
@@ -379,6 +386,7 @@ async function fetchMarketProps() {
   const values = new Map();       // player row id -> { column: line }
   const positionOf = new Map();
   const books = new Map();        // player row id -> THINNEST book count across his lines
+  const groupBooks = new Map();   // player row id -> { rec, rush, pass }: thinnest WITHIN each
   const counts = {};
   const failures = [];
   let sidesDisagreed = 0;
@@ -467,7 +475,13 @@ async function fetchMarketProps() {
       // The weakest link, not the widest: a player whose receiving yards eight books agree
       // on but whose receptions come from one is only as trustworthy as that one.
       const seen = books.get(row.id);
-      books.set(row.id, seen == null ? bookCount(offer) : Math.min(seen, bookCount(offer)));
+      const count = bookCount(offer);
+      books.set(row.id, seen == null ? count : Math.min(seen, count));
+      // The same rule again, but only over the markets that feed one scoring component,
+      // so a thin line on a statistic he barely accrues cannot mute the rest of him.
+      if (!groupBooks.has(row.id)) groupBooks.set(row.id, {});
+      const g = groupBooks.get(row.id);
+      g[m.group] = g[m.group] == null ? count : Math.min(g[m.group], count);
       n++;
     }
     counts[m.label] = n;
@@ -485,6 +499,7 @@ async function fetchMarketProps() {
   const update = db.prepare(`
     UPDATE players SET
       ${COLUMNS.map(c => `${c} = @${c}`).join(', ')},
+      ${BOOK_COLUMNS.map(c => `${c} = @${c}`).join(', ')},
       mkt_points = @mkt_points, mkt_books = @mkt_books,
       mkt_complete = @mkt_complete, mkt_adjusted = @mkt_adjusted, last_updated = @ts
     WHERE id = @id
@@ -494,6 +509,7 @@ async function fetchMarketProps() {
   db.transaction(() => {
     // Clear every row first: a line that is withdrawn must not persist as though current.
     db.prepare(`UPDATE players SET ${COLUMNS.map(c => `${c} = NULL`).join(', ')},
+                ${BOOK_COLUMNS.map(c => `${c} = NULL`).join(', ')},
                 mkt_points = NULL, mkt_books = NULL, mkt_complete = NULL, mkt_adjusted = NULL
                 WHERE mkt_points IS NOT NULL OR ${COLUMNS.map(c => `${c} IS NOT NULL`).join(' OR ')}`).run();
 
@@ -511,6 +527,7 @@ async function fetchMarketProps() {
       update.run({
         id, ts: now,
         ...Object.fromEntries(COLUMNS.map(c => [c, v[c] ?? null])),
+        ...Object.fromEntries(BOOK_GROUPS.map(g => [`mkt_books_${g}`, groupBooks.get(id)?.[g] ?? null])),
         mkt_points: Math.round(pts * 10) / 10,
         mkt_books: books.get(id) || null,
         mkt_complete: complete ? 1 : 0,

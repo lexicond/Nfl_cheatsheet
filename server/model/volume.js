@@ -164,7 +164,7 @@ function volumeBaselines(history) {
  * backs' carries. It is applied to volume, not to efficiency, because that is where
  * game script actually acts.
  */
-function projectVolume(seasons, position, baselines, stability, env, tuning = {}, depthOrder = null) {
+function projectVolume(seasons, position, baselines, stability, env, tuning = {}, depthOrder = null, ageMultiplier = 1) {
   const base = baselines[position] || {};
   const stab = stability[position] || {};
   const out = {};
@@ -211,6 +211,20 @@ function projectVolume(seasons, position, baselines, stability, env, tuning = {}
     if (projected > allowed && projected > 0) {
       const scale = allowed / projected;
       for (const m of metrics) out[m] *= scale;
+    }
+  }
+
+  // Ageing, applied to opportunity — see model/age.js. This is the larger half of what
+  // happens to an older player and it is not really decline at all: it is losing the job.
+  // A 29-year-old back keeps about 81% of his touches and a 32-year-old receiver 63% of
+  // his targets, measured over consecutive seasons in which he held a role in both.
+  //
+  // It goes here, ahead of the game-script lean and before anything downstream sums a
+  // team, so that the touches an ageing player gives up are visible to the conservation
+  // step and land on the players who actually take them.
+  if (ageMultiplier !== 1 && Number.isFinite(ageMultiplier)) {
+    for (const metric of ['targets_pg', 'carries_pg', 'attempts_pg']) {
+      if (out[metric] != null) out[metric] *= ageMultiplier;
     }
   }
 

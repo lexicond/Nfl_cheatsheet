@@ -12,6 +12,8 @@
 const nflverse = require('./nflverse');
 const { buildUsageHistory, positionalBaselines } = require('./usage');
 const { buildStability } = require('./stability');
+const { buildAgeCurves, ageMultiplier } = require('./age');
+const { applyMarketPrior } = require('./marketprior');
 const { projectVolume, volumeBaselines, depthAllowance, UNRANKED_DEPTH } = require('./volume');
 const { RULES } = require('./scoring');
 const { projectEfficiency, fpoeResidual } = require('./efficiency');
@@ -57,6 +59,13 @@ const STABILITY_SEASONS = 6;
 // passing touchdowns and about 3,900 yards a team across 545 attempts.
 const LEAGUE_YARDS_PER_ATTEMPT = 7.2;
 const LEAGUE_TD_PER_ATTEMPT = 0.0465;
+// Targets per pass attempt: the rest are thrown away, spiked or sacked. Hoisted up here
+// because the draft-capital budget rates below are derived from it — a target is a pass
+// attempt aimed at somebody, so the receiving rates a rookie contributes have to be the
+// passing rates divided by this, or the two sides of the identity disagree by 6%.
+const TARGETS_PER_ATTEMPT = 0.94;
+const LEAGUE_YARDS_PER_TARGET = LEAGUE_YARDS_PER_ATTEMPT / TARGETS_PER_ATTEMPT;
+const LEAGUE_TD_PER_TARGET = LEAGUE_TD_PER_ATTEMPT / TARGETS_PER_ATTEMPT;
 
 const ROLE_GATE = { QB: 100, RB: 60, WR: 35, TE: 25 };
 
@@ -100,6 +109,23 @@ const TUNING = {
   // against the benchmark averaged -0.063 across the selection seasons; at power 1 it is
   // +0.059.
   qbClaimPower: 2,
+  // How far a player carrying a betting line is moved toward it, relative to his
+  // team-mates. Scaled per player by how many books stand behind his thinnest line, and
+  // 0 disables the market entirely. This is the ONE number in this file that was not
+  // chosen against a held-out season, because season-long props exist for the coming
+  // season only — see model/marketprior.js.
+  marketWeight: 0.5,
+  // Whether the measured ageing curve is applied at all. Off, the model has no way to
+  // tell a 30-year-old coming off a good season from a 25-year-old — see model/age.js.
+  useAgeCurve: true,
+  // Whether the quarterback-games allocation may fill as well as cap — see the note there.
+  qbGamesExact: true,
+  // How a team's carry budget is set in the conservation step: 'league' gives every team
+  // a league-typical rushing load tilted by game script, 'team' keeps the team's own
+  // projected carries and corrects only the level. The second is what the passing side
+  // does and it looks like the obviously symmetric choice — it is not; see the note in
+  // the conservation section.
+  carryBudget: 'league',
   // Whose job is it? 'peak' takes the most a quarterback ever carried in the window,
   // 'anchor' only his latest season. Peak is better and the reason is Joe Burrow: his
   // 2025 was eight games, so on the latest season alone Joe Flacco outranked him and the
@@ -255,6 +281,11 @@ async function runModel({
   //   depthChart  — sleeper_id -> { order, team }, the only live read on who is starting
   useOdds = true,
   depthChart = null,
+  //   marketLines — sleeper_id -> the board's mkt_* fields, the betting market's own
+  //                 season totals per player. Used ONLY to move a player relative to his
+  //                 team-mates; see model/marketprior.js, including why it cannot be
+  //                 backtested and is therefore absent here by default.
+  marketLines = null,
   // Model hyperparameters. Defaults are the values selected out of sample — see
   // TUNING below and scripts/tune-projections.js. Overridable so the tuner can sweep
   // them without editing the model.
@@ -309,6 +340,30 @@ async function runModel({
   const rateBaselines = positionalBaselines(fullHistory);
   const volBaselines = volumeBaselines(fullHistory);
   const rookieCurve = buildRookieCurve(fullHistory, crosswalk, seasons);
+
+  /**
+   * How old a player was in a given season, from his date of birth rather than from the
+   * crosswalk's current-age column — the column is as of today, and the curve has to
+   * index players by their age in a past season without drifting by a year.
+   *
+   * Note what this is NOT: lookahead. When a man was born is not information about the
+   * season being projected, and it is the same number whichever season a backtest runs.
+   */
+  const ageAt = (gsis, season) => {
+    const bd = crosswalk.byGsis.get(gsis)?.birthdate;
+    if (!bd) return null;
+    const born = Date.parse(bd);
+    if (!Number.isFinite(born)) return null;
+    // Measured at the start of September, which is roughly when a season is played.
+    return (Date.UTC(season, 8, 1) - born) / (365.25 * 24 * 3600 * 1000);
+  };
+
+  // The ageing curves, measured off the same history everything else here is measured
+  // off. See model/age.js — in particular why the LEVEL of what it measures is regression
+  // to the mean and is deliberately divided out.
+  const ageCurves = (tuning.useAgeCurve ?? TUNING.useAgeCurve)
+    ? buildAgeCurves(fullHistory, ageAt)
+    : { table: {}, sample: { pairs: 0, positions: {} } };
 
   // --- Module C ---------------------------------------------------------------
   const envGames = environmentMaxWeek == null
@@ -416,8 +471,17 @@ async function runModel({
 
     const fpoe = fpoeResidual(usable, position, rateBaselines);
     const tune = tune0;
-    const volume = projectVolume(usable, position, volBaselines, stability.table, env, tune, depthOrder);
-    const efficiency = projectEfficiency(usable, position, rateBaselines, stability.table, fpoe, tune);
+    // Ageing, split the way it was measured: most of what happens to an older player is
+    // that he loses the job, so the larger half lands on Module A. Applying it to volume
+    // rather than to the finished number also means the conservation step SEES it — the
+    // carries an ageing back gives up go back into his team's budget and are shared out
+    // among the men actually taking them, instead of vanishing from the league.
+    const ageNow = ageAt(gsis, targetSeason);
+    const ageVolume = ageMultiplier(ageCurves.table, position, ageNow, 'volume');
+    const ageEfficiency = ageMultiplier(ageCurves.table, position, ageNow, 'efficiency');
+
+    const volume = projectVolume(usable, position, volBaselines, stability.table, env, tune, depthOrder, ageVolume);
+    const efficiency = projectEfficiency(usable, position, rateBaselines, stability.table, fpoe, tune, ageEfficiency);
     let { ppg, breakdown, env_scalar_applied } =
       expectedPointsPerGame(volume, efficiency, env?.env_scalar ?? 1);
     // A projection anchored on a season he has not repeated since is a weaker claim than
@@ -465,6 +529,9 @@ async function runModel({
         env_scalar: env_scalar_applied,
         fpoe: Math.round(fpoe * 1000) / 1000,
         talent_multiplier: efficiency.talent_multiplier,
+        age: ageNow == null ? null : Math.round(ageNow * 10) / 10,
+        age_volume_multiplier: Math.round(ageVolume * 1000) / 1000,
+        age_efficiency_multiplier: Math.round(ageEfficiency * 1000) / 1000,
         role_opportunity: roleOpportunity,
         depth_order: depthOrder,
         injury_status: depth?.injury ?? null,
@@ -563,14 +630,37 @@ async function runModel({
         //
         // These are budget contributions only. His own projection still comes from the
         // rookie curve, and nothing scales these — the conservation pass skips him.
-        ...(entry.position === 'QB' && rookieDepthOrder != null
+        //
+        // This is not a quarterback-only problem, and treating it as one was the mistake.
+        // Every position's budget has the same hole: a drafted running back listed first
+        // contributed no carries, so his team's remaining backs were scaled up to fill a
+        // gap that was not there. Seattle's carry budget came to 160 against a real 455
+        // because Jadarian Price is its listed starter, the scale pinned at the 1.40 cap,
+        // and Emanuel Wilson — a third-string back — projected 99 points on carries that
+        // belong to Price. The same hole put Arizona, Tennessee and the Jets over the cap.
+        ...(rookieDepthOrder != null
           ? (() => {
-            const attempts = depthAllowance('QB', rookieDepthOrder)?.attempts_pg ?? 0;
-            return {
-              attempts_pg: attempts,
-              pass_yards_pg: attempts * LEAGUE_YARDS_PER_ATTEMPT,
-              pass_tds_pg: attempts * LEAGUE_TD_PER_ATTEMPT,
-            };
+            const allow = depthAllowance(entry.position, rookieDepthOrder) || {};
+            const attempts = allow.attempts_pg ?? 0;
+            const targets = allow.targets_pg ?? 0;
+            const carries = allow.carries_pg ?? 0;
+            const out = {};
+            if (attempts > 0) {
+              out.attempts_pg = attempts;
+              out.pass_yards_pg = attempts * LEAGUE_YARDS_PER_ATTEMPT;
+              out.pass_tds_pg = attempts * LEAGUE_TD_PER_ATTEMPT;
+            }
+            if (targets > 0) {
+              out.targets_pg = targets;
+              out.rec_yards_pg = targets * LEAGUE_YARDS_PER_TARGET;
+              // Needed for the same reason the passing touchdowns are: the receiving-TD
+              // reconciliation divides by the team's projected receiving touchdowns, so a
+              // starter who contributes targets but no touchdowns inflates the ratio and
+              // every veteran beside him is cut to match a passing game he scores none of.
+              out.rec_tds_pg = targets * LEAGUE_TD_PER_TARGET;
+            }
+            if (carries > 0) out.carries_pg = carries;
+            return out;
           })()
           : {}),
         basis: trueRookie
@@ -579,6 +669,30 @@ async function runModel({
       },
     });
     rookieCount++;
+  }
+
+  // --- Module D: the market's opinion on share --------------------------------------
+  //
+  // Runs after every player has a projection and BEFORE conservation, which is the whole
+  // design. The market moves a player relative to his team-mates; the conservation step
+  // then puts his team back on its budget, so what survives is a transfer of share and
+  // not a change in level. Reversing the order would let three priced players drag a
+  // whole team's volume around, and per-team market aggregates are far too thin for that.
+  const marketPrior = applyMarketPrior(projections, marketLines, {
+    weight: tuning.marketWeight ?? TUNING.marketWeight,
+  });
+  if (marketPrior.players > 0) {
+    // Re-simulate: ppg moved, so the floor, ceiling and best-ball numbers built off it
+    // are stale until they are rebuilt.
+    for (const p of projections) {
+      if (p.components?.market_weight == null) continue;
+      const sim = simulateSeason(p.ppg, p.games, p.volatility, { iterations, seed: p.gsis_id });
+      if (!sim) continue;
+      p.points = Math.round(sim.mean * 10) / 10;
+      p.floor = Math.round(sim.floor * 10) / 10;
+      p.ceiling = Math.round(sim.ceiling * 10) / 10;
+      p.best_ball = Math.round(sim.best_ball * 10) / 10;
+    }
   }
 
   // --- Conservation: a team only has one quarterback job ---------------------------
@@ -640,11 +754,38 @@ async function runModel({
     const claim = qbs.map(p => Math.pow(Math.max(claimBasis(p), 1), power));
     const claimTotal = claim.reduce((a, b) => a + b, 0) || 1;
 
+    // Cap only, or allocate exactly?
+    //
+    // This has only ever taken games away, and that leaves a hole wherever a quarterback
+    // starts below the share he is entitled to. A draft-capital starter is handed a flat
+    // 13.0 games by the rookie block, so Las Vegas came to 14.2 quarterback games in a
+    // seventeen-game season and threw 450 times against a real team's 545 — and because
+    // every target is derived from those attempts, its whole receiving corps was fed from
+    // a budget a hundred attempts short. Brock Bowers reads about 9% light for that reason
+    // alone.
+    const exact = tuning.qbGamesExact ?? TUNING.qbGamesExact;
+
     for (let i = 0; i < qbs.length; i++) {
       const p = qbs[i];
       const share = claim[i] / claimTotal;
-      const allowed = Math.max(0, Math.min(p.games, QB_GAMES_PER_TEAM * share));
-      if (allowed >= p.games - 0.01) continue;      // he already fitted
+      const entitled = QB_GAMES_PER_TEAM * share;
+      // Filling is only ever applied to a man the model has already declined to give a
+      // full season — never above seventeen, and never to a veteran who simply projects
+      // for fewer games than his share, since nothing here knows better than he does.
+      const allowed = exact && p.components.basis
+        ? Math.max(0, Math.min(QB_GAMES_PER_TEAM, entitled))
+        : Math.max(0, Math.min(p.games, entitled));
+      if (Math.abs(allowed - p.games) < 0.01) continue;      // he already fitted
+      if (allowed > p.games) {
+        p.games = Math.round(allowed * 10) / 10;
+        p.components.games_filled = true;
+        const simUp = simulateSeason(p.ppg, p.games, p.volatility, { iterations, seed: p.gsis_id });
+        p.points = simUp ? Math.round(simUp.mean * 10) / 10 : Math.round(p.ppg * p.games * 10) / 10;
+        p.floor = simUp ? Math.round(simUp.floor * 10) / 10 : null;
+        p.ceiling = simUp ? Math.round(simUp.ceiling * 10) / 10 : null;
+        p.best_ball = simUp ? Math.round(simUp.best_ball * 10) / 10 : null;
+        continue;
+      }
 
       qbGamesReclaimed += p.games - allowed;
       p.games = Math.round(allowed * 10) / 10;
@@ -684,28 +825,42 @@ async function runModel({
   // independent check that the parts agree, and become a check that the scaling ran.
   // That is the right trade — better a board with numbers that add up than a test that
   // fails honestly while the board misleads — but the validator says which it is.
-  const TARGETS_PER_ATTEMPT = 0.94;   // the rest are thrown away, spiked or sacked
   const LEAGUE_RUSH_ATTEMPTS = 455;
   const LEAGUE_PASS_ATTEMPTS = 545;
 
   const teamTotals = new Map();
   for (const p of projections) {
-    // A draft-capital player has no per-metric projection to scale, so he is not scaled —
-    // but a quarterback among them now carries an attempt rate, and those attempts are
-    // real: they are what his receivers are fed from. Leaving them out built the budget as
-    // though nobody threw the ball, which is how one rookie quarterback shrank an entire
-    // receiving corps.
+    // A draft-capital player has no per-metric projection of his own to scale, and the
+    // pass below skips him — his points come from the rookie curve. But the touches he
+    // will take are real, and the budget has to know about them or the men beside him are
+    // scaled up to fill a gap that is not there. He therefore carries the allowance for
+    // the rank the depth chart gives him, and it counts here exactly like anyone else's.
     const isDraftCapital = !!p.components.basis;
-    if (isDraftCapital && !(p.components.attempts_pg > 0)) continue;
-    if (!teamTotals.has(p.team)) teamTotals.set(p.team, { att: 0, tgt: 0, car: 0, passTd: 0, recTd: 0 });
-    const t = teamTotals.get(p.team);
     const g = p.games || 0;
-    t.att += (p.components.attempts_pg || 0) * g;
-    t.passTd += (p.components.pass_tds_pg || 0) * g;
-    if (isDraftCapital) continue;   // he consumes attempts, but has no targets or carries to count
-    t.tgt += (p.components.targets_pg || 0) * g;
-    t.car += (p.components.carries_pg || 0) * g;
-    t.recTd += (p.components.rec_tds_pg || 0) * g;
+    if (isDraftCapital && !(g > 0)) continue;
+    if (!teamTotals.has(p.team)) {
+      teamTotals.set(p.team, {
+        att: 0, tgt: 0, car: 0, passTd: 0, recTd: 0,
+        // The part of each total the scaling pass cannot move, because it belongs to a
+        // draft-capital player whose points come from the rookie curve rather than from
+        // these rates. Tracked separately so the scale can be worked out on the part it
+        // can actually move: with a rookie starter counted in the divisor but not scaled,
+        // target/total overshoots, and Seattle stayed pinned at the 1.40 cap even after
+        // its listed starter began contributing carries.
+        attFixed: 0, tgtFixed: 0, carFixed: 0, passTdFixed: 0, recTdFixed: 0,
+      });
+    }
+    const t = teamTotals.get(p.team);
+    const att = (p.components.attempts_pg || 0) * g;
+    const passTd = (p.components.pass_tds_pg || 0) * g;
+    const tgt = (p.components.targets_pg || 0) * g;
+    const car = (p.components.carries_pg || 0) * g;
+    const recTd = (p.components.rec_tds_pg || 0) * g;
+    t.att += att; t.passTd += passTd; t.tgt += tgt; t.car += car; t.recTd += recTd;
+    if (isDraftCapital) {
+      t.attFixed += att; t.passTdFixed += passTd;
+      t.tgtFixed += tgt; t.carFixed += car; t.recTdFixed += recTd;
+    }
   }
 
   // The league-wide attempt correction.
@@ -731,36 +886,83 @@ async function runModel({
     ? Math.max(0.85, Math.min(1.3, LEAGUE_PASS_ATTEMPTS / projectedLeagueAtt))
     : 1;
 
+  // The running side does NOT get the same treatment, and the asymmetry is deliberate.
+  //
+  // The obvious move is to mirror the paragraph above: keep each team's own projected
+  // carries and correct only the level, on the grounds that deleting a team's spread was
+  // exactly the mistake rejected on the passing side. That was tried (carryBudget: 'team')
+  // and it is worse, because the premise does not hold — the model's team carry sum is not
+  // a projection of how much a team runs, it is an artefact of how many of its backs
+  // happen to clear the role gate. Measured against what teams actually did:
+  //
+  //                    model sd   actual sd   correlation with actual
+  //     'team'          116-127     44-56            0.16-0.29
+  //     'league'         35- 62     44-56            0.21-0.33
+  //
+  // So the team's own spread is two to three times too wide AND less correlated with
+  // reality than the constant. Preserving it preserves noise. Across 2023-25 the backtest
+  // cannot separate the two at all (+0.0130 against +0.0128 mean Spearman edge), which is
+  // the honest statement: the choice is settled on calibration, not on the backtest.
+  const tuneC = { ...TUNING, ...tuning };
+  const projectedLeagueCar = [...teamTotals.values()].reduce((a, t) => a + t.car, 0)
+    / (teamTotals.size || 1);
+  const carryCorrection = projectedLeagueCar > 0
+    ? Math.max(0.85, Math.min(1.3, LEAGUE_RUSH_ATTEMPTS / projectedLeagueCar))
+    : 1;
+
   const scales = new Map();
   for (const [team, t] of teamTotals) {
-    const env = environment.table.get(team);
-    const lean = env?.pass_lean ?? 0;
     // This team's own projected volume, on a realistic league scale.
     //
     // Both sides move together. Correcting only the targets was tried and it breaks the
     // thing that makes this checkable: it put 512 targets against 496 attempts, which is
     // not a projection but an impossibility, since every attempt is at most one target.
     const targetAtt = t.att * attemptCorrection;
-    const targetTgt = targetAtt * TARGETS_PER_ATTEMPT;
-    const targetCar = LEAGUE_RUSH_ATTEMPTS * (1 - lean * 2);
-    // Bounded: a scale far from 1 means something else is wrong and silently
-    // multiplying by it would hide that rather than fix it.
-    const sc0 = {
-      pass: t.att > 0 ? Math.max(0.6, Math.min(1.4, targetAtt / t.att)) : 1,
-      rec: t.tgt > 0 ? Math.max(0.6, Math.min(1.4, targetTgt / t.tgt)) : 1,
+    // 'team' keeps this team's own projected carries and corrects only the level;
+    // 'league' is the constant-plus-lean budget. See the note on TUNING.carryBudget.
+    const targetCar = tuneC.carryBudget === 'league'
+      ? LEAGUE_RUSH_ATTEMPTS * (1 - (environment.table.get(team)?.pass_lean ?? 0) * 2)
+      : t.car * carryCorrection;
+
+    // The scale is what the movable part has to be multiplied by for the WHOLE team to
+    // land on its target, so the draft-capital share comes off both sides first. Bounded,
+    // because a scale far from 1 means something else is wrong and silently multiplying by
+    // it would hide that rather than fix it.
+    const solve = (target, total, fixed, lo = 0.6, hi = 1.4) => {
+      const movable = total - fixed;
+      if (!(movable > 0)) return 1;
+      return Math.max(lo, Math.min(hi, (target - fixed) / movable));
     };
+
+    const pass = solve(targetAtt, t.att, t.attFixed);
+
+    // Targets are scaled to the attempts the team ACTUALLY ends up with, not to the ones
+    // it was aimed at. The two are the same only while the pass scale is unclamped, and
+    // where it clamps they come apart badly: Las Vegas, whose attempts are almost entirely
+    // a rookie quarterback's and therefore unmovable, sat at the 1.40 cap on passing and
+    // finished with 464 targets against 450 attempts — a ratio of 1.03 where every attempt
+    // is at most one target. Deriving the target budget from the achieved number keeps the
+    // identity true per team instead of only at the median, which is all the validator was
+    // able to see.
+    const postAtt = t.attFixed + (t.att - t.attFixed) * pass;
+    const targetTgt = postAtt * TARGETS_PER_ATTEMPT;
+    const sc0 = { pass, rec: solve(targetTgt, t.tgt, t.tgtFixed) };
+    // Every touchdown a quarterback throws is caught by somebody. Nothing in the model
+    // made that true and it was not: league-wide it produced 811 passing touchdowns
+    // against 742 receiving ones, so 69 of its own thrown touchdowns landed on nobody.
+    // Passing touchdowns are the side to trust — the model puts them at 811 against a
+    // real 811, and 4.66% per attempt against a real 4.65% — so the receiving side is
+    // reconciled to them. Both sides carry their own scale already, so this is computed
+    // on the post-scale totals and only the ratio between them moves.
+    const postPassTd = t.passTdFixed + (t.passTd - t.passTdFixed) * sc0.pass;
+    const postRecTd = t.recTdFixed + (t.recTd - t.recTdFixed) * sc0.rec;
     scales.set(team, {
-      pass: t.att > 0 ? Math.max(0.6, Math.min(1.4, targetAtt / t.att)) : 1,
-      rec: t.tgt > 0 ? Math.max(0.6, Math.min(1.4, targetTgt / t.tgt)) : 1,
-      rush: t.car > 0 ? Math.max(0.6, Math.min(1.4, targetCar / t.car)) : 1,
-      // Every touchdown a quarterback throws is caught by somebody. Nothing in the model
-      // made that true and it was not: league-wide it produced 811 passing touchdowns
-      // against 742 receiving ones, so 69 of its own thrown touchdowns landed on nobody.
-      // Passing touchdowns are the side to trust — the model puts them at 811 against a
-      // real 811, and 4.66% per attempt against a real 4.65% — so the receiving side is
-      // reconciled to them. Both sides carry the pass scale already, so this is computed
-      // on the post-scale totals and only the ratio between them moves.
-      recTd: t.recTd > 0 ? Math.max(0.7, Math.min(1.4, (t.passTd * sc0.pass) / (t.recTd * sc0.rec))) : 1,
+      pass: sc0.pass,
+      rec: sc0.rec,
+      rush: solve(targetCar, t.car, t.carFixed),
+      recTd: postRecTd > 0
+        ? solve(postPassTd, postRecTd, t.recTdFixed, 0.7, 1.4)
+        : 1,
     });
   }
 
@@ -838,6 +1040,9 @@ async function runModel({
         games_reclaimed: Math.round(qbGamesReclaimed * 10) / 10,
         dropped: dropped,
       },
+      // Reported every run rather than buried, because it is the one input here that no
+      // backtest can vouch for.
+      market_prior: marketPrior,
       // Players the role gate refused. Reported rather than silently dropped: a
       // projection that is absent is a claim too, and it should be a visible one.
       gated,

@@ -56,7 +56,7 @@ function opportunityCount(seasons, field, maxSeasons = 3) {
  * talent prior. It is applied as a small multiplier on yardage rates only, and it is
  * itself shrunk, because a single season of beating expectation is mostly luck.
  */
-function projectEfficiency(seasons, position, baselines, stability, fpoePrior = 0, tuning = {}) {
+function projectEfficiency(seasons, position, baselines, stability, fpoePrior = 0, tuning = {}, ageMultiplier = 1) {
   const base = baselines[position] || {};
   const stab = stability[position] || {};
   const out = {};
@@ -76,6 +76,19 @@ function projectEfficiency(seasons, position, baselines, stability, fpoePrior = 
     if (out[metric] != null) out[metric] *= talent;
   }
   out.talent_multiplier = Math.round(talent * 1000) / 1000;
+
+  // The residual half of ageing: what is left once the change in OPPORTUNITY is taken
+  // out, which Module A has already applied. It is the smaller half — most of what looks
+  // like an old player declining is an old player playing less — and at several ages it
+  // is nothing at all. Applied to the yardage rates only, on the same grounds as the
+  // talent prior: a touchdown rate is too noisy to carry a further multiplier, and
+  // scoring rates are reconciled at the team level downstream anyway.
+  if (ageMultiplier !== 1 && Number.isFinite(ageMultiplier)) {
+    for (const metric of ['yards_per_target', 'yards_per_carry', 'yards_per_attempt']) {
+      if (out[metric] != null) out[metric] *= ageMultiplier;
+    }
+  }
+  out.age_multiplier = Math.round(ageMultiplier * 1000) / 1000;
 
   return out;
 }

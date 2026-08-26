@@ -298,6 +298,11 @@ async function loadCrosswalk() {
       draft_ovr: num(r.draft_ovr),
       draft_round: num(r.draft_round),
       age: num(r.age),
+      // The birthdate, not just the age, because the age column is as of today and the
+      // ageing curve needs to index a player by how old he was in a PAST season. Deriving
+      // it from a fixed date of birth is exact; subtracting years from a current age drifts
+      // by up to a year depending on when in the calendar it was last regenerated.
+      birthdate: r.birthdate && r.birthdate !== 'NA' ? r.birthdate : null,
     };
     byGsis.set(gsis, entry);
     if (sleeper) bySleeper.set(sleeper, entry);
