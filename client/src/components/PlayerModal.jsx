@@ -1,5 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 
+// FantasyPros' boards run to sixteen tiers and the badge on the board now shows theirs
+// by default, so your own tier uses the same scale — a hand-set 3 has to mean the same
+// thing as the 3 it replaces or the badge is two different measurements in one column.
+const TIER_SCALE = Array.from({ length: 16 }, (_, i) => i + 1);
+
 const POS_COLORS = {
   QB: 'text-amber-400',
   RB: 'text-green-400',
@@ -7,16 +12,28 @@ const POS_COLORS = {
   TE: 'text-orange-400',
 };
 
+// The box grows to whatever is in it. A fixed three rows was fine for a line you typed
+// yourself and silently clips an imported expert note — which is a note you cannot read
+// without selecting text inside it, and looks like the note simply ends there.
 function NoteField({ label, value, onChange, onBlur }) {
+  const ref = useRef(null);
+  const fit = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 420)}px`;
+  };
+  useEffect(fit, [value]);
   return (
     <div>
       <label className="block text-xs font-medium text-[#8b90a8] mb-1">{label}</label>
       <textarea
+        ref={ref}
         value={value || ''}
-        onChange={e => onChange(e.target.value)}
+        onChange={e => { onChange(e.target.value); fit(); }}
         onBlur={onBlur}
         rows={3}
-        className="input w-full text-sm resize-none"
+        className="input w-full text-sm resize-none overflow-y-auto"
         placeholder="..."
       />
     </div>
@@ -330,8 +347,11 @@ export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = 
           {/* Tier selector */}
           <div>
             <h3 className="text-xs font-semibold text-[#555875] uppercase tracking-wider mb-2">Tier</h3>
-            <div className="flex gap-1.5 items-center">
-              {[1, 2, 3, 4, 5].map(t => (
+            {/* The same 1-16 FantasyPros use, so a tier you set means the same thing as
+                the one it replaces. Wraps rather than scrolls — sixteen 32px buttons do
+                not fit the panel on a phone. */}
+            <div className="flex flex-wrap gap-1.5 items-center">
+              {TIER_SCALE.map(t => (
                 <button
                   key={t}
                   onClick={() => {
@@ -339,7 +359,9 @@ export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = 
                     setDraft(d => ({ ...d, tier: newTier }));
                     onUpdate(player.id, { tier: newTier });
                   }}
-                  className={`tier-badge w-8 h-8 ${draft.tier === t ? `tier-${t}` : 'border-[#2e3148] text-[#555875] hover:text-[#8b90a8]'}`}
+                  className={`tier-badge w-8 h-8 ${draft.tier === t ? `tier-${t}` : 'border-[#2e3148] text-[#555875] hover:text-[#8b90a8]'}${
+                    player.tier_fp === t && draft.tier !== t ? ' ring-1 ring-[#3a3e56]' : ''}`}
+                  title={player.tier_fp === t ? `FantasyPros' tier for this format` : undefined}
                 >
                   {t}
                 </button>
@@ -353,9 +375,10 @@ export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = 
                 </button>
               )}
             </div>
-            {!draft.tier && player.tier_auto && (
+            {!draft.tier && player.tier_fp && (
               <div className="text-xs text-[#555875] mt-1.5 italic">
-                Auto-tier: T{player.tier_auto} (ADP-based · click above to override)
+                FantasyPros have him in tier {player.tier_fp}, off their overall board for
+                this format · click above to set your own
               </div>
             )}
           </div>

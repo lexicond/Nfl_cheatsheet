@@ -53,6 +53,23 @@
   .tier-3 { @apply bg-green-500/20 text-green-400 border border-green-500/40; }
   .tier-4 { @apply bg-purple-500/20 text-purple-400 border border-purple-500/40; }
   .tier-5 { @apply bg-gray-500/20 text-gray-400 border border-gray-500/40; }
+  /* FantasyPros' boards run to sixteen tiers, so the five hues cycle and fade. The
+     colour's job on a tier-sorted board is to make the BOUNDARY between one tier and
+     the next visible, which only needs adjacent tiers to differ — T1 and T6 are sixty
+     picks apart and never compared at a glance. The fade is what carries depth. */
+  .tier-6  { @apply bg-amber-500/12 text-amber-400/85 border border-amber-500/30; }
+  .tier-7  { @apply bg-blue-500/12 text-blue-400/85 border border-blue-500/30; }
+  .tier-8  { @apply bg-green-500/12 text-green-400/85 border border-green-500/30; }
+  .tier-9  { @apply bg-purple-500/12 text-purple-400/85 border border-purple-500/30; }
+  .tier-10 { @apply bg-gray-500/12 text-gray-400/85 border border-gray-500/30; }
+  .tier-11 { @apply bg-amber-500/8 text-amber-400/65 border border-amber-500/20; }
+  .tier-12 { @apply bg-blue-500/8 text-blue-400/65 border border-blue-500/20; }
+  .tier-13 { @apply bg-green-500/8 text-green-400/65 border border-green-500/20; }
+  .tier-14 { @apply bg-purple-500/8 text-purple-400/65 border border-purple-500/20; }
+  .tier-15 { @apply bg-gray-500/8 text-gray-400/65 border border-gray-500/20; }
+  .tier-16 { @apply bg-gray-500/8 text-gray-400/50 border border-gray-500/20; }
+  /* Not a tier anyone published: everyone past the end of the board for this format. */
+  .tier-none { @apply bg-white/5 text-[#8b90a8] border border-dashed border-[#3a3e56]; }
 
   .btn {
     @apply px-3 py-1.5 rounded text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-[#0f1117];

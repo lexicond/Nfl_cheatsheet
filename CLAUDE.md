@@ -16,9 +16,9 @@ Concretely, this has already happened:
 - `fantasypros.com/nfl/rankings/best-ball-cheatsheets.php` redirects to the generic
   standard-scoring redraft board and returns valid `ecrData`. So do
   `dynasty-superflex-overall`, `ppr-dynasty-superflex`, `half-ppr-superflex-cheatsheets`
-  and others. Every FantasyPros fetch therefore asserts the `type` and `scoring` it
-  expects and rejects the response otherwise. **Never add a FantasyPros URL without an
-  `expect` block.**
+  and others. Every FantasyPros fetch therefore asserts the `type`, `scoring` and
+  `position_id` it expects and rejects the response otherwise. **Never add a FantasyPros
+  URL without an `expect` block.**
 - `superflex-cheatsheets.php` is the STANDARD-scoring board. This app is half-PPR
   throughout; use `half-point-ppr-superflex-cheatsheets.php`.
 - Sleeper's `/v1/projections/nfl/{year}/0` still answers 200 with every player object
@@ -41,6 +41,10 @@ After touching a scraper, `server/sources.js` or `server/consensus.js`, run
 `node server/scripts/validate-sources.js`. It asserts on what the numbers *imply*: a
 superflex board must open with quarterbacks, dynasty must skew younger than redraft, best
 ball and redraft must differ, and no two inputs to one consensus may correlate above 0.97.
+It also checks the FantasyPros tiers the cheat sheet groups on — that each board's tier
+never runs backwards against that board's own rank, which is what a per-position payload
+written into an overall column looks like, and that only the superflex boards tier
+quarterbacks first.
 
 ## Architecture
 
@@ -139,6 +143,66 @@ defect, A/B it across 2023–25 and look for a gain in *every* season, not in th
   displayed and sortable but sits outside the consensus, because averaging "RB4" with a
   pick number would be meaningless. It is registered twice in `sources.js` — once per
   season-long format — aliased onto one column, since a column declares a single format.
+- **The cheat sheet's tiers are FantasyPros', and they are OVERALL tiers shown in
+  positional columns.** Each of the five FantasyPros boards publishes its own `tier`
+  alongside `rank_ecr`, and they are not interchangeable: the superflex board lifts
+  quarterbacks into Tier 1, which pushes every receiver down a rung or two, and dynasty
+  tiers a different population again. So there is one column per board — `fp_tier` (best
+  ball, the original name), `fp_tier_rd`, `fp_tier_sf`, `fp_tier_dyn`, `fp_tier_dyn_sf` —
+  and `TIER_FIELD` in `cheatsheet/board.js` picks the one matching the view, borrowing the
+  superflex redraft board for best-ball 2QB exactly as that view's consensus already does.
+  Because the numbering is overall, a positional column legitimately starts at Tier 3 and
+  skips numbers; that cross-position comparability is the point of taking theirs rather
+  than cutting the sheet's own breaks per column. Anyone FantasyPros has not tiered goes in
+  a trailing `Untiered` group rather than being folded into the nearest tier.
+- **`expect` must assert `position_id` too, now that a tier is read.** Type and scoring
+  alone do not prove a board is the overall one: `half-point-ppr-cheatsheets.php?position=RB`
+  returns `Draft Half PPR`/`HALF` like the overall page and tiers each position from 1, which
+  written into an overall column reads a WR3 as an overall Tier 3. The overall boards are
+  `ALL`, the superflex ones `OP`. And the trap runs the other way as well:
+  `half-point-ppr-qb-cheatsheets.php` looks like the half-PPR QB board and is really the
+  generic STANDARD overall board — the QB draft board is `qb-cheatsheets.php`.
+- **The app board's default tier is FantasyPros' too, and `tier_auto` is gone.** It used
+  to be a band of ADP rounds computed in `routes/players.js` — the first half round, then
+  rounds 1½, 3 and 6 — which was a restatement of the consensus column beside it rather
+  than anybody's opinion about where the talent breaks. The field is `tier_fp`, chosen per
+  format by `FP_TIER_COLUMN`, and the badge is dashed when it is FantasyPros' and solid
+  when it is yours. Two things follow: the T1–T5 filter buttons are now built from the
+  tiers the format actually has (served in the response's `tiers.present`, counted before
+  the tier filter is applied or picking a tier would narrow the buttons to the one already
+  picked), and **tier 0 is the untiered filter** — no real tier is ever 0, so it selects
+  exactly the players the tier sort sinks. Test it with `!= null`, never for truthiness.
+- **Sorting by tier needs a tie-break, because a tier is a band and not an ordering.**
+  Without one a whole tier comes back alphabetical. `DERIVED_SORTS.tier` carries a `tie`
+  that falls back to the consensus, and the cheat sheet's `by()` does the same. Untiered
+  players keep a null and ride the comparator's existing nulls-last rule to the bottom
+  rather than being given a made-up last tier number, which would read as FantasyPros'
+  opinion about a player they declined to rank.
+- **Your own tier runs on FantasyPros' 1-16 scale, not its own.** A hand-set 3 has to
+  mean the same thing as the 3 it replaces or the badge is two measurements in one
+  column. Sixteen is too many to click through blind, so the row badge's cycle ENTERS at
+  `tier_fp` — one click adopts what is already showing, which is the common case — steps
+  up from there, steps back on shift-click, and clears at either end. `TIER_BORDER`, the
+  stripe that marks a row whose tier you set by hand, is written out to sixteen rather
+  than assembled from a hue list: Tailwind scans the source for literal class names and
+  purges anything built at runtime.
+- **The tier badge colours cycle every five and that is deliberate.** FantasyPros' boards
+  run to sixteen; `index.css` carries `tier-1` … `tier-16` where the five hues repeat and
+  fade. The colour's only job on a tier-sorted board is to make the boundary between one
+  tier and the next visible, which needs adjacent tiers to differ and nothing more — T1
+  and T6 are sixty picks apart and never compared at a glance.
+- **`note_sources` is the Sleeper scraper's, not yours.** It looks like the obvious home
+  for imported analysis — the UI even labels it "Analyst Notes" — and `scrapers/sleeper.js`
+  rewrites every player's projected stat line into it on every refresh, standing off only
+  where the existing text does not begin `Sleeper `. So writing anything else there both
+  displaces that line and freezes it for that player for ever, with nothing on screen to
+  say the numbers had stopped updating. `apply-expert-board.js` writes to `note_upside`
+  and `note_downside`, which nothing else owns, and puts the verdict at the head of each.
+- **A tier must be withdrawn, not merely written**, for the same reason a projection must.
+  FantasyPros drops players off a board between runs, and a tier left behind reads as
+  current because every column beside it is — the sheet goes on grouping a man nobody ranks
+  any more into Tier 4. Each board nulls its own tier column inside the same transaction
+  that refills it, so a board that failed to fetch is skipped whole and keeps what it had.
 - **A draft id proves nothing on its own.** `/v1/draft/<id>` answers 200 for every draft
   Sleeper has ever hosted — any sport, any season. A 2021 draft returns forty valid picks
   that would mark forty players taken on a 2026 board, and it all looks right. So

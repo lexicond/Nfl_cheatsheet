@@ -4,12 +4,31 @@ import { CSS } from '@dnd-kit/utilities';
 
 const SEASON_YEAR = new Date().getFullYear();
 
+// Your own tier runs on FantasyPros' 1-16 scale, so a hand-set 3 means the same thing
+// as the 3 it replaces.
+const TIER_MAX = 16;
+
+// The stripe down the left of a row marks a tier YOU set — FantasyPros' get none, which
+// is what makes yours findable at a glance while scrolling. Written out rather than
+// built from a hue list because Tailwind scans the source for literal class names and
+// would purge anything assembled at runtime. Hues cycle every five, as the badges do.
 const TIER_BORDER = {
   1: 'border-l-2 border-l-amber-500',
   2: 'border-l-2 border-l-blue-500',
   3: 'border-l-2 border-l-green-500',
   4: 'border-l-2 border-l-purple-500',
   5: 'border-l-2 border-l-gray-500',
+  6: 'border-l-2 border-l-amber-500/70',
+  7: 'border-l-2 border-l-blue-500/70',
+  8: 'border-l-2 border-l-green-500/70',
+  9: 'border-l-2 border-l-purple-500/70',
+  10: 'border-l-2 border-l-gray-500/70',
+  11: 'border-l-2 border-l-amber-500/45',
+  12: 'border-l-2 border-l-blue-500/45',
+  13: 'border-l-2 border-l-green-500/45',
+  14: 'border-l-2 border-l-purple-500/45',
+  15: 'border-l-2 border-l-gray-500/45',
+  16: 'border-l-2 border-l-gray-500/30',
 };
 
 function AdpCell({ value }) {
@@ -161,11 +180,21 @@ export default function PlayerRow({
 
   const style = { transform: CSS.Transform.toString(transform), transition };
 
+  // Your own tier now runs 1-16, the same scale FantasyPros use, so a hand-set 3 means
+  // the same thing as the 3 it replaces. Sixteen is too many to click through blind, so
+  // the cycle ENTERS at whatever the badge is already showing — one click adopts
+  // FantasyPros' tier as your own, which is the common case — and steps up from there.
+  // Shift-click steps back, and stepping off either end clears it.
   const cycleTier = (e) => {
     e.stopPropagation();
-    const tiers = [null, 1, 2, 3, 4, 5];
-    const idx = tiers.indexOf(player.tier ?? null);
-    onUpdate(player.id, { tier: tiers[(idx + 1) % tiers.length] });
+    const back = e.shiftKey;
+    const cur = player.tier ?? null;
+    if (cur == null) {
+      onUpdate(player.id, { tier: back ? TIER_MAX : (player.tier_fp ?? 1) });
+      return;
+    }
+    const next = cur + (back ? -1 : 1);
+    onUpdate(player.id, { tier: next < 1 || next > TIER_MAX ? null : next });
   };
 
   const startEditRank = () => {
@@ -185,12 +214,12 @@ export default function PlayerRow({
   const gapNorm = (sleeperBaseline?.positional_norms?.[player.position]) ?? 0;
   const gapVsNorm = player.sleeper_gap == null ? null : player.sleeper_gap - gapNorm;
 
-  // FantasyPros publishes real expert tiers. They sit on their own scale (theirs run
-  // well past five) so they do not drive the badge, but they are worth naming where the
-  // badge explains itself.
-  const fpTierNote = player.fp_tier != null
-    ? ` · FantasyPros put him in their tier ${player.fp_tier}`
-    : '';
+  // The badge shows your own tier if you set one, otherwise FantasyPros' — off their
+  // OVERALL board for the format on screen, so a Tier 4 back and a Tier 4 receiver are
+  // the same rung. Their boards run to sixteen and a player past the end of one has no
+  // tier at all rather than a made-up last number.
+  const shownTier = player.tier ?? player.tier_fp ?? null;
+  const tierIsMine = player.tier != null;
 
   // Position rank in the format currently on screen, not whichever source ranked
   // him highest.
@@ -521,27 +550,22 @@ export default function PlayerRow({
 
     tier: (
       <td key="tier" className={`${cellClass} w-14 text-center`}>
-        {player.tier ? (
+        {shownTier != null ? (
           <button
             onClick={cycleTier}
-            className={`tier-badge w-7 h-7 text-xs tier-${player.tier}`}
-            title={`Your own tier ${player.tier}${fpTierNote} · click to cycle`}
+            className={`tier-badge w-7 h-7 text-xs tier-${shownTier}${
+              tierIsMine ? '' : ' border-dashed opacity-70'}`}
+            title={tierIsMine
+              ? `Your own tier ${shownTier}${player.tier_fp != null ? ` · FantasyPros have him in tier ${player.tier_fp}` : ''} · click to step up, shift-click to step back`
+              : `FantasyPros' tier ${shownTier}, off their overall board for this format — so it means the same rung at every position. Dashed because it is theirs; click to adopt it as your own.`}
           >
-            T{player.tier}
-          </button>
-        ) : player.tier_auto ? (
-          <button
-            onClick={cycleTier}
-            className="tier-badge w-7 h-7 text-xs border-dashed border-[#2e3148] text-[#555875] hover:text-[#8b90a8] opacity-50"
-            title={`Tier ${player.tier_auto}, drawn from where his consensus number falls: the bands are the first half round, then rounds 1½, 3 and 6 at this league size. Not anyone’s expert tiers${fpTierNote}. Dashed because it is automatic — click to set your own.`}
-          >
-            T{player.tier_auto}
+            T{shownTier}
           </button>
         ) : (
           <button
             onClick={cycleTier}
-            className="tier-badge w-7 h-7 text-xs border-[#2e3148] text-[#555875] hover:text-[#8b90a8]"
-            title="Click to set tier"
+            className="tier-badge w-7 h-7 text-xs border-dashed border-[#2e3148] text-[#555875] hover:text-[#8b90a8]"
+            title="Past the end of FantasyPros' board for this format — untiered. Click to set your own, shift-click to start from the bottom."
           >
             –
           </button>

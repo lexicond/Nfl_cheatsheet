@@ -251,6 +251,10 @@ td.dim { color: var(--muted); }
   margin-bottom: 3px;
 }
 .tier-lab::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+/* Dashed, because this group is not a tier anyone published — it is everyone past
+   the end of FantasyPros' board for the format on screen. */
+.tier-lab-none { font-style: italic; }
+.tier-lab-none::after { background: none; border-top: 1px dashed var(--rule); height: 0; }
 .tier ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
 .tier li { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; }
 .tier li .n { font-family: var(--sans); font-size: 12.5px; font-weight: 600; letter-spacing: -.01em; }

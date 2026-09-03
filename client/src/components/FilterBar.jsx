@@ -4,9 +4,15 @@ import SourcePanel from './SourcePanel';
 import DraftSyncPanel from './DraftSyncPanel';
 
 const POSITIONS = ['QB', 'RB', 'WR', 'TE'];
-const TIERS = [1, 2, 3, 4, 5];
+
+// The tier buttons used to be a fixed T1–T5, because the tier was a band of ADP rounds
+// computed on the server. It is FantasyPros' now and their boards run to sixteen, so the
+// buttons come from what this format actually has. 0 is the untiered button — everyone
+// past the end of their board, which is where the tier sort puts them.
+const UNTIERED = 0;
 
 const SORT_COMMON = [
+  { value: 'tier', label: 'Tier' },
   { value: 'personal_rank', label: 'My Rank' },
   { value: 'projected_pts', label: 'Proj Pts' },
 ];
@@ -68,7 +74,7 @@ const SCARCITY = {
 const FilterBar = forwardRef(function FilterBar(
   { filters, setFilter, sourceStatus, refreshing, onRefresh, format, setFormat,
     leagueType, setLeagueType, view, excluded, onToggleSource, onEnableAllSources,
-    formatLabel, teamSize, setTeamSize,
+    formatLabel, tiers, teamSize, setTeamSize,
     draft, onConnectDraft, onDisconnectDraft, onSyncDraft, onLookupDrafts,
     draftConnecting, draftError, onClearDraftError },
   ref
@@ -148,14 +154,14 @@ const FilterBar = forwardRef(function FilterBar(
           <button
             onClick={() => setFilter('tier', null)}
             className={`text-xs px-2 py-1 rounded border font-medium transition-colors ${
-              !filters.tier
+              filters.tier == null
                 ? 'bg-white/10 border-white/30 text-white'
                 : 'border-[#2e3148] text-[#555875] hover:text-[#8b90a8]'
             }`}
           >
             ALL
           </button>
-          {TIERS.map(t => (
+          {(tiers?.present || []).map(t => (
             <button
               key={t}
               onClick={() => toggleTier(t)}
@@ -166,6 +172,18 @@ const FilterBar = forwardRef(function FilterBar(
               T{t}
             </button>
           ))}
+          {tiers?.untiered > 0 && (
+            <button
+              onClick={() => toggleTier(UNTIERED)}
+              title={`${tiers.untiered} players past the end of FantasyPros' board for this format`}
+              className={`text-xs px-2 py-1 rounded border font-bold transition-colors tier-badge border-dashed ${
+                filters.tier === UNTIERED
+                  ? 'tier-none' : 'border-[#2e3148] text-[#555875] hover:text-[#8b90a8]'
+              }`}
+            >
+              T–
+            </button>
+          )}
         </div>
 
         <div className="hidden sm:block w-px h-5 bg-[#2e3148]" />

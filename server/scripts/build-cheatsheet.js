@@ -140,6 +140,11 @@ const players = rows.filter(r => keep.has(r.id)).map(r => ({
   sld: num(r.adp_sl_dyn), slds: num(r.adp_sl_dyn_sf),
   age: r.age == null ? null : Math.round(Number(r.age)),
   dy: num(r.dyn_rank_consensus), dys: num(r.dyn_rank_consensus_sf),
+  // FantasyPros' own tier off each of its overall boards — what the Tiers view groups
+  // on. One per board because they are not interchangeable: the superflex board lifts
+  // quarterbacks into the top rounds and pushes everyone else down a tier or two.
+  ftb: r.fp_tier, ftr: r.fp_tier_rd, fts: r.fp_tier_sf,
+  ftd: r.fp_tier_dyn, ftds: r.fp_tier_dyn_sf,
 }));
 
 const meta = {};
@@ -344,7 +349,7 @@ ${css}
   <section class="sec" id="cols-sec" hidden>
     <div class="sec-head">
       <h2>Positional tiers</h2>
-      <p>Tiers cut where the market leaves a real gap, not at round numbers — the last name in a tier is the one worth reaching for.</p>
+      <p>FantasyPros' own tiers off the overall board for the format on screen, split by position — so a Tier 4 running back and a Tier 4 receiver really are the same rung, and the last name in a tier is the one worth reaching for. Numbers run from the overall board, so a position that has nobody in the early tiers starts further down. Anyone FantasyPros has not tiered is listed last.</p>
     </div>
     <div class="cols" id="cols"></div>
   </section>

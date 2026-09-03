@@ -16,32 +16,32 @@ const POS_ALLOW = new Set(['QB', 'RB', 'WR', 'TE']);
 const FP_SOURCES = [
   {
     url: 'https://www.fantasypros.com/nfl/rankings/best-ball-overall.php',
-    column: 'adp_fantasypros', label: 'Best Ball', primary: true,
-    expect: { type: 'Best Ball', scoring: 'PPR' },
+    column: 'adp_fantasypros', tierColumn: 'fp_tier', label: 'Best Ball', primary: true,
+    expect: { type: 'Best Ball', scoring: 'PPR', position: 'ALL' },
   },
   {
     url: 'https://www.fantasypros.com/nfl/rankings/half-point-ppr-cheatsheets.php',
-    column: 'adp_fp_rd', label: 'Redraft ½PPR',
-    expect: { type: 'Draft Half PPR', scoring: 'HALF' },
+    column: 'adp_fp_rd', tierColumn: 'fp_tier_rd', label: 'Redraft ½PPR',
+    expect: { type: 'Draft Half PPR', scoring: 'HALF', position: 'ALL' },
   },
   {
     // superflex-cheatsheets.php is the STANDARD-scoring superflex board; this app
     // is half-PPR throughout, so it uses the half-PPR superflex board instead.
     url: 'https://www.fantasypros.com/nfl/rankings/half-point-ppr-superflex-cheatsheets.php',
-    column: 'adp_fp_sf', label: 'Superflex ½PPR',
-    expect: { type: 'Draft Half PPR', scoring: 'HALF' },
+    column: 'adp_fp_sf', tierColumn: 'fp_tier_sf', label: 'Superflex ½PPR',
+    expect: { type: 'Draft Half PPR', scoring: 'HALF', position: 'OP' },
   },
   {
     url: 'https://www.fantasypros.com/nfl/rankings/dynasty-overall.php',
-    column: 'adp_fp_dyn', label: 'Dynasty',
-    expect: { type: 'Dynasty', scoring: 'PPR' },
+    column: 'adp_fp_dyn', tierColumn: 'fp_tier_dyn', label: 'Dynasty',
+    expect: { type: 'Dynasty', scoring: 'PPR', position: 'ALL' },
   },
   {
     // dynasty-superflex-overall.php and the ppr-/half-point-ppr- prefixed variants all
     // redirect to the generic redraft board; this is the real one.
     url: 'https://www.fantasypros.com/nfl/rankings/dynasty-superflex.php',
-    column: 'adp_fp_dyn_sf', label: 'Dynasty SF',
-    expect: { type: 'Dynasty', scoring: 'PPR' },
+    column: 'adp_fp_dyn_sf', tierColumn: 'fp_tier_dyn_sf', label: 'Dynasty SF',
+    expect: { type: 'Dynasty', scoring: 'PPR', position: 'OP' },
   },
 ];
 
@@ -60,6 +60,16 @@ async function scrapeFpPage(url, expect) {
       throw new Error(
         `${url} served "${data.type}/${data.scoring}", expected "${expect.type}/${expect.scoring}" ` +
         '— the page most likely now redirects to a different board'
+      );
+    }
+    // The tier stored off these pages is an OVERALL tier, and that is only true while
+    // the payload is the overall board. `?position=RB` and the positional pages return
+    // the same type and scoring with per-position tiers numbered from 1, which would be
+    // written into the same column and read as though a WR3 were an overall Tier 3.
+    if (data.position_id !== expect.position) {
+      throw new Error(
+        `${url} served the ${data.position_id} board, expected ${expect.position} ` +
+        '— its tiers would be positional rather than overall'
       );
     }
   }
@@ -118,7 +128,7 @@ async function fetchFantasyPros() {
       continue;
     }
 
-    const { column, label, players, primary } = result.value;
+    const { column, tierColumn, label, players, primary } = result.value;
     if (players.length === 0) {
       failures.push(`${label}: empty`);
       continue;
@@ -128,18 +138,26 @@ async function fetchFantasyPros() {
     const updateRank = db.prepare(`
       UPDATE players
       SET ${column} = @rank,
+          ${tierColumn} = @tier,
           nfl_team = COALESCE(@nfl_team, nfl_team),
           bye_week = COALESCE(@bye_week, bye_week),
           last_updated = @ts
       WHERE id = @id
     `);
+    // A tier has to be withdrawn, not merely written. FantasyPros drops players off a
+    // board between runs, and a tier left behind reads as current because every column
+    // beside it is — the cheat sheet would go on grouping a man nobody ranks any more
+    // into Tier 4. Cleared inside the transaction, so a board that failed to fetch is
+    // skipped entirely and keeps what it had.
+    const clearTiers = db.prepare(`UPDATE players SET ${tierColumn} = NULL`);
     const updatePrimaryExtras = db.prepare(`
-      UPDATE players SET pos_rank_fantasypros = @pos_rank, fp_tier = @tier WHERE id = @id
+      UPDATE players SET pos_rank_fantasypros = @pos_rank WHERE id = @id
     `);
 
     const claim = createClaimGuard(`FantasyPros ${label}`);
     const count = db.transaction(() => {
       let n = 0;
+      clearTiers.run();
       for (const p of players) {
         let target = findPlayer(p.name, p.position, p.nfl_team);
 
@@ -158,8 +176,11 @@ async function fetchFantasyPros() {
         }
         if (!target || !claim(target.id, p.name)) continue;
 
-        updateRank.run({ id: target.id, rank: p.rank, nfl_team: p.nfl_team, bye_week: p.bye_week, ts: now });
-        if (primary) updatePrimaryExtras.run({ id: target.id, pos_rank: p.pos_rank, tier: p.tier });
+        updateRank.run({
+          id: target.id, rank: p.rank, tier: p.tier,
+          nfl_team: p.nfl_team, bye_week: p.bye_week, ts: now,
+        });
+        if (primary) updatePrimaryExtras.run({ id: target.id, pos_rank: p.pos_rank });
         n++;
       }
       return n;

@@ -16,6 +16,16 @@ const TEAM_SIZES = [8, 10, 12, 14];
 // the sources currently switched on without this list needing to know about them.
 const DERIVED_SORTS = {
   personal_rank: { get: r => r.personal_rank, dir: 'asc' },
+  // Yours if you set one, otherwise FantasyPros'. A tier is a band, not an ordering, so
+  // it needs the tie-break: without one a whole tier would come back alphabetical.
+  // Untiered players carry null and the comparator sinks every null to the bottom, so
+  // they land after Tier 16 rather than being given a made-up number that would read
+  // as FantasyPros' opinion.
+  tier: {
+    get: r => r.tier ?? r.tier_fp ?? null,
+    dir: 'asc',
+    tie: (a, b) => cmpNullsLast(a.adp_consensus, b.adp_consensus),
+  },
   adp_consensus: { get: r => r.adp_consensus, dir: 'asc' },
   projected_pts: { get: r => r.projected_pts, dir: 'desc' },
   xfp_points:    { get: r => r.xfp_points, dir: 'desc' },
@@ -28,6 +38,15 @@ const DERIVED_SORTS = {
   spread:        { get: r => r.spread, dir: 'desc' },
   sleeper_gap:   { get: r => r.sleeper_gap, dir: 'desc' },
 };
+
+// Ascending, with a missing value last rather than first — the same rule the board's
+// own comparator applies to its primary key.
+function cmpNullsLast(a, b) {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return a - b;
+}
 
 /**
  * Resolve a requested sort key.
@@ -63,17 +82,20 @@ const SIGNAL_COLUMNS = [
   'projected_pts', 'xfp_points',
 ];
 
-// Tier boundaries in rounds rather than picks, so they follow the league size.
-const TIER_ROUNDS = [0.5, 1.5, 3, 6];
-
-function tierForPick(pick, teamSize) {
-  if (pick == null) return null;
-  const round = pick / teamSize;
-  for (let i = 0; i < TIER_ROUNDS.length; i++) {
-    if (round <= TIER_ROUNDS[i]) return i + 1;
-  }
-  return 5;
-}
+// The default tier is FantasyPros' own, off its OVERALL board for the format on screen.
+// It used to be a band of ADP rounds computed here, which was a restatement of the
+// consensus column sitting next to it rather than anybody's opinion about where the
+// talent actually breaks.
+//
+// One column per board because they are not interchangeable: the superflex board lifts
+// quarterbacks into Tier 1, which pushes every receiver down a rung. Best ball has no
+// superflex board of its own and borrows the redraft superflex one, exactly as that
+// view's consensus already does.
+const FP_TIER_COLUMN = {
+  'BB:1QB': 'fp_tier', 'BB:2QB': 'fp_tier_sf',
+  'RD:1QB': 'fp_tier_rd', 'RD:2QB': 'fp_tier_sf',
+  'DYN:1QB': 'fp_tier_dyn', 'DYN:2QB': 'fp_tier_dyn_sf',
+};
 
 // GET /api/players
 router.get('/', (req, res) => {
@@ -177,7 +199,7 @@ router.get('/', (req, res) => {
         adp_trend: adpTrend,
         // Dynasty's headline is already a rank, so it needs no pick-to-round mapping.
         round: headline != null && format !== 'DYN' ? Math.ceil(headline / teamSize) : null,
-        tier_auto: tierForPick(headline, teamSize),
+        tier_fp: r[FP_TIER_COLUMN[`${format}:${leagueType}`]] ?? null,
       };
     });
 
@@ -337,11 +359,16 @@ router.get('/', (req, res) => {
     const result = relevant.filter(p => {
       if (positions.length > 0 && !positions.includes(p.position)) return false;
       // Filter on the tier the board actually shows him in: yours if you set one,
-      // otherwise the automatic one. Matching only hand-set tiers meant the T1-T5
-      // buttons emptied the board for anyone who had never set one by hand — which is
-      // everyone, by default, while every row displays an automatic tier badge.
-      if (tierFilter != null && Number.isFinite(tierFilter)
-        && (p.tier ?? p.tier_auto) !== tierFilter) return false;
+      // otherwise FantasyPros'. Matching only hand-set tiers meant the tier buttons
+      // emptied the board for anyone who had never set one by hand — which is
+      // everyone, by default, while every row displays a tier badge.
+      //
+      // 0 is the "untiered" button: nobody FantasyPros has not tiered can carry a real
+      // tier, so it selects exactly the players the tier sort sinks to the bottom.
+      if (tierFilter != null && Number.isFinite(tierFilter)) {
+        const shown = p.tier ?? p.tier_fp ?? null;
+        if (tierFilter === 0 ? shown != null : shown !== tierFilter) return false;
+      }
       if (starred === '1' && !p.starred) return false;
       if (drafted !== '1' && p.drafted) return false;
       if (needle && !p.name.toLowerCase().includes(needle)) return false;
@@ -357,7 +384,7 @@ router.get('/', (req, res) => {
     ];
     const resolved = sortSpec(sort, sortable);
     const effectiveSort = resolved ? sort : DEFAULT_SORT[format];
-    const { get, dir } = resolved || DERIVED_SORTS[DEFAULT_SORT[format]];
+    const { get, dir, tie } = resolved || DERIVED_SORTS[DEFAULT_SORT[format]];
 
     result.sort((a, b) => {
       // Drafted players always sink, whatever the sort.
@@ -365,10 +392,10 @@ router.get('/', (req, res) => {
       const av = get(a);
       const bv = get(b);
       // Unranked players sort last rather than jumbling in at the top.
-      if (av == null && bv == null) return a.name.localeCompare(b.name);
+      if (av == null && bv == null) return (tie && tie(a, b)) || a.name.localeCompare(b.name);
       if (av == null) return 1;
       if (bv == null) return -1;
-      if (av === bv) return a.name.localeCompare(b.name);
+      if (av === bv) return (tie && tie(a, b)) || a.name.localeCompare(b.name);
       return dir === 'desc' ? bv - av : av - bv;
     });
 
@@ -380,6 +407,15 @@ router.get('/', (req, res) => {
       // What the board was actually ordered by, so the client can correct a stale choice.
       sort: effectiveSort,
       sleeper_baseline: baseline ? { ...baseline, positional_norms: sleeperNorms } : null,
+      // The tiers this format actually has, so the filter buttons can offer exactly
+      // those. Counted over `relevant` rather than `result`, or picking a tier would
+      // narrow the board and then narrow the buttons to the one already picked.
+      // `untiered` is how many carry no tier at all — the players the tier sort sinks.
+      tiers: {
+        present: [...new Set(relevant.map(p => p.tier ?? p.tier_fp).filter(t => t != null))]
+          .sort((a, b) => a - b),
+        untiered: relevant.filter(p => (p.tier ?? p.tier_fp) == null).length,
+      },
       // What each position's value-over-replacement is measured against, so the board
       // can explain a VOR number rather than just printing it.
       xfp_replacement: xfpLevels,
@@ -405,7 +441,7 @@ const RESPONSE_FIELDS = [
   'ktc_value', 'fc_value', 'ds_value', 'dp_value', 'adp_fp_dyn', 'adp_sl_dyn',
   'mkt_points', 'mkt_pass_yards', 'mkt_rush_yards', 'mkt_rec_yards',
   'mkt_pass_tds', 'mkt_rush_tds', 'mkt_rec_tds', 'mkt_receptions', 'mkt_books', 'mkt_complete', 'mkt_adjusted',
-  'age', 'fp_tier', 'tier_auto', 'round', 'spread', 'sleeper_gap',
+  'age', 'fp_tier', 'tier_fp', 'round', 'spread', 'sleeper_gap',
   'ff_pos_rank', 'ff_points',
   'personal_rank', 'tier', 'starred', 'flagged', 'drafted', 'drafted_manual',
   'draft_pick_no', 'draft_round', 'drafted_by', 'drafted_by_me',

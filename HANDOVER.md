@@ -1,3 +1,148 @@
+# Handover — 3 September 2026
+
+Branch: `claude/nfl-cheatsheet-tiers-snmimd`. Read `CLAUDE.md` first; it holds the traps
+that will otherwise cost you hours. The previous handover, covering the ageing curve and
+the market prior, is below this section and still describes the model accurately.
+
+## Why this branch exists
+
+The cheat sheet's Tiers view cut its own tier breaks — wherever the consensus left a gap
+wider than `max(2.5, adp × 0.14)`. That is a defensible heuristic and it is nobody's
+published opinion, so a tier on the sheet did not correspond to a tier anyone in the room
+would recognise. It now shows **FantasyPros' own tiers**, and so does the app board —
+which was showing a third thing again, a band of ADP rounds computed on the server. The
+second half of this handover covers that and an expert round-up imported onto the board
+as stars, flags and notes.
+
+## What changed
+
+**Every FantasyPros board's tier is stored, not just the best-ball one.** The scraper
+already read `tier` off `ecrData` and wrote it from the primary page alone. All five
+boards publish one and they are not interchangeable — the superflex board lifts six
+quarterbacks into Tier 1, which pushes Ja'Marr Chase from Tier 1 to Tier 2 and everyone
+behind him further — so there is now a column per board: `fp_tier` (best ball, unchanged
+name), `fp_tier_rd`, `fp_tier_sf`, `fp_tier_dyn`, `fp_tier_dyn_sf`.
+
+**The Tiers view groups on them.** `TIER_FIELD` in `cheatsheet/board.js` picks the board
+matching the view, borrowing the superflex redraft board for best-ball 2QB exactly as that
+view's consensus already does. `tierBreaks()` is gone. The app board and the printable
+board's new `Tier` column read the same columns — see the second half of this handover.
+
+**These are overall tiers rendered in positional columns, and that is the point.** Tier 4
+means the same rung in the running back column as in the receiver column, which is what
+you actually want mid-draft. The cost is that a column starts wherever its best player
+lands: on the half-PPR redraft board the QB column opens at Tier 3 and the TE column at
+Tier 2, and both skip numbers further down. Order *within* a tier is still the sheet's own
+headline consensus, not FantasyPros' — so a tier can run against their ranking internally.
+
+**Anyone FantasyPros has not tiered goes in a trailing `Untiered` group**, italic and
+under a dashed rule, rather than being folded into the nearest tier — which would be
+inventing an opinion. On the live board that is three quarterbacks and four tight ends at
+the deep end of the redraft view: players Sleeper and Underdog rank and FantasyPros' board
+does not reach.
+
+## Two things this forced, both in `CLAUDE.md`
+
+**`expect` now asserts `position_id`.** Type and scoring alone do not prove a board is the
+overall one. `half-point-ppr-cheatsheets.php?position=RB` returns `Draft Half PPR`/`HALF`
+exactly like the overall page and tiers each position from 1 — written into an overall
+column that reads a WR3 as an overall Tier 3. The trap runs the other way too:
+`half-point-ppr-qb-cheatsheets.php` looks like the half-PPR QB board and is really the
+generic STANDARD overall board (`Draft`/`STD`/`ALL`, 440 players). The real QB draft board
+is `qb-cheatsheets.php`.
+
+**A tier is withdrawn, not merely written.** Same lesson as the projection column:
+FantasyPros drops players off a board between runs and a stale tier reads as current
+because every column beside it is. Each board nulls its own tier column inside the
+transaction that refills it, so a board that failed to fetch is skipped whole and keeps
+what it had.
+
+## What checks it
+
+`validate-sources.js` grew a section, and both halves were confirmed to fail when the data
+is deliberately corrupted:
+
+- Sorted by a board's own ECR rank, its tier can only ever go up. A per-position payload
+  written into an overall column sawtooths once per position — the simulated version was
+  caught at 200 places.
+- Only the superflex boards may tier quarterbacks first. Redraft ½PPR and Dynasty must
+  have zero QBs in Tier 1; Superflex ½PPR has six and Dynasty SF three.
+- Coverage: at least 98% of the players carrying a board's rank must carry its tier, since
+  the two are written by the same statement.
+
+`validate-sources.js` and `validate-draft-sync.js` both pass. The sheet was rebuilt and
+loaded in a browser across all six format/league views with no console errors.
+
+## Then the app board, and an expert round-up
+
+**The app board defaults to the same tiers.** `tier_auto` — the ADP round bands computed
+in `routes/players.js` — is gone; the field is `tier_fp`, picked per format by
+`FP_TIER_COLUMN`. The badge is solid when the tier is yours and dashed when it is
+FantasyPros'. The T1–T5 filter buttons are now built from the tiers the format actually
+has, served in the response's `tiers.present` and counted *before* the tier filter is
+applied — count them after and picking a tier narrows the buttons to the one already
+picked. A `T–` button selects the untiered, as filter value 0.
+
+**Sorting by tier** is a new option in both the app and the cheat sheet. A tier is a band
+rather than an ordering, so it carries a tie-break to consensus — without one a whole tier
+comes back alphabetical. The untiered keep a null and ride the comparators' existing
+nulls-last rule to the bottom, rather than being handed a made-up final tier number: that
+would read as FantasyPros' opinion about players they declined to rank. Measured on the
+live redraft board, 356 of 376 are tiered and the other 20 land last with none interleaved.
+The printable sheet grew a `Tier` column to go with it, since a sort on a column you
+cannot see is worse than no sort.
+
+**The expert round-up is applied by a script, not by hand.**
+`server/data/expert-board-2026.json` holds the round-up — 17 targets, 15 fades, 5
+contested — and `node server/scripts/apply-expert-board.js` stars the targets, flags the
+fades and writes the verdict, the cost, who is saying it and the reasoning into each
+player's Upside and Downside notes. All 34 matched. It is idempotent, never clears a star
+or flag you set, never touches your rank, tier, drafted mark or Personal Notes, and
+refuses to overwrite a note it did not write.
+
+It matches on **name and position only**. The board is the authority on which team a
+player is on and the round-up is not: it has Michael Pittman Jr. on IND where the board
+has him on PIT — and the round-up's own DK Metcalf note ("Pittman + Bernard cut in")
+agrees with the board. Disagreements are printed, never resolved silently.
+
+**Run it wherever the database lives** — `railway run node server/scripts/apply-expert-board.js`
+on Railway. `draft.db` is git-ignored and the container's copy is throwaway, so applying it
+here does not reach the deployed board.
+
+### One trap this turned up
+
+`note_sources` — the field the UI labels "Analyst Notes" — is the obvious home for
+imported analysis and is the one field that must not be used for it. `scrapers/sleeper.js`
+rewrites every player's projected stat line into it on every refresh and stands off only
+where the text does not begin `Sleeper `. Writing there would displace that line for
+exactly the 34 players worth reading about *and* freeze it for them for ever, with nothing
+on screen to say the numbers had stopped updating. The verdict goes at the head of the
+upside or downside note instead.
+
+**Your own tier runs on the same 1–16 scale.** It cycled 1–5, which meant a hand-set 3
+and FantasyPros' 3 were two different measurements sharing one column. Sixteen is too
+many to click through blind, so the row badge's cycle enters at `tier_fp` — the first
+click adopts what is already showing, which is the common case — steps up from there,
+steps back on shift-click, and clears off either end. The modal keeps explicit buttons,
+now 1–16 and wrapping, with a faint ring on whichever one is FantasyPros'.
+
+`TIER_BORDER` — the stripe marking a row you tiered by hand — is written out to sixteen
+rather than built from a hue list, because Tailwind scans the source for literal class
+names and purges anything assembled at runtime.
+
+## Not done, and worth knowing
+
+Two places the imported round-up does not reach, both left deliberately:
+
+- The **printable cheat sheet** carries no star or flag at all — `build-cheatsheet.js`
+  does not put them in the payload — so the round-up is invisible on the thing you take
+  into the draft room.
+- The five **contested** players get no marker on any board. They are neither starred nor
+  flagged by design, since asserting one verdict would throw away the disagreement that
+  put them on the list, but that does leave them findable only through the notes.
+
+---
+
 # Handover — 24 August 2026
 
 Branch: `claude/fantasy-points-prediction-review-tw9vif`. Read `CLAUDE.md` first; it holds

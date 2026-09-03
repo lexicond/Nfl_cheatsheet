@@ -228,22 +228,41 @@ function pool() {
   return state.hideTaken ? rows.filter(p => !p.taken) : rows;
 }
 
-// Tier breaks fall where the market itself leaves a gap, not on round numbers.
-// The gap that counts as a break widens as ADP gets deeper, because a two-pick
-// difference at pick 5 means far more than at pick 120.
-function tierBreaks(list) {
-  const tiers = [];
-  let cur = [];
-  for (let i = 0; i < list.length; i++) {
-    cur.push(list[i]);
-    const next = list[i + 1];
-    if (!next) break;
-    const gap = next.h - list[i].h;
-    const threshold = Math.max(2.5, list[i].h * 0.14);
-    if (gap >= threshold && cur.length >= 2) { tiers.push(cur); cur = []; }
+// Which FantasyPros board's tier belongs to each view. They are not interchangeable:
+// the superflex board lifts quarterbacks into the top rounds and pushes everyone else
+// down a tier or two, and dynasty tiers a different population again. Best ball has no
+// superflex board of its own, so its 2QB view borrows the same one the 2QB consensus
+// above already uses.
+const TIER_FIELD = {
+  'BB:1QB': 'ftb', 'BB:2QB': 'fts',
+  'RD:1QB': 'ftr', 'RD:2QB': 'fts',
+  'DYN:1QB': 'ftd', 'DYN:2QB': 'ftds',
+};
+
+// The tiers are FantasyPros' own, off its OVERALL board for the format on screen — so
+// Tier 4 means the same rung in the running back column as in the receiver column, and
+// a position with nobody in the early tiers legitimately starts at Tier 3 and skips
+// numbers. That cross-position comparability is the reason to take theirs rather than
+// cut the sheet's own breaks per column.
+//
+// Order inside a tier is this sheet's headline, which is the consensus of every source
+// left switched on and is deliberately not FantasyPros' order — so a tier can run
+// against their ranking within itself. Anyone they have not tiered goes last rather
+// than being folded into the nearest tier, which would be inventing an opinion.
+function fpTierGroups(list) {
+  const field = TIER_FIELD[key()];
+  const byTier = new Map();
+  const untiered = [];
+  for (const p of list) {
+    const t = field ? p[field] : null;
+    if (t == null) { untiered.push(p); continue; }
+    if (!byTier.has(t)) byTier.set(t, []);
+    byTier.get(t).push(p);
   }
-  if (cur.length) tiers.push(cur);
-  return tiers;
+  const groups = [...byTier.keys()].sort((a, b) => a - b)
+    .map(t => ({ lab: 'Tier ' + t, players: byTier.get(t) }));
+  if (untiered.length) groups.push({ lab: 'Untiered', players: untiered, untiered: true });
+  return groups;
 }
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -298,6 +317,7 @@ function renderBoard(rows) {
   const head = `<thead><tr>
     <th class="l">#</th><th class="l">Player</th><th>Pos</th>
     <th>${state.format === 'DYN' ? 'Age' : 'Bye'}</th>
+    <th title="FantasyPros' tier off their overall board for this format, so it means the same rung at every position. A dash is a player past the end of their board.">Tier</th>
     ${cols.map(c => `<th>${esc(c[0])}</th>`).join('')}
     <th>${state.format === 'DYN' ? 'Rank' : 'Consensus'}</th>
     ${state.format === 'DYN' ? '' : '<th>Rd</th>'}
@@ -308,7 +328,8 @@ function renderBoard(rows) {
     <th>Proj</th><th>Proj rk</th>
   </tr></thead>`;
 
-  const colCount = 4 + cols.length + (state.format === 'DYN' ? 3 : 4) + 2 + (showModel ? 2 : 0);
+  // 4 fixed columns, plus the tier, plus the sources, plus the trailing block.
+  const colCount = 5 + cols.length + (state.format === 'DYN' ? 3 : 4) + 2 + (showModel ? 2 : 0);
   // Round markers only mean anything while the board is in draft order. Under any other
   // sort they would interleave — Round 34, Round 19, Round 31 — so they are dropped and
   // the Rd column carries the round instead.
@@ -355,6 +376,7 @@ function renderBoard(rows) {
         <div class="pmeta">${esc(p.t || 'FA')} &middot; ${p.p}${p.pr_pos}${p.sc < 2 ? ' &middot; 1 source' : ''}</div></td>
       <td><span class="chip ${p.p}">${p.p}</span></td>
       <td class="dim">${(state.format === 'DYN' ? p.age : p.b) ?? '&ndash;'}</td>
+      <td class="dim">${p[TIER_FIELD[key()]] == null ? '&ndash;' : 'T' + p[TIER_FIELD[key()]]}</td>
       ${cols.map(c => { const v = c[1](p); return `<td class="dim">${v == null ? '&ndash;' : (v > 999 ? v.toLocaleString() : fmt1(v))}</td>`; }).join('')}
       <td class="big">${fmt1(p.h)}</td>
       ${state.format === 'DYN' ? '' : `<td class="dim">${p.round}</td>`}
@@ -385,12 +407,14 @@ function renderCols(rows) {
   const shown = state.pos ? [state.pos] : POS;
   document.getElementById('cols').innerHTML = shown.map(pos => {
     const list = rows.filter(p => p.p === pos).slice(0, 48);
-    const tiers = tierBreaks(list);
+    const tiers = fpTierGroups(list);
     return `<div>
       <div class="col-head ${pos}">${pos}<span>${list.length}</span></div>
-      ${tiers.map((t, i) => `<div class="tier">
-        <div class="tier-lab">Tier ${i + 1}</div>
-        <ol>${t.map(p => `<li>
+      ${tiers.map(g => `<div class="tier">
+        <div class="tier-lab${g.untiered ? ' tier-lab-none' : ''}"${g.untiered
+          ? ' title="Beyond the end of FantasyPros&#39; board for this format — they have not tiered him"'
+          : ''}>${g.lab}</div>
+        <ol>${g.players.map(p => `<li>
           <span class="n">${esc(p.n)}</span>
           <span class="t">${esc(p.t || 'FA')}${state.format === 'DYN' ? (p.age ? ' · ' + p.age : '') : (p.b ? ' · ' + p.b : '')}</span>
           <span class="a">${fmt1(p.h)}</span>
@@ -464,6 +488,7 @@ function renderSortOptions() {
   const opts = [
     ['', state.format === 'DYN' ? 'Dynasty rank' : 'Consensus'],
     ...[...activeSources(), ...refs].map(([f, label]) => [f, label]),
+    ['__tier', "FantasyPros' tier"],
     ['__gap', 'Cheapest on Sleeper'],
     ['__split', 'Most disagreement'],
     ...(state.format === 'DYN' ? [['__age', 'Age (youngest)']] : []),
@@ -486,8 +511,17 @@ function sortRows(rows) {
     if (av == null && bv == null) return a.h - b.h;
     if (av == null) return 1;
     if (bv == null) return -1;
+    // Equal values fall back to the consensus too. It matters for a tier, which is a
+    // band rather than an ordering: without it a whole tier would come back in
+    // whatever order the rows happened to arrive in.
+    if (av === bv) return a.h - b.h;
     return dir === 'desc' ? bv - av : av - bv;
   });
+  // A tier is a band, not an ordering, so the fallback inside `by` does the real work:
+  // players sharing a tier come back in consensus order, and the untiered — everyone
+  // past the end of FantasyPros' board for this format — sink to the bottom rather than
+  // being given a made-up last tier number.
+  if (k === '__tier') return by(p => p[TIER_FIELD[key()]], 'asc');
   if (k === '__gap') return by(p => p.slGapAdj, 'desc');
   if (k === '__split') return by(p => p.spread, 'desc');
   if (k === '__age') return by(p => p.age, 'asc');
