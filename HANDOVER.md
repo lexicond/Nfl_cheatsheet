@@ -9,7 +9,10 @@ the market prior, is below this section and still describes the model accurately
 The cheat sheet's Tiers view cut its own tier breaks — wherever the consensus left a gap
 wider than `max(2.5, adp × 0.14)`. That is a defensible heuristic and it is nobody's
 published opinion, so a tier on the sheet did not correspond to a tier anyone in the room
-would recognise. It now shows **FantasyPros' own tiers**.
+would recognise. It now shows **FantasyPros' own tiers**, and so does the app board —
+which was showing a third thing again, a band of ADP rounds computed on the server. The
+second half of this handover covers that and an expert round-up imported onto the board
+as stars, flags and notes.
 
 ## What changed
 
@@ -22,7 +25,8 @@ name), `fp_tier_rd`, `fp_tier_sf`, `fp_tier_dyn`, `fp_tier_dyn_sf`.
 
 **The Tiers view groups on them.** `TIER_FIELD` in `cheatsheet/board.js` picks the board
 matching the view, borrowing the superflex redraft board for best-ball 2QB exactly as that
-view's consensus already does. `tierBreaks()` is gone.
+view's consensus already does. `tierBreaks()` is gone. The app board and the printable
+board's new `Tier` column read the same columns — see the second half of this handover.
 
 **These are overall tiers rendered in positional columns, and that is the point.** Tier 4
 means the same rung in the running back column as in the receiver column, which is what
@@ -69,13 +73,57 @@ is deliberately corrupted:
 `validate-sources.js` and `validate-draft-sync.js` both pass. The sheet was rebuilt and
 loaded in a browser across all six format/league views with no console errors.
 
+## Then the app board, and an expert round-up
+
+**The app board defaults to the same tiers.** `tier_auto` — the ADP round bands computed
+in `routes/players.js` — is gone; the field is `tier_fp`, picked per format by
+`FP_TIER_COLUMN`. The badge is solid when the tier is yours and dashed when it is
+FantasyPros'. The T1–T5 filter buttons are now built from the tiers the format actually
+has, served in the response's `tiers.present` and counted *before* the tier filter is
+applied — count them after and picking a tier narrows the buttons to the one already
+picked. A `T–` button selects the untiered, as filter value 0.
+
+**Sorting by tier** is a new option in both the app and the cheat sheet. A tier is a band
+rather than an ordering, so it carries a tie-break to consensus — without one a whole tier
+comes back alphabetical. The untiered keep a null and ride the comparators' existing
+nulls-last rule to the bottom, rather than being handed a made-up final tier number: that
+would read as FantasyPros' opinion about players they declined to rank. Measured on the
+live redraft board, 356 of 376 are tiered and the other 20 land last with none interleaved.
+The printable sheet grew a `Tier` column to go with it, since a sort on a column you
+cannot see is worse than no sort.
+
+**The expert round-up is applied by a script, not by hand.**
+`server/data/expert-board-2026.json` holds the round-up — 17 targets, 15 fades, 5
+contested — and `node server/scripts/apply-expert-board.js` stars the targets, flags the
+fades and writes the verdict, the cost, who is saying it and the reasoning into each
+player's Upside and Downside notes. All 34 matched. It is idempotent, never clears a star
+or flag you set, never touches your rank, tier, drafted mark or Personal Notes, and
+refuses to overwrite a note it did not write.
+
+It matches on **name and position only**. The board is the authority on which team a
+player is on and the round-up is not: it has Michael Pittman Jr. on IND where the board
+has him on PIT — and the round-up's own DK Metcalf note ("Pittman + Bernard cut in")
+agrees with the board. Disagreements are printed, never resolved silently.
+
+**Run it wherever the database lives** — `railway run node server/scripts/apply-expert-board.js`
+on Railway. `draft.db` is git-ignored and the container's copy is throwaway, so applying it
+here does not reach the deployed board.
+
+### One trap this turned up
+
+`note_sources` — the field the UI labels "Analyst Notes" — is the obvious home for
+imported analysis and is the one field that must not be used for it. `scrapers/sleeper.js`
+rewrites every player's projected stat line into it on every refresh and stands off only
+where the text does not begin `Sleeper `. Writing there would displace that line for
+exactly the 34 players worth reading about *and* freeze it for them for ever, with nothing
+on screen to say the numbers had stopped updating. The verdict goes at the head of the
+upside or downside note instead.
+
 ## Not done, and worth knowing
 
-The **app** still shows `tier_auto` — the ADP round bands (first half round, then rounds
-1½, 3 and 6) — on its board rows, with the best-ball `fp_tier` only in the badge's
-tooltip. Only the standalone cheat sheet was changed. Pointing the app's default badge at
-the same per-format column is a small follow-up: the data is in the DB and the four new
-columns need adding to `RESPONSE_FIELDS` in `routes/players.js` to reach the client.
+The tier badge you set by hand still cycles 1–5 only. That is your own scale for marking
+up a board and five is enough for it, but it does mean a hand-set T3 and FantasyPros' T3
+look identical apart from the dashed border.
 
 ---
 

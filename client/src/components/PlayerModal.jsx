@@ -7,16 +7,28 @@ const POS_COLORS = {
   TE: 'text-orange-400',
 };
 
+// The box grows to whatever is in it. A fixed three rows was fine for a line you typed
+// yourself and silently clips an imported expert note — which is a note you cannot read
+// without selecting text inside it, and looks like the note simply ends there.
 function NoteField({ label, value, onChange, onBlur }) {
+  const ref = useRef(null);
+  const fit = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 420)}px`;
+  };
+  useEffect(fit, [value]);
   return (
     <div>
       <label className="block text-xs font-medium text-[#8b90a8] mb-1">{label}</label>
       <textarea
+        ref={ref}
         value={value || ''}
-        onChange={e => onChange(e.target.value)}
+        onChange={e => { onChange(e.target.value); fit(); }}
         onBlur={onBlur}
         rows={3}
-        className="input w-full text-sm resize-none"
+        className="input w-full text-sm resize-none overflow-y-auto"
         placeholder="..."
       />
     </div>
@@ -353,9 +365,10 @@ export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = 
                 </button>
               )}
             </div>
-            {!draft.tier && player.tier_auto && (
+            {!draft.tier && player.tier_fp && (
               <div className="text-xs text-[#555875] mt-1.5 italic">
-                Auto-tier: T{player.tier_auto} (ADP-based · click above to override)
+                FantasyPros have him in tier {player.tier_fp}, off their overall board for
+                this format · click above to set your own
               </div>
             )}
           </div>

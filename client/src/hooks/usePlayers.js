@@ -40,6 +40,8 @@ export function usePlayers() {
   const [view, setView] = useState(null);
   const [sleeperBaseline, setSleeperBaseline] = useState(null);
   const [xfpReplacement, setXfpReplacement] = useState(null);
+  // Which tiers this format actually has, so the filter buttons offer exactly those.
+  const [tiers, setTiers] = useState(null);
 
   const searchDebounceRef = useRef(null);
 
@@ -72,7 +74,8 @@ export function usePlayers() {
     try {
       const params = new URLSearchParams();
       if (currentFilters.positions.length > 0) params.set('position', currentFilters.positions.join(','));
-      if (currentFilters.tier) params.set('tier', currentFilters.tier);
+      // != null, not truthy: 0 is the untiered button and a truthy test drops it.
+      if (currentFilters.tier != null) params.set('tier', currentFilters.tier);
       if (currentFilters.starred) params.set('starred', '1');
       if (!currentFilters.hideDrafted) params.set('drafted', '1');
       if (currentFilters.search) params.set('search', currentFilters.search);
@@ -93,6 +96,7 @@ export function usePlayers() {
       setView(data.view || null);
       setSleeperBaseline(data.sleeper_baseline || null);
       setXfpReplacement(data.xfp_replacement || null);
+      setTiers(data.tiers || null);
       // First load has no stored choice, so adopt whatever the server switched on.
       if (excluded === null && Array.isArray(data.excluded)) setExcludedRaw(data.excluded);
       // The server refuses to sort by a source that is switched off. Adopt what it
@@ -184,9 +188,13 @@ export function usePlayers() {
         if (filters.hideDrafted && p.drafted) return false;
         if (filters.starred && !p.starred) return false;
         // The same effective tier the server filters on, and the same one the badge
-        // shows: yours if you set one, otherwise the automatic one. Comparing only
-        // hand-set tiers dropped every row the moment a tier filter was active.
-        if (filters.tier != null && (p.tier ?? p.tier_auto) !== filters.tier) return false;
+        // shows: yours if you set one, otherwise FantasyPros'. Comparing only hand-set
+        // tiers dropped every row the moment a tier filter was active. 0 is the
+        // untiered button, so it matches the players who have no tier at all.
+        if (filters.tier != null) {
+          const shown = p.tier ?? p.tier_fp ?? null;
+          if (filters.tier === 0 ? shown != null : shown !== filters.tier) return false;
+        }
         return true;
       });
     });
@@ -278,5 +286,6 @@ export function usePlayers() {
     setTeamSize,
     sleeperBaseline,
     xfpReplacement,
+    tiers,
   };
 }

@@ -44,6 +44,7 @@ export default function App() {
     setTeamSize,
     sleeperBaseline,
     xfpReplacement,
+    tiers,
     refetchQuiet,
     showToast,
   } = usePlayers();
@@ -157,6 +158,7 @@ export default function App() {
         onToggleSource={toggleSource}
         onEnableAllSources={enableAllSources}
         formatLabel={formatLabel}
+        tiers={tiers}
         teamSize={teamSize}
         setTeamSize={setTeamSize}
         draft={draft}

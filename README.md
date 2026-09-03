@@ -114,6 +114,29 @@ node server/scripts/health-check.js     # freshness, coverage, ranking consisten
 node server/scripts/health-check.js --repair
 ```
 
+### Importing an expert round-up
+
+`server/data/expert-board-2026.json` is a hand-compiled round-up of what analysts are
+saying — a `targets` list, a `fades` list, and a `contested` list for the players they
+genuinely disagree about. Applying it stars the targets, flags the fades, and writes the
+verdict, the cost, who is saying it and the reasoning into each player's Upside and
+Downside notes:
+
+```bash
+node server/scripts/apply-expert-board.js --dry-run   # what it would touch
+node server/scripts/apply-expert-board.js
+```
+
+It is idempotent and deliberately narrow: it never clears a star or flag you set, never
+touches your rank, tier, drafted mark or Personal Notes, and refuses to overwrite a note
+it did not itself write (`--overwrite` says otherwise). It matches on name and position —
+the board is the authority on which team a player is on, so a round-up naming last week's
+team is reported rather than believed.
+
+Run it wherever the database lives. On Railway that means `railway run node
+server/scripts/apply-expert-board.js`, because the board's data is on the volume there,
+not in the repo.
+
 ---
 
 ## The printable cheat sheet
@@ -233,15 +256,15 @@ skews a best-ball board and a 1QB ranking never skews a superflex one:
 | Feature | How to use |
 |---|---|
 | Filter by position | Click position pills (QB / RB / WR / TE) — multi-select |
-| Filter by tier | Click tier pills (T1–T5) |
+| Filter by tier | Click tier pills — FantasyPros' tiers for the format on screen, plus T– for everyone past the end of their board |
 | Hide drafted players | "Hide Drafted" toggle (on by default) |
 | Starred only | "Starred Only" toggle |
 | Search | Type in the search box (debounced 300ms) |
-| Sort | Dropdown — options follow the format on screen (Consensus, each source, Proj Pts, My Rank) |
+| Sort | Dropdown — options follow the format on screen (Consensus, each source, Tier, Proj Pts, My Rank). Sorting by Tier orders within a tier by consensus and sinks the untiered to the bottom |
 | Switch format | Best Ball / Redraft / Dynasty, and 1QB / SF-2QB — columns, consensus and sort all follow |
 | Set personal rank | Click the "My #" cell and type a number |
 | Drag to reorder | Grab the ⠿ handle on the left side of any row |
-| Cycle tier | Click the tier badge in the row |
+| Cycle tier | Click the tier badge in the row — a solid badge is your own tier, a dashed one is FantasyPros' |
 | Star / flag | Click ★ / ⚑ icons in the Flags column |
 | Mark as drafted | Click the "Available" / "✓ Drafted" button |
 | Follow a live Sleeper draft | **Draft** button in the top bar — see below |
