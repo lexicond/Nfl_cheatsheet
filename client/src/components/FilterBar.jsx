@@ -27,7 +27,7 @@ function getSortOptions(view, excluded, format) {
   return [
     consensus,
     ...active.map(s => ({ value: s.column, label: s.label })),
-    { value: 'sleeper_gap', label: 'Cheapest on Sleeper' },
+    { value: 'sleeper_gap_pct', label: 'Cheapest on Sleeper (%)' },
     { value: 'spread', label: 'Most disagreement' },
     // The model's own orderings. Only offered where they mean something: dynasty is a
     // keep-forever league and this is a one-season projection.

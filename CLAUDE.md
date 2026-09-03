@@ -565,6 +565,19 @@ defect, A/B it across 2023–25 and look for a gain in *every* season, not in th
   and an edge requires disagreeing somewhere, so this is not asserted as a failure — but the
   validator does fail below rho 0.6, because a model that has come loose from the market
   entirely is broken rather than contrarian.
+- **The Sleeper gap is RELATIVE, and its sign is the opposite of what it used to be.**
+  It was places-later (positive = cheaper); it is now `(consensus − sleeperADP) /
+  sleeperADP`, so **negative** = cheaper on Sleeper, and the sort is ascending in both
+  boards. Both failure modes are real and both are guarded: measured in places, the top
+  of the list is deep quarterbacks — Bryce Young 56 picks, Cam Ward 53, Daniel Jones 51 —
+  where ADP is flat enough that a fifty-pick gap is mostly noise, which is why it is a
+  ratio; and measured as a ratio the denominator is tiny at the top of the board, so
+  Jahmyr Gibbs 0.4 picks later reads −21% and Puka Nacua 1.4 picks reads −16%. True, and
+  not actionable unless your pick falls between the two — so `sleeper_gap_picks` rides in
+  the tooltip and the sheet's cell, and the range is capped at `teamSize × 20` for the
+  same reason the arbitrage column is. Positions are normalised out (quarterbacks sit
+  ~12% cheap on Sleeper before any individual is a bargain), so 0% means normal for his
+  position, not agreement.
 - **A new column `kind` has to be added to the descending-sort set in two places** —
   `sortSpec` in `routes/players.js` and `sortRows` in `cheatsheet/board.js`. ADP and ranks
   count up from the best pick; trade values, projections and betting lines count down from it.

@@ -260,7 +260,8 @@ skews a best-ball board and a 1QB ranking never skews a superflex one:
 | Hide drafted players | "Hide Drafted" toggle (on by default) |
 | Starred only | "Starred Only" toggle |
 | Search | Type in the search box (debounced 300ms) |
-| Sort | Dropdown — options follow the format on screen (Consensus, each source, Tier, Proj Pts, My Rank). Sorting by Tier orders within a tier by consensus and sinks the untiered to the bottom |
+| Sort | Dropdown — options follow the format on screen (Consensus, each source, Tier, Cheapest on Sleeper (%), Proj Pts, My Rank). Sorting by Tier orders within a tier by consensus and sinks the untiered to the bottom |
+| Find who is cheap in your room | Sort by **Cheapest on Sleeper (%)**. The `SL %` column is `(consensus − Sleeper ADP) / Sleeper ADP` with each position's median taken out, so negative means he goes later on Sleeper than he is priced — the biggest negatives sit at the top. Hover for the gap in picks, which is what says whether it is actually usable |
 | Switch format | Best Ball / Redraft / Dynasty, and 1QB / SF-2QB — columns, consensus and sort all follow |
 | Set personal rank | Click the "My #" cell and type a number |
 | Drag to reorder | Grab the ⠿ handle on the left side of any row |

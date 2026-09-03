@@ -37,6 +37,9 @@ const DERIVED_SORTS = {
   age:           { get: r => r.age, dir: 'asc' },
   spread:        { get: r => r.spread, dir: 'desc' },
   sleeper_gap:   { get: r => r.sleeper_gap, dir: 'desc' },
+  // Ascending: this one is negative when he goes later on Sleeper, so the cheapest
+  // players are the biggest negatives and belong at the top.
+  sleeper_gap_pct: { get: r => r.sleeper_gap_pct, dir: 'asc' },
 };
 
 // Ascending, with a missing value last rather than first — the same rule the board's
@@ -244,8 +247,60 @@ router.get('/', (req, res) => {
         norms[pos] = vals.length >= 8 ? vals[Math.floor(vals.length / 2)] : 0;
       }
       sleeperNorms = norms;
+
+      // The same disagreement measured RELATIVELY: (consensus − Sleeper) / Sleeper, so a
+      // NEGATIVE number means he goes later on Sleeper and can be had cheaper there.
+      // Note that is the opposite sign to `sleeper_gap` above, which counts places later
+      // as positive — the two are never shown in the same column for that reason.
+      //
+      // Why relative at all: a fixed number of picks means completely different things at
+      // different points on the board, and ranked by places the top of the list is deep
+      // quarterbacks — Bryce Young 56 picks, Cam Ward 53, Daniel Jones 51 — where ADP is
+      // flat and undifferentiated enough that a fifty-pick "gap" is mostly noise. Divided
+      // by what he costs, those fall to 11-12% and real mid-round disagreements surface.
+      //
+      // It has the mirror-image weakness and it is worth knowing before trusting the top
+      // of the list: the denominator is tiny at the top of the board, so Jahmyr Gibbs at
+      // 0.6 picks later and Puka Nacua at 2.5 reads as −35%. True, and not something you
+      // can act on unless your pick happens to fall between the two. The pick difference
+      // is carried on the same row so the size of the thing is never hidden.
+      const draftable = teamSize * 20;
+      const rawPct = new Map();
+      for (const p of enriched) {
+        const sl = p[baseline.column];
+        // Beyond the draftable range both numbers come off lists that keep ordering
+        // players long after anyone is picking them, and the ratios out there are large
+        // and meaningless — the same trap the edge column documents. Unrestricted, the
+        // whole top of this list was players in the 600s on Sleeper and the 300s on the
+        // consensus, whom both sides agree not to draft.
+        if (sl == null || p.adp_consensus == null || sl > draftable) continue;
+        rawPct.set(p.id, (p.adp_consensus - sl) / sl);
+      }
+      // Positions carry a standing offset here too — quarterbacks sit 12% cheap on
+      // Sleeper before any individual is a bargain — so each is read against its own
+      // median, exactly as the places column is.
+      const pctNorms = {};
+      for (const pos of ['QB', 'RB', 'WR', 'TE']) {
+        const vals = enriched.filter(p => p.position === pos && rawPct.has(p.id))
+          .map(p => rawPct.get(p.id)).sort((a, b) => a - b);
+        pctNorms[pos] = vals.length >= 8 ? vals[Math.floor(vals.length / 2)] : 0;
+      }
+      for (const p of enriched) {
+        p.sleeper_gap_pct = rawPct.has(p.id)
+          ? Math.round((rawPct.get(p.id) - (pctNorms[p.position] ?? 0)) * 1000) / 1000
+          : null;
+        // What that percentage is actually worth in picks, so a big number on a cheap
+        // player cannot hide how small the move is.
+        p.sleeper_gap_picks = rawPct.has(p.id)
+          ? Math.round((p[baseline.column] - p.adp_consensus) * 10) / 10
+          : null;
+      }
     } else {
-      for (const p of enriched) p.sleeper_gap = null;
+      for (const p of enriched) {
+        p.sleeper_gap = null;
+        p.sleeper_gap_pct = null;
+        p.sleeper_gap_picks = null;
+      }
     }
 
     // Positional ranks, computed over the full pool: where a player sits among his
@@ -441,7 +496,8 @@ const RESPONSE_FIELDS = [
   'ktc_value', 'fc_value', 'ds_value', 'dp_value', 'adp_fp_dyn', 'adp_sl_dyn',
   'mkt_points', 'mkt_pass_yards', 'mkt_rush_yards', 'mkt_rec_yards',
   'mkt_pass_tds', 'mkt_rush_tds', 'mkt_rec_tds', 'mkt_receptions', 'mkt_books', 'mkt_complete', 'mkt_adjusted',
-  'age', 'fp_tier', 'tier_fp', 'round', 'spread', 'sleeper_gap',
+  'age', 'fp_tier', 'tier_fp', 'round', 'spread',
+  'sleeper_gap', 'sleeper_gap_pct', 'sleeper_gap_picks',
   'ff_pos_rank', 'ff_points',
   'personal_rank', 'tier', 'starred', 'flagged', 'drafted', 'drafted_manual',
   'draft_pick_no', 'draft_round', 'drafted_by', 'drafted_by_me',
