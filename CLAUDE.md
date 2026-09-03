@@ -128,6 +128,18 @@ defect, A/B it across 2023–25 and look for a gain in *every* season, not in th
   `node server/scripts/audit-matching.js` hunts for the damage.
 - **FFC ignores its own `teams` parameter** — 10 and 12 return byte-identical data. League
   size is a display setting only.
+- **A non-wrapping row in the filter bar sets the width of the whole page.** The tier
+  buttons became sixteen when they became FantasyPros', and sixteen pills plus ALL and
+  T– is a 710px flex line that cannot break. That does not merely look cramped on a
+  phone: it raises the document's min-content width past the viewport, Safari lays the
+  page out at 722px without scaling down, and half the board sits off the right of the
+  screen with the rest of the app in a 54%-wide column. The fix is two-part and both
+  halves matter — `flex-wrap` on the group so its min-content width is one pill and it
+  can never set the page width again, and a `<select>` below `sm` because sixteen
+  wrapped pills would eat three rows of a sticky bar already holding a third of a phone
+  screen. Test any new bar control by asserting `window.innerWidth` is still 390 at a
+  390px viewport; `document.body.scrollWidth` does **not** catch it, because the body
+  has already been widened to match.
 - **Chrome will not stick a `<td>`**, and a wrapper with horizontal overflow is always a
   scroll container, so a page-level sticky header cannot live inside one. The cheat
   sheet's board scrolls in its own bounded pane for this reason.

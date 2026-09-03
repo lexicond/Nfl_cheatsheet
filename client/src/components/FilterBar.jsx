@@ -148,12 +148,37 @@ const FilterBar = forwardRef(function FilterBar(
 
         <div className="hidden sm:block w-px h-5 bg-[#2e3148]" />
 
-        {/* Tier filter */}
-        <div className="flex items-center gap-1">
+        {/* Tier filter.
+
+            The pills are desktop-only. FantasyPros' boards carry sixteen tiers, and
+            sixteen pills plus ALL and T– is a 710px row that cannot wrap — which does
+            not merely look cramped on a phone, it widens the whole DOCUMENT past the
+            viewport. Safari then lays the page out at that width without scaling it
+            down, so half the board sits off the right of the screen and the rest of the
+            app renders into a 54%-wide column with black beside it. `flex-wrap` is here
+            for the same reason: it drops the row's min-content width to one pill, so
+            this control can never set the page width again. A phone gets the select
+            instead — sixteen wrapped pills would eat three rows of a sticky bar that is
+            already holding a third of the screen. */}
+        <div className="flex flex-wrap items-center gap-1">
           <span className="hidden sm:inline text-xs text-[#555875] mr-0.5">Tier:</span>
+          <select
+            value={filters.tier ?? ''}
+            onChange={e => setFilter('tier', e.target.value === '' ? null : Number(e.target.value))}
+            className="sm:hidden input text-xs py-1 pr-6"
+            aria-label="Filter by tier"
+          >
+            <option value="">All tiers</option>
+            {(tiers?.present || []).map(t => (
+              <option key={t} value={t}>Tier {t}</option>
+            ))}
+            {tiers?.untiered > 0 && (
+              <option value={UNTIERED}>Untiered ({tiers.untiered})</option>
+            )}
+          </select>
           <button
             onClick={() => setFilter('tier', null)}
-            className={`text-xs px-2 py-1 rounded border font-medium transition-colors ${
+            className={`hidden sm:block text-xs px-2 py-1 rounded border font-medium transition-colors ${
               filters.tier == null
                 ? 'bg-white/10 border-white/30 text-white'
                 : 'border-[#2e3148] text-[#555875] hover:text-[#8b90a8]'
@@ -165,7 +190,7 @@ const FilterBar = forwardRef(function FilterBar(
             <button
               key={t}
               onClick={() => toggleTier(t)}
-              className={`text-xs px-2 py-1 rounded border font-bold transition-colors tier-badge ${
+              className={`hidden sm:block text-xs px-2 py-1 rounded border font-bold transition-colors tier-badge ${
                 filters.tier === t ? `tier-${t}` : 'border-[#2e3148] text-[#555875] hover:text-[#8b90a8]'
               }`}
             >
@@ -176,7 +201,7 @@ const FilterBar = forwardRef(function FilterBar(
             <button
               onClick={() => toggleTier(UNTIERED)}
               title={`${tiers.untiered} players past the end of FantasyPros' board for this format`}
-              className={`text-xs px-2 py-1 rounded border font-bold transition-colors tier-badge border-dashed ${
+              className={`hidden sm:block text-xs px-2 py-1 rounded border font-bold transition-colors tier-badge border-dashed ${
                 filters.tier === UNTIERED
                   ? 'tier-none' : 'border-[#2e3148] text-[#555875] hover:text-[#8b90a8]'
               }`}
