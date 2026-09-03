@@ -1,3 +1,84 @@
+# Handover — 3 September 2026
+
+Branch: `claude/nfl-cheatsheet-tiers-snmimd`. Read `CLAUDE.md` first; it holds the traps
+that will otherwise cost you hours. The previous handover, covering the ageing curve and
+the market prior, is below this section and still describes the model accurately.
+
+## Why this branch exists
+
+The cheat sheet's Tiers view cut its own tier breaks — wherever the consensus left a gap
+wider than `max(2.5, adp × 0.14)`. That is a defensible heuristic and it is nobody's
+published opinion, so a tier on the sheet did not correspond to a tier anyone in the room
+would recognise. It now shows **FantasyPros' own tiers**.
+
+## What changed
+
+**Every FantasyPros board's tier is stored, not just the best-ball one.** The scraper
+already read `tier` off `ecrData` and wrote it from the primary page alone. All five
+boards publish one and they are not interchangeable — the superflex board lifts six
+quarterbacks into Tier 1, which pushes Ja'Marr Chase from Tier 1 to Tier 2 and everyone
+behind him further — so there is now a column per board: `fp_tier` (best ball, unchanged
+name), `fp_tier_rd`, `fp_tier_sf`, `fp_tier_dyn`, `fp_tier_dyn_sf`.
+
+**The Tiers view groups on them.** `TIER_FIELD` in `cheatsheet/board.js` picks the board
+matching the view, borrowing the superflex redraft board for best-ball 2QB exactly as that
+view's consensus already does. `tierBreaks()` is gone.
+
+**These are overall tiers rendered in positional columns, and that is the point.** Tier 4
+means the same rung in the running back column as in the receiver column, which is what
+you actually want mid-draft. The cost is that a column starts wherever its best player
+lands: on the half-PPR redraft board the QB column opens at Tier 3 and the TE column at
+Tier 2, and both skip numbers further down. Order *within* a tier is still the sheet's own
+headline consensus, not FantasyPros' — so a tier can run against their ranking internally.
+
+**Anyone FantasyPros has not tiered goes in a trailing `Untiered` group**, italic and
+under a dashed rule, rather than being folded into the nearest tier — which would be
+inventing an opinion. On the live board that is three quarterbacks and four tight ends at
+the deep end of the redraft view: players Sleeper and Underdog rank and FantasyPros' board
+does not reach.
+
+## Two things this forced, both in `CLAUDE.md`
+
+**`expect` now asserts `position_id`.** Type and scoring alone do not prove a board is the
+overall one. `half-point-ppr-cheatsheets.php?position=RB` returns `Draft Half PPR`/`HALF`
+exactly like the overall page and tiers each position from 1 — written into an overall
+column that reads a WR3 as an overall Tier 3. The trap runs the other way too:
+`half-point-ppr-qb-cheatsheets.php` looks like the half-PPR QB board and is really the
+generic STANDARD overall board (`Draft`/`STD`/`ALL`, 440 players). The real QB draft board
+is `qb-cheatsheets.php`.
+
+**A tier is withdrawn, not merely written.** Same lesson as the projection column:
+FantasyPros drops players off a board between runs and a stale tier reads as current
+because every column beside it is. Each board nulls its own tier column inside the
+transaction that refills it, so a board that failed to fetch is skipped whole and keeps
+what it had.
+
+## What checks it
+
+`validate-sources.js` grew a section, and both halves were confirmed to fail when the data
+is deliberately corrupted:
+
+- Sorted by a board's own ECR rank, its tier can only ever go up. A per-position payload
+  written into an overall column sawtooths once per position — the simulated version was
+  caught at 200 places.
+- Only the superflex boards may tier quarterbacks first. Redraft ½PPR and Dynasty must
+  have zero QBs in Tier 1; Superflex ½PPR has six and Dynasty SF three.
+- Coverage: at least 98% of the players carrying a board's rank must carry its tier, since
+  the two are written by the same statement.
+
+`validate-sources.js` and `validate-draft-sync.js` both pass. The sheet was rebuilt and
+loaded in a browser across all six format/league views with no console errors.
+
+## Not done, and worth knowing
+
+The **app** still shows `tier_auto` — the ADP round bands (first half round, then rounds
+1½, 3 and 6) — on its board rows, with the best-ball `fp_tier` only in the badge's
+tooltip. Only the standalone cheat sheet was changed. Pointing the app's default badge at
+the same per-format column is a small follow-up: the data is in the DB and the four new
+columns need adding to `RESPONSE_FIELDS` in `routes/players.js` to reach the client.
+
+---
+
 # Handover — 24 August 2026
 
 Branch: `claude/fantasy-points-prediction-review-tw9vif`. Read `CLAUDE.md` first; it holds

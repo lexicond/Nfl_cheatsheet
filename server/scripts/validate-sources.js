@@ -168,5 +168,47 @@ for (const [key, cols] of Object.entries(CONSENSUS_SOURCES)) {
   else bad(`${key}: inputs declared for another format — ${wrong.map(c => `${COLUMNS[c].short} is ${COLUMNS[c].format}:${COLUMNS[c].league}`).join('; ')}`);
 }
 
+/* 8. FantasyPros tiers — the cheat sheet groups on these, so they have to be that
+ *    board's OVERALL tiers and not some other page's. Two things give that away: a
+ *    positional payload tiers each position from 1, which runs backwards against the
+ *    overall rank it is stored beside; and a tier column filled from the wrong board
+ *    puts quarterbacks in the wrong place for the format. */
+section('FantasyPros tiers — overall, and the format\'s own');
+const TIER_BOARDS = [
+  ['adp_fantasypros', 'fp_tier', 'Best Ball'],
+  ['adp_fp_rd', 'fp_tier_rd', 'Redraft ½PPR'],
+  ['adp_fp_sf', 'fp_tier_sf', 'Superflex ½PPR'],
+  ['adp_fp_dyn', 'fp_tier_dyn', 'Dynasty'],
+  ['adp_fp_dyn_sf', 'fp_tier_dyn_sf', 'Dynasty SF'],
+];
+for (const [rankCol, tierCol, label] of TIER_BOARDS) {
+  const ranked = rows.filter(r => r[rankCol] != null);
+  const tiered = ranked.filter(r => r[tierCol] != null);
+  if (ranked.length === 0) { warn(`${label}: no ranks stored, cannot check tiers`); continue; }
+  if (tiered.length < ranked.length * 0.98) {
+    bad(`${label}: ${tiered.length}/${ranked.length} ranked players carry a tier — the tier is written beside the rank, so a shortfall means one of them is stale`);
+    continue;
+  }
+
+  // A tier is a band of the same ranking, so sorted by that board's rank the tier can
+  // only ever go up. A positional payload written here would sawtooth once per position.
+  const seq = tiered.slice().sort((a, b) => a[rankCol] - b[rankCol]).map(r => r[tierCol]);
+  const backwards = seq.filter((t, i) => i > 0 && t < seq[i - 1]).length;
+  if (backwards === 0) ok(`${label}: ${tiered.length} tiered, 1–${Math.max(...seq)}, never running backwards against its own rank`);
+  else bad(`${label}: tier falls as rank rises at ${backwards} place(s) — this looks like a per-position board written into an overall column`);
+}
+
+// The format-specific claim, and the one that catches a tier column filled from the
+// wrong board: superflex tiers quarterbacks at the very top, 1QB does not.
+for (const [tierCol, label, superflex] of [
+  ['fp_tier_rd', 'Redraft ½PPR', false], ['fp_tier_sf', 'Superflex ½PPR', true],
+  ['fp_tier_dyn', 'Dynasty', false], ['fp_tier_dyn_sf', 'Dynasty SF', true],
+]) {
+  const qbT1 = rows.filter(r => r.position === 'QB' && r[tierCol] === 1).length;
+  const text = `${label}: ${qbT1} QB in tier 1`;
+  if (superflex ? qbT1 >= 3 : qbT1 === 0) ok(text);
+  else bad(`${text} — ${superflex ? 'a superflex board tiers quarterbacks first; this looks like 1QB tiers' : 'a 1QB board does not; this looks like superflex tiers'}`);
+}
+
 console.log(`\n${failures === 0 ? '\x1b[32mPASSED\x1b[0m' : '\x1b[31mFAILED\x1b[0m'} — ${failures} failure(s), ${warnings} warning(s)\n`);
 process.exit(failures === 0 ? 0 : 1);

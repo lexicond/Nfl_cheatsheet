@@ -16,9 +16,9 @@ Concretely, this has already happened:
 - `fantasypros.com/nfl/rankings/best-ball-cheatsheets.php` redirects to the generic
   standard-scoring redraft board and returns valid `ecrData`. So do
   `dynasty-superflex-overall`, `ppr-dynasty-superflex`, `half-ppr-superflex-cheatsheets`
-  and others. Every FantasyPros fetch therefore asserts the `type` and `scoring` it
-  expects and rejects the response otherwise. **Never add a FantasyPros URL without an
-  `expect` block.**
+  and others. Every FantasyPros fetch therefore asserts the `type`, `scoring` and
+  `position_id` it expects and rejects the response otherwise. **Never add a FantasyPros
+  URL without an `expect` block.**
 - `superflex-cheatsheets.php` is the STANDARD-scoring board. This app is half-PPR
   throughout; use `half-point-ppr-superflex-cheatsheets.php`.
 - Sleeper's `/v1/projections/nfl/{year}/0` still answers 200 with every player object
@@ -41,6 +41,10 @@ After touching a scraper, `server/sources.js` or `server/consensus.js`, run
 `node server/scripts/validate-sources.js`. It asserts on what the numbers *imply*: a
 superflex board must open with quarterbacks, dynasty must skew younger than redraft, best
 ball and redraft must differ, and no two inputs to one consensus may correlate above 0.97.
+It also checks the FantasyPros tiers the cheat sheet groups on — that each board's tier
+never runs backwards against that board's own rank, which is what a per-position payload
+written into an overall column looks like, and that only the superflex boards tier
+quarterbacks first.
 
 ## Architecture
 
@@ -139,6 +143,30 @@ defect, A/B it across 2023–25 and look for a gain in *every* season, not in th
   displayed and sortable but sits outside the consensus, because averaging "RB4" with a
   pick number would be meaningless. It is registered twice in `sources.js` — once per
   season-long format — aliased onto one column, since a column declares a single format.
+- **The cheat sheet's tiers are FantasyPros', and they are OVERALL tiers shown in
+  positional columns.** Each of the five FantasyPros boards publishes its own `tier`
+  alongside `rank_ecr`, and they are not interchangeable: the superflex board lifts
+  quarterbacks into Tier 1, which pushes every receiver down a rung or two, and dynasty
+  tiers a different population again. So there is one column per board — `fp_tier` (best
+  ball, the original name), `fp_tier_rd`, `fp_tier_sf`, `fp_tier_dyn`, `fp_tier_dyn_sf` —
+  and `TIER_FIELD` in `cheatsheet/board.js` picks the one matching the view, borrowing the
+  superflex redraft board for best-ball 2QB exactly as that view's consensus already does.
+  Because the numbering is overall, a positional column legitimately starts at Tier 3 and
+  skips numbers; that cross-position comparability is the point of taking theirs rather
+  than cutting the sheet's own breaks per column. Anyone FantasyPros has not tiered goes in
+  a trailing `Untiered` group rather than being folded into the nearest tier.
+- **`expect` must assert `position_id` too, now that a tier is read.** Type and scoring
+  alone do not prove a board is the overall one: `half-point-ppr-cheatsheets.php?position=RB`
+  returns `Draft Half PPR`/`HALF` like the overall page and tiers each position from 1, which
+  written into an overall column reads a WR3 as an overall Tier 3. The overall boards are
+  `ALL`, the superflex ones `OP`. And the trap runs the other way as well:
+  `half-point-ppr-qb-cheatsheets.php` looks like the half-PPR QB board and is really the
+  generic STANDARD overall board — the QB draft board is `qb-cheatsheets.php`.
+- **A tier must be withdrawn, not merely written**, for the same reason a projection must.
+  FantasyPros drops players off a board between runs, and a tier left behind reads as
+  current because every column beside it is — the sheet goes on grouping a man nobody ranks
+  any more into Tier 4. Each board nulls its own tier column inside the same transaction
+  that refills it, so a board that failed to fetch is skipped whole and keeps what it had.
 - **A draft id proves nothing on its own.** `/v1/draft/<id>` answers 200 for every draft
   Sleeper has ever hosted — any sport, any season. A 2021 draft returns forty valid picks
   that would mark forty players taken on a 2026 board, and it all looks right. So

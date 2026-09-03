@@ -196,6 +196,15 @@ addColumnIfMissing('players', 'dp_value_sf', 'INTEGER');
 addColumnIfMissing('players', 'ds_value', 'INTEGER');
 addColumnIfMissing('players', 'ds_value_sf', 'INTEGER');
 addColumnIfMissing('players', 'fp_tier', 'INTEGER');
+// FantasyPros publishes a tier on every one of its overall boards, and they are not
+// the same tiers: the superflex board reorders quarterbacks into the top rounds, which
+// pushes every receiver down a tier or two, and dynasty tiers a different population
+// again. One column per board, so a format switch never shows another format's tiers.
+// `fp_tier` above is the best-ball board's, kept under its original name.
+addColumnIfMissing('players', 'fp_tier_rd', 'INTEGER');
+addColumnIfMissing('players', 'fp_tier_sf', 'INTEGER');
+addColumnIfMissing('players', 'fp_tier_dyn', 'INTEGER');
+addColumnIfMissing('players', 'fp_tier_dyn_sf', 'INTEGER');
 addColumnIfMissing('players', 'ff_pos_rank', 'INTEGER');
 addColumnIfMissing('players', 'ff_points', 'REAL');
 

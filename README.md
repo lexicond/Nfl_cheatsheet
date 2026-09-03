@@ -130,8 +130,10 @@ draft room with no signal. It carries every format and league type, and three vi
   each position's supply thins out, with the two widest drop-offs marked.
 - **Board** — grouped by the round the pick actually falls in, with each contributing
   source shown next to the consensus.
-- **Tiers** — positional tiers cut where the market leaves a real gap rather than at
-  round numbers.
+- **Tiers** — FantasyPros' own tiers off the overall board for the format on screen,
+  split by position, so a Tier 4 back and a Tier 4 receiver are the same rung. Numbering
+  is overall, so a column starts wherever its best player lands and can skip numbers;
+  anyone FantasyPros has not tiered is listed last.
 
 Plus the players whose projected positional rank disagrees most with what they cost.
 
