@@ -178,6 +178,14 @@ defect, A/B it across 2023–25 and look for a gain in *every* season, not in th
   players keep a null and ride the comparator's existing nulls-last rule to the bottom
   rather than being given a made-up last tier number, which would read as FantasyPros'
   opinion about a player they declined to rank.
+- **Your own tier runs on FantasyPros' 1-16 scale, not its own.** A hand-set 3 has to
+  mean the same thing as the 3 it replaces or the badge is two measurements in one
+  column. Sixteen is too many to click through blind, so the row badge's cycle ENTERS at
+  `tier_fp` — one click adopts what is already showing, which is the common case — steps
+  up from there, steps back on shift-click, and clears at either end. `TIER_BORDER`, the
+  stripe that marks a row whose tier you set by hand, is written out to sixteen rather
+  than assembled from a hue list: Tailwind scans the source for literal class names and
+  purges anything built at runtime.
 - **The tier badge colours cycle every five and that is deliberate.** FantasyPros' boards
   run to sixteen; `index.css` carries `tier-1` … `tier-16` where the five hues repeat and
   fade. The colour's only job on a tier-sorted board is to make the boundary between one

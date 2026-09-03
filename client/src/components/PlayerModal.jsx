@@ -1,5 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 
+// FantasyPros' boards run to sixteen tiers and the badge on the board now shows theirs
+// by default, so your own tier uses the same scale — a hand-set 3 has to mean the same
+// thing as the 3 it replaces or the badge is two different measurements in one column.
+const TIER_SCALE = Array.from({ length: 16 }, (_, i) => i + 1);
+
 const POS_COLORS = {
   QB: 'text-amber-400',
   RB: 'text-green-400',
@@ -342,8 +347,11 @@ export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = 
           {/* Tier selector */}
           <div>
             <h3 className="text-xs font-semibold text-[#555875] uppercase tracking-wider mb-2">Tier</h3>
-            <div className="flex gap-1.5 items-center">
-              {[1, 2, 3, 4, 5].map(t => (
+            {/* The same 1-16 FantasyPros use, so a tier you set means the same thing as
+                the one it replaces. Wraps rather than scrolls — sixteen 32px buttons do
+                not fit the panel on a phone. */}
+            <div className="flex flex-wrap gap-1.5 items-center">
+              {TIER_SCALE.map(t => (
                 <button
                   key={t}
                   onClick={() => {
@@ -351,7 +359,9 @@ export default function PlayerModal({ player, onClose, onUpdate, sourceStatus = 
                     setDraft(d => ({ ...d, tier: newTier }));
                     onUpdate(player.id, { tier: newTier });
                   }}
-                  className={`tier-badge w-8 h-8 ${draft.tier === t ? `tier-${t}` : 'border-[#2e3148] text-[#555875] hover:text-[#8b90a8]'}`}
+                  className={`tier-badge w-8 h-8 ${draft.tier === t ? `tier-${t}` : 'border-[#2e3148] text-[#555875] hover:text-[#8b90a8]'}${
+                    player.tier_fp === t && draft.tier !== t ? ' ring-1 ring-[#3a3e56]' : ''}`}
+                  title={player.tier_fp === t ? `FantasyPros' tier for this format` : undefined}
                 >
                   {t}
                 </button>

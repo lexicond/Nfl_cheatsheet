@@ -119,11 +119,27 @@ exactly the 34 players worth reading about *and* freeze it for them for ever, wi
 on screen to say the numbers had stopped updating. The verdict goes at the head of the
 upside or downside note instead.
 
+**Your own tier runs on the same 1–16 scale.** It cycled 1–5, which meant a hand-set 3
+and FantasyPros' 3 were two different measurements sharing one column. Sixteen is too
+many to click through blind, so the row badge's cycle enters at `tier_fp` — the first
+click adopts what is already showing, which is the common case — steps up from there,
+steps back on shift-click, and clears off either end. The modal keeps explicit buttons,
+now 1–16 and wrapping, with a faint ring on whichever one is FantasyPros'.
+
+`TIER_BORDER` — the stripe marking a row you tiered by hand — is written out to sixteen
+rather than built from a hue list, because Tailwind scans the source for literal class
+names and purges anything assembled at runtime.
+
 ## Not done, and worth knowing
 
-The tier badge you set by hand still cycles 1–5 only. That is your own scale for marking
-up a board and five is enough for it, but it does mean a hand-set T3 and FantasyPros' T3
-look identical apart from the dashed border.
+Two places the imported round-up does not reach, both left deliberately:
+
+- The **printable cheat sheet** carries no star or flag at all — `build-cheatsheet.js`
+  does not put them in the payload — so the round-up is invisible on the thing you take
+  into the draft room.
+- The five **contested** players get no marker on any board. They are neither starred nor
+  flagged by design, since asserting one verdict would throw away the disagreement that
+  put them on the list, but that does leave them findable only through the notes.
 
 ---
 

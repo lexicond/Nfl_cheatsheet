@@ -264,7 +264,7 @@ skews a best-ball board and a 1QB ranking never skews a superflex one:
 | Switch format | Best Ball / Redraft / Dynasty, and 1QB / SF-2QB — columns, consensus and sort all follow |
 | Set personal rank | Click the "My #" cell and type a number |
 | Drag to reorder | Grab the ⠿ handle on the left side of any row |
-| Cycle tier | Click the tier badge in the row — a solid badge is your own tier, a dashed one is FantasyPros' |
+| Cycle tier | Click the tier badge in the row — the first click adopts FantasyPros' tier as your own, further clicks step up, shift-click steps back, and stepping off either end clears it. A solid badge is your own tier, a dashed one is FantasyPros' |
 | Star / flag | Click ★ / ⚑ icons in the Flags column |
 | Mark as drafted | Click the "Available" / "✓ Drafted" button |
 | Follow a live Sleeper draft | **Draft** button in the top bar — see below |
