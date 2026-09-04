@@ -219,6 +219,10 @@ export default function PlayerRow({
   // which is why only one of them is ever on screen.
   const gapPct = player.sleeper_gap_pct;
   const gapPicks = player.sleeper_gap_picks;
+  // Past the end of the range that actually gets drafted. The number is still real — it
+  // is a ratio, not a rank — but out there both sides are ordering players nobody picks,
+  // so it is dimmed and marked and the sort leaves it out.
+  const gapDeep = player.sleeper_gap_deep === true;
 
   // The badge shows your own tier if you set one, otherwise FantasyPros' — off their
   // OVERALL board for the format on screen, so a Tier 4 back and a Tier 4 receiver are
@@ -419,10 +423,16 @@ export default function PlayerRow({
         {player.xfp_edge == null || Math.abs(player.xfp_edge) < 25 ? (
           <span
             className="text-[#555875]"
-            title={player.xfp_edge == null
-              ? 'Not enough to compare — he needs both a projection and a consensus number, and to be inside the range that actually gets drafted'
-              : `The model and the market are within ${Math.abs(player.xfp_edge)} places of each other on him. `
-                + 'Only gaps of 25 places — about two rounds — get a number.'}
+            // A blank has two quite different causes and "–" used to cover both, which
+            // reads as missing data either way. Edge is a rank difference over a pool,
+            // so unlike the Sleeper gap it cannot be extended to a player outside that
+            // pool without changing everyone else's number.
+            title={player.xfp_edge != null
+              ? `The model and the market are within ${Math.abs(player.xfp_edge)} places of each other on him. `
+                + 'Only gaps of 25 places — about two rounds — get a number.'
+              : player.xfp_vor == null
+                ? 'The model declines to project him — no recent role, no current team, or out injured — so there is nothing to compare the market against.'
+                : 'Past the end of the range that actually gets drafted. Edge ranks the model against the market over one pool of players, and out there both sides are ordering people nobody picks: ranked that way every "biggest buy" was a player both sides agree to ignore.'}
           >
             {player.xfp_edge == null ? '–' : '·'}
           </span>
@@ -509,26 +519,31 @@ export default function PlayerRow({
     // denominator is tiny, so Puka Nacua 2.5 picks later reads as -35%.
     sleeper_gap: (
       <td key="sleeper_gap" className={`${cellClass} w-16 font-mono text-right`}>
-        {gapPct == null || Math.abs(gapPct) < 0.04 ? (
+        {gapPct == null ? (
           <span
             className="text-[#555875]"
-            title={gapPct == null
-              ? 'No Sleeper price inside the draftable range to compare against'
-              : `Sleeper and the consensus price him within ${Math.abs(Math.round(gapPct * 100))}% of each other`
-                + `${gapPicks != null ? ` (${Math.abs(gapPicks).toFixed(0)} picks)` : ''}`}
+            title="Sleeper publishes no ADP for him in this format, so there is nothing to compare against"
           >
-            {gapPct == null ? '–' : '·'}
+            –
           </span>
         ) : (
           <span
-            className={gapPct < 0 ? 'text-green-400' : 'text-amber-400'}
+            // The number is always shown — a dot where a real value exists reads as
+            // missing data. Colour is what says whether it is worth acting on: muted
+            // under 4%, and muted anyway past the draftable range.
+            className={gapDeep || Math.abs(gapPct) < 0.04
+              ? 'text-[#555875]'
+              : (gapPct < 0 ? 'text-green-400' : 'text-amber-400')}
             title={(gapPct < 0
               ? `Sleeper drafts him ${Math.abs(Math.round(gapPct * 100))}% later than the consensus prices him — cheaper there`
               : `Sleeper drafts him ${Math.round(gapPct * 100)}% earlier than the consensus prices him — dearer there`)
               + (gapPicks != null ? `. That is ${Math.abs(gapPicks).toFixed(0)} picks — check it is a gap you can actually use.` : '')
-              + ` Read against the median every ${player.position} carries on this board, so 0% is normal for his position.`}
+              + ` Read against the median every ${player.position} carries on this board, so 0% is normal for his position.`
+              + (gapDeep
+                ? ' * He is past the end of the range that actually gets drafted, where both sides are ordering players nobody picks — the number is real but it is left out of the sort.'
+                : '')}
           >
-            {gapPct > 0 ? '+' : ''}{Math.round(gapPct * 100)}%
+            {gapPct > 0 ? '+' : ''}{Math.round(gapPct * 100)}%{gapDeep ? '*' : ''}
           </span>
         )}
       </td>

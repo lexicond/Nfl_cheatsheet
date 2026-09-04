@@ -142,6 +142,18 @@ there is mostly noise. Dividing by what he costs drops those to 11-12% and surfa
 mid-round disagreements instead (MarShawn Lloyd −18% on 24 picks, Dalton Schultz −12% on
 27).
 
+**The draftable-range cap belongs on the ranking, not on the number.** It was applied to
+both, which blanked 464 of the 637 rows that have both numbers — look a player up past
+pick 200 and you got a dash where a real value belonged. A ratio is a per-player quantity
+and is well defined at pick 400; what the range protects is the *sort*. It now computes
+for everyone, and `sleeper_gap_deep` marks the row: dimmed with a `*`, and read as null by
+the sort only. `xfp_edge` is the opposite case and keeps its cap, because a rank
+difference cannot be extended to a player outside its pool without changing everyone
+else's number — uncapped, every one of the top eight "buys" is a player at ADP 680-700
+with a VOR of −37 to −82. Its blank now says which reason applies; inside a 10-team range
+only five players lack an Edge, and all five are the role gate refusing to project an
+injured or role-less player.
+
 The mirror-image weakness is real and is worth knowing before trusting the top of the
 list: the denominator is tiny at the top of the board, so Jahmyr Gibbs at 0.4 picks later
 reads −21% and Puka Nacua at 1.4 picks reads −16%. True, and not actionable unless your

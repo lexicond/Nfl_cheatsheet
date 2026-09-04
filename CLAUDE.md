@@ -574,10 +574,24 @@ defect, A/B it across 2023–25 and look for a gain in *every* season, not in th
   ratio; and measured as a ratio the denominator is tiny at the top of the board, so
   Jahmyr Gibbs 0.4 picks later reads −21% and Puka Nacua 1.4 picks reads −16%. True, and
   not actionable unless your pick falls between the two — so `sleeper_gap_picks` rides in
-  the tooltip and the sheet's cell, and the range is capped at `teamSize × 20` for the
-  same reason the arbitrage column is. Positions are normalised out (quarterbacks sit
-  ~12% cheap on Sleeper before any individual is a bargain), so 0% means normal for his
-  position, not agreement.
+  the tooltip and the sheet's cell. Positions are normalised out (quarterbacks sit ~12%
+  cheap on Sleeper before any individual is a bargain), so 0% means normal for his
+  position, not agreement; the norm is taken over the draftable range only, or the noisy
+  and far more numerous deep tail would set it.
+- **A draftable-range cap belongs on the RANKING, not on the value — unless the value is
+  itself a rank.** `teamSize × 20` was applied to `sleeper_gap_pct` as it is to
+  `xfp_edge`, and that was wrong: a ratio is a per-player quantity, perfectly well
+  defined at pick 400, so capping it put a dash where a real number belonged and blanked
+  464 of 637 rows. It now computes for everyone, and `sleeper_gap_deep` marks the row —
+  dimmed with a `*`, and read as null by the sort only, exactly as `mkt_complete` marks a
+  market total that is not comparable. **`xfp_edge` is the opposite case and keeps its
+  cap**: it is a rank difference over one pool, so it cannot be extended to a player
+  outside that pool without changing everyone else's number, and uncapped it is measurably
+  nonsense — every one of the top eight "buys" was a player at ADP 680-700 with a value
+  over replacement of −37 to −82, whom both sides agree to ignore. Its blank now says
+  which of the two reasons applies, because "no projection" (the role gate: 5 players
+  inside a 10-team range, all injured or without a role) and "outside the range" read
+  identically as a dash.
 - **A new column `kind` has to be added to the descending-sort set in two places** —
   `sortSpec` in `routes/players.js` and `sortRows` in `cheatsheet/board.js`. ADP and ranks
   count up from the best pick; trade values, projections and betting lines count down from it.
