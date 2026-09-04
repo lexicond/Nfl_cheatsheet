@@ -205,24 +205,29 @@ function pool() {
   // denominator is tiny.
   const slField = SLEEPER_FIELD[key()];
   rows.sort((a, b) => a.h - b.h);
-  // Beyond the range that actually gets drafted both numbers come off lists that keep
-  // ordering players long after anyone is picking them, and the ratios out there are
-  // large and meaningless — the same trap the arbitrage column documents.
+  // Computed for everyone who has both numbers: this is a per-player ratio, not a rank
+  // over a pool, so it is well defined at pick 400 and blanking it there just meant a
+  // dash where a number belonged. The draftable range is for the RANKING — out there
+  // both sides are ordering players nobody picks, and unrestricted the whole top of the
+  // sort was players in the 600s on Sleeper. So it marks a row rather than deleting it.
   const draftable = state.teams * 20;
   rows.forEach(p => {
     const sl = p[slField];
-    p.slPicks = sl != null && p.h != null && sl <= draftable
-      ? Math.round((sl - p.h) * 10) / 10 : null;
-    p.slRaw = p.slPicks == null ? null : (p.h - p[slField]) / p[slField];
+    const ok = sl != null && p.h != null;
+    p.slPicks = ok ? Math.round((sl - p.h) * 10) / 10 : null;
+    p.slRaw = ok ? (p.h - sl) / sl : null;
+    p.slDeep = ok ? sl > draftable : null;
   });
 
   // Whole positions carry a standing offset — quarterbacks sit about 12% cheap on
   // Sleeper before any individual is a bargain, and best ball, which has no Sleeper
   // board at all and borrows the redraft one, more so. Reading each against its own
-  // median makes 0% mean "normal for his position" rather than "the two agree".
+  // median makes 0% mean "normal for his position" rather than "the two agree". The
+  // median comes from the draftable range only: the deep tail is noisier and far more
+  // numerous, and would shift every number that matters to fit players nobody drafts.
   const norms = {};
   for (const pos of POS) {
-    const vals = rows.filter(p => p.p === pos && p.slRaw != null)
+    const vals = rows.filter(p => p.p === pos && p.slRaw != null && !p.slDeep)
       .map(p => p.slRaw).sort((a, b) => a - b);
     norms[pos] = vals.length >= 8 ? vals[Math.floor(vals.length / 2)] : 0;
   }
@@ -368,11 +373,14 @@ function renderBoard(rows) {
     const pct = g == null ? null : Math.round(g * 100);
     const picksNote = p.slPicks == null ? ''
       : ` — ${Math.abs(p.slPicks).toFixed(0)} picks, so check it is a gap you can actually use`;
+    // Always the number where one exists; a dot where a real value sits reads as missing
+    // data. Muted under 4%, and muted past the draftable range whatever its size.
+    const gapMuted = p.slDeep || Math.abs(g) < 0.04;
     const gap = g == null ? '<span class="muted">&ndash;</span>'
-      : Math.abs(g) < 0.04 ? '<span class="muted">&middot;</span>'
-      : `<span class="${g < 0 ? 'gap-cheap' : 'gap-dear'}" title="${g < 0
+      : `<span class="${gapMuted ? 'muted' : (g < 0 ? 'gap-cheap' : 'gap-dear')}" title="${g < 0
           ? `Sleeper drafts him ${Math.abs(pct)}% later than the consensus prices him, so he comes cheaper there`
-          : `Sleeper drafts him ${pct}% earlier than the consensus prices him, so he costs more there`}${picksNote}. Read against the median every ${p.p} carries on this board.">${pct > 0 ? '+' : ''}${pct}%</span>`;
+          : `Sleeper drafts him ${pct}% earlier than the consensus prices him, so he costs more there`}${picksNote}. Read against the median every ${p.p} carries on this board.${
+            p.slDeep ? ' * Past the end of the range that actually gets drafted, so it is not ranked.' : ''}">${pct > 0 ? '+' : ''}${pct}%${p.slDeep ? '*' : ''}</span>`;
 
     const split = p.spread == null ? '<span class="muted">&ndash;</span>'
       : `<span class="${p.spread >= 24 ? 'split-wide' : p.spread >= 12 ? '' : 'muted'}">${p.spread}</span>`;
@@ -536,7 +544,9 @@ function sortRows(rows) {
   if (k === '__tier') return by(p => p[TIER_FIELD[key()]], 'asc');
   // Ascending: cheapest on Sleeper is the biggest NEGATIVE, since the gap is now a
   // fraction of his price rather than a count of places later.
-  if (k === '__gap') return by(p => p.slGapAdj, 'asc');
+  // Past the draftable range the number still shows on the row but is not ranked:
+  // ranking it against players actually being drafted put men nobody picks at the top.
+  if (k === '__gap') return by(p => (p.slDeep ? null : p.slGapAdj), 'asc');
   if (k === '__split') return by(p => p.spread, 'desc');
   if (k === '__age') return by(p => p.age, 'asc');
   if (k === '__proj') return by(p => p.pr, 'desc');

@@ -38,8 +38,11 @@ const DERIVED_SORTS = {
   spread:        { get: r => r.spread, dir: 'desc' },
   sleeper_gap:   { get: r => r.sleeper_gap, dir: 'desc' },
   // Ascending: this one is negative when he goes later on Sleeper, so the cheapest
-  // players are the biggest negatives and belong at the top.
-  sleeper_gap_pct: { get: r => r.sleeper_gap_pct, dir: 'asc' },
+  // players are the biggest negatives and belong at the top. Players past the draftable
+  // range read as null HERE ONLY — they still carry a number on the board, but ranking
+  // them against players who are actually being drafted is what put eight men nobody
+  // picks at the top of the list.
+  sleeper_gap_pct: { get: r => (r.sleeper_gap_deep ? null : r.sleeper_gap_pct), dir: 'asc' },
 };
 
 // Ascending, with a missing value last rather than first — the same rule the board's
@@ -264,24 +267,32 @@ router.get('/', (req, res) => {
       // 0.6 picks later and Puka Nacua at 2.5 reads as −35%. True, and not something you
       // can act on unless your pick happens to fall between the two. The pick difference
       // is carried on the same row so the size of the thing is never hidden.
+      // Computed for EVERY player who has both numbers. This is a per-player ratio, not
+      // a rank over a pool, so it is perfectly well defined for a player at pick 400 —
+      // and blanking him meant looking a name up and getting a dash where a number
+      // belonged. What the draftable range is really for is the RANKING: out there both
+      // sides come off lists that keep ordering players long after anybody is picking
+      // them, and unrestricted the whole top of the sort was players in the 600s on
+      // Sleeper and the 300s on the consensus, whom both sides agree not to draft. So
+      // the range now marks a row rather than deleting it — `sleeper_gap_deep` dims it
+      // on the board and drops it out of the sort, exactly as `mkt_complete` does for a
+      // market total that is not comparable.
       const draftable = teamSize * 20;
       const rawPct = new Map();
       for (const p of enriched) {
         const sl = p[baseline.column];
-        // Beyond the draftable range both numbers come off lists that keep ordering
-        // players long after anyone is picking them, and the ratios out there are large
-        // and meaningless — the same trap the edge column documents. Unrestricted, the
-        // whole top of this list was players in the 600s on Sleeper and the 300s on the
-        // consensus, whom both sides agree not to draft.
-        if (sl == null || p.adp_consensus == null || sl > draftable) continue;
+        if (sl == null || p.adp_consensus == null) continue;
         rawPct.set(p.id, (p.adp_consensus - sl) / sl);
       }
       // Positions carry a standing offset here too — quarterbacks sit 12% cheap on
       // Sleeper before any individual is a bargain — so each is read against its own
-      // median, exactly as the places column is.
+      // median. The median is taken over the draftable range only: the deep tail is
+      // both noisy and far more numerous, and letting it set the norm would shift every
+      // number that matters to fit players nobody drafts.
       const pctNorms = {};
       for (const pos of ['QB', 'RB', 'WR', 'TE']) {
-        const vals = enriched.filter(p => p.position === pos && rawPct.has(p.id))
+        const vals = enriched
+          .filter(p => p.position === pos && rawPct.has(p.id) && p[baseline.column] <= draftable)
           .map(p => rawPct.get(p.id)).sort((a, b) => a - b);
         pctNorms[pos] = vals.length >= 8 ? vals[Math.floor(vals.length / 2)] : 0;
       }
@@ -294,12 +305,14 @@ router.get('/', (req, res) => {
         p.sleeper_gap_picks = rawPct.has(p.id)
           ? Math.round((p[baseline.column] - p.adp_consensus) * 10) / 10
           : null;
+        p.sleeper_gap_deep = rawPct.has(p.id) ? p[baseline.column] > draftable : null;
       }
     } else {
       for (const p of enriched) {
         p.sleeper_gap = null;
         p.sleeper_gap_pct = null;
         p.sleeper_gap_picks = null;
+        p.sleeper_gap_deep = null;
       }
     }
 
@@ -497,7 +510,7 @@ const RESPONSE_FIELDS = [
   'mkt_points', 'mkt_pass_yards', 'mkt_rush_yards', 'mkt_rec_yards',
   'mkt_pass_tds', 'mkt_rush_tds', 'mkt_rec_tds', 'mkt_receptions', 'mkt_books', 'mkt_complete', 'mkt_adjusted',
   'age', 'fp_tier', 'tier_fp', 'round', 'spread',
-  'sleeper_gap', 'sleeper_gap_pct', 'sleeper_gap_picks',
+  'sleeper_gap', 'sleeper_gap_pct', 'sleeper_gap_picks', 'sleeper_gap_deep',
   'ff_pos_rank', 'ff_points',
   'personal_rank', 'tier', 'starred', 'flagged', 'drafted', 'drafted_manual',
   'draft_pick_no', 'draft_round', 'drafted_by', 'drafted_by_me',
