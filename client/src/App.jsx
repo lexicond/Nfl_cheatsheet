@@ -42,7 +42,6 @@ export default function App() {
     enableAllSources,
     teamSize,
     setTeamSize,
-    sleeperBaseline,
     xfpReplacement,
     tiers,
     refetchQuiet,
@@ -192,7 +191,6 @@ export default function App() {
             view={view}
             excluded={excluded}
             sourceStatus={sourceStatus}
-            sleeperBaseline={sleeperBaseline}
             xfpReplacement={xfpReplacement}
             filterBarHeight={filterBarHeight}
             draftConnected={draft.connected}

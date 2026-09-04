@@ -130,6 +130,27 @@ now 1–16 and wrapping, with a faint ring on whichever one is FantasyPros'.
 rather than built from a hue list, because Tailwind scans the source for literal class
 names and purges anything assembled at runtime.
 
+## The Sleeper gap is relative now, and its sign flipped
+
+`Δ SL` counted places later on Sleeper, positive for cheaper. It is now `SL %` —
+`(consensus − sleeperADP) / sleeperADP`, so **negative** means cheaper, and the sort is
+ascending. Both boards changed together.
+
+Measured in places, the top of the list was deep quarterbacks: Bryce Young 56 picks, Cam
+Ward 53, Daniel Jones 51 — the 160-240 range of ADP is flat enough that a fifty-pick gap
+there is mostly noise. Dividing by what he costs drops those to 11-12% and surfaces real
+mid-round disagreements instead (MarShawn Lloyd −18% on 24 picks, Dalton Schultz −12% on
+27).
+
+The mirror-image weakness is real and is worth knowing before trusting the top of the
+list: the denominator is tiny at the top of the board, so Jahmyr Gibbs at 0.4 picks later
+reads −21% and Puka Nacua at 1.4 picks reads −16%. True, and not actionable unless your
+pick happens to fall between the two. `sleeper_gap_picks` therefore rides in the tooltip
+on both boards, and the range is capped at `teamSize × 20` — unrestricted, the whole top
+of the list was players in the 600s on Sleeper and the 300s on the consensus, whom both
+sides agree not to draft. Positions are normalised out, so 0% means normal for his
+position rather than agreement.
+
 ## Not done, and worth knowing
 
 Two places the imported round-up does not reach, both left deliberately:

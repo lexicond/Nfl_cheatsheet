@@ -193,32 +193,42 @@ function pool() {
   });
   ROUND_REPLACEMENT = repl;
 
-  // Sleeper gap: where Sleeper drafts him against where the consensus rates him.
-  // Positive means he comes cheaper on Sleeper. Taken from Sleeper's own board whether
-  // or not Sleeper is one of the ticked sources.
+  // Sleeper gap: how far Sleeper's price sits from the consensus, as a FRACTION of that
+  // price. Negative means he goes later on Sleeper and comes cheaper there. Taken from
+  // Sleeper's own board whether or not Sleeper is one of the ticked sources.
+  //
+  // Relative rather than a number of picks, and the app board does the same: a fixed
+  // pick gap means completely different things at pick 5 and pick 200, and ranked by
+  // places the top of the list is deep quarterbacks where ADP is flat enough that a
+  // fifty-pick gap is mostly noise. The pick difference is kept alongside because the
+  // percentage alone hides how small a move is at the top of the board, where the
+  // denominator is tiny.
   const slField = SLEEPER_FIELD[key()];
-  const slRank = new Map();
-  PLAYERS.filter(p => p[slField] != null)
-    .sort((a, b) => a[slField] - b[slField])
-    .forEach((p, i) => slRank.set(p.n, i + 1));
   rows.sort((a, b) => a.h - b.h);
-  rows.forEach((p, i) => {
-    const sl = slRank.get(p.n);
-    p.slGap = sl != null ? sl - (i + 1) : null;
+  // Beyond the range that actually gets drafted both numbers come off lists that keep
+  // ordering players long after anyone is picking them, and the ratios out there are
+  // large and meaningless — the same trap the arbitrage column documents.
+  const draftable = state.teams * 20;
+  rows.forEach(p => {
+    const sl = p[slField];
+    p.slPicks = sl != null && p.h != null && sl <= draftable
+      ? Math.round((sl - p.h) * 10) / 10 : null;
+    p.slRaw = p.slPicks == null ? null : (p.h - p[slField]) / p[slField];
   });
 
-  // Best ball has no Sleeper board, so the baseline is Sleeper's redraft ADP — and best
-  // ball values positions differently, which puts a standing offset on whole positions.
-  // Subtracting each position's median makes the number read against its own norm.
+  // Whole positions carry a standing offset — quarterbacks sit about 12% cheap on
+  // Sleeper before any individual is a bargain, and best ball, which has no Sleeper
+  // board at all and borrows the redraft one, more so. Reading each against its own
+  // median makes 0% mean "normal for his position" rather than "the two agree".
   const norms = {};
   for (const pos of POS) {
-    const vals = rows.filter((p, i) => p.p === pos && p.slGap != null && i < 150)
-      .map(p => p.slGap).sort((a, b) => a - b);
+    const vals = rows.filter(p => p.p === pos && p.slRaw != null)
+      .map(p => p.slRaw).sort((a, b) => a - b);
     norms[pos] = vals.length >= 8 ? vals[Math.floor(vals.length / 2)] : 0;
   }
   rows.forEach(p => {
     p.slNorm = norms[p.p] || 0;
-    p.slGapAdj = p.slGap == null ? null : p.slGap - p.slNorm;
+    p.slGapAdj = p.slRaw == null ? null : p.slRaw - p.slNorm;
   });
 
   // Drafted players come out only at the very end. Every rank above — positional rank,
@@ -321,7 +331,7 @@ function renderBoard(rows) {
     ${cols.map(c => `<th>${esc(c[0])}</th>`).join('')}
     <th>${state.format === 'DYN' ? 'Rank' : 'Consensus'}</th>
     ${state.format === 'DYN' ? '' : '<th>Rd</th>'}
-    <th title="Places cheaper (+) or dearer (-) on Sleeper than the consensus${slProxy ? '. Sleeper publishes no best-ball board, so this is its half-PPR redraft ADP' : ''}">&Delta; SL</th>
+    <th title="How far Sleeper's price sits from the consensus, as a fraction of that price. Negative means he goes later on Sleeper and comes cheaper there${slProxy ? '. Sleeper publishes no best-ball board, so this is its half-PPR redraft ADP' : ''}">SL %</th>
     <th title="How many places apart your ticked sources are on him">Split</th>
     ${showModel ? `<th title="Points above the last ${state.teams}-team ${state.leagueType === '2QB' ? 'superflex' : '1QB'} starter at his position, from this board's own model. The number to compare across positions — raw points are not comparable.">VOR</th>`
       + '<th title="85th-percentile season from simulating the year week by week. Best ball starts your best players automatically, so the ceiling is closer to what you are buying than the average is.">Ceil</th>' : ''}
@@ -355,12 +365,14 @@ function renderBoard(rows) {
           : `Drafted ${Math.abs(d)} spots earlier at ${p.p} than he projects`}">${d > 0 ? '\u25b2' : '\u25bc'}${Math.abs(d)}</span>`;
 
     const g = p.slGapAdj;
-    const normNote = p.slNorm ? ` (against the ${p.slNorm > 0 ? '+' : ''}${p.slNorm} every ${p.p} carries here)` : '';
+    const pct = g == null ? null : Math.round(g * 100);
+    const picksNote = p.slPicks == null ? ''
+      : ` — ${Math.abs(p.slPicks).toFixed(0)} picks, so check it is a gap you can actually use`;
     const gap = g == null ? '<span class="muted">&ndash;</span>'
-      : Math.abs(g) < 5 ? '<span class="muted">&middot;</span>'
-      : `<span class="${g > 0 ? 'gap-cheap' : 'gap-dear'}" title="${g > 0
-          ? `Sleeper drafts him ${g} places later than the consensus, so he comes cheaper there`
-          : `Sleeper drafts him ${Math.abs(g)} places earlier than the consensus, so he costs more there`}${normNote}">${g > 0 ? '+' : ''}${g}</span>`;
+      : Math.abs(g) < 0.04 ? '<span class="muted">&middot;</span>'
+      : `<span class="${g < 0 ? 'gap-cheap' : 'gap-dear'}" title="${g < 0
+          ? `Sleeper drafts him ${Math.abs(pct)}% later than the consensus prices him, so he comes cheaper there`
+          : `Sleeper drafts him ${pct}% earlier than the consensus prices him, so he costs more there`}${picksNote}. Read against the median every ${p.p} carries on this board.">${pct > 0 ? '+' : ''}${pct}%</span>`;
 
     const split = p.spread == null ? '<span class="muted">&ndash;</span>'
       : `<span class="${p.spread >= 24 ? 'split-wide' : p.spread >= 12 ? '' : 'muted'}">${p.spread}</span>`;
@@ -489,7 +501,7 @@ function renderSortOptions() {
     ['', state.format === 'DYN' ? 'Dynasty rank' : 'Consensus'],
     ...[...activeSources(), ...refs].map(([f, label]) => [f, label]),
     ['__tier', "FantasyPros' tier"],
-    ['__gap', 'Cheapest on Sleeper'],
+    ['__gap', 'Cheapest on Sleeper (%)'],
     ['__split', 'Most disagreement'],
     ...(state.format === 'DYN' ? [['__age', 'Age (youngest)']] : []),
     ['__proj', 'Projected points'],
@@ -522,7 +534,9 @@ function sortRows(rows) {
   // past the end of FantasyPros' board for this format — sink to the bottom rather than
   // being given a made-up last tier number.
   if (k === '__tier') return by(p => p[TIER_FIELD[key()]], 'asc');
-  if (k === '__gap') return by(p => p.slGapAdj, 'desc');
+  // Ascending: cheapest on Sleeper is the biggest NEGATIVE, since the gap is now a
+  // fraction of his price rather than a count of places later.
+  if (k === '__gap') return by(p => p.slGapAdj, 'asc');
   if (k === '__split') return by(p => p.spread, 'desc');
   if (k === '__age') return by(p => p.age, 'asc');
   if (k === '__proj') return by(p => p.pr, 'desc');

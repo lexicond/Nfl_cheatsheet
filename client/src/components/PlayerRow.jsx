@@ -161,7 +161,7 @@ function ValueBadge({ score, position }) {
 
 export default function PlayerRow({
   player, index, onUpdate, onOpenModal, columns = [],
-  format = 'BB', leagueType = '1QB', sleeperBaseline = null, draftUrl = null,
+  format = 'BB', leagueType = '1QB', draftUrl = null,
   replacement = null,
 }) {
   const [copied, setCopied] = useState(false);
@@ -209,10 +209,16 @@ export default function PlayerRow({
     if (!isNaN(val) && val > 0) onUpdate(player.id, { personal_rank: val });
   };
 
-  // Where the Sleeper baseline is a stand-in, whole positions carry a standing offset,
-  // so the gap is read against its position's norm rather than against zero.
-  const gapNorm = (sleeperBaseline?.positional_norms?.[player.position]) ?? 0;
-  const gapVsNorm = player.sleeper_gap == null ? null : player.sleeper_gap - gapNorm;
+  // How far Sleeper's price sits from the consensus, as a fraction of that price and
+  // already normalised per position on the server — whole positions carry a standing
+  // offset (quarterbacks sit about 12% cheap on Sleeper before any individual is a
+  // bargain), so 0% means "normal for his position", not "the two agree".
+  //
+  // NEGATIVE means he goes later on Sleeper and comes cheaper there. `sleeper_gap`, the
+  // places version the sheet still uses, counts the same thing with the opposite sign,
+  // which is why only one of them is ever on screen.
+  const gapPct = player.sleeper_gap_pct;
+  const gapPicks = player.sleeper_gap_picks;
 
   // The badge shows your own tier if you set one, otherwise FantasyPros' — off their
   // OVERALL board for the format on screen, so a Tier 4 back and a Tier 4 receiver are
@@ -489,38 +495,45 @@ export default function PlayerRow({
       </td>
     ),
 
-    // How this player sits on Sleeper against the consensus. Positive means Sleeper
-    // drafts him later, so he comes cheaper in the room you are actually drafting in.
+    // How this player sits on Sleeper against the consensus, as a FRACTION of what he
+    // costs rather than as a number of picks — negative means he goes later on Sleeper
+    // and comes cheaper in the room you are actually drafting in. Relative because a
+    // fixed number of picks means completely different things at pick 5 and pick 200:
+    // ranked by places the top of this list was deep quarterbacks, where ADP is flat
+    // enough that a fifty-pick gap is mostly noise.
+    //
+    // The pick difference rides in the tooltip rather than in a second column. Two
+    // adjacent columns measuring the same disagreement with OPPOSITE sign conventions is
+    // a misreading waiting to happen, and the number of picks is the thing that says
+    // whether a large percentage is actually actionable — at the top of the board the
+    // denominator is tiny, so Puka Nacua 2.5 picks later reads as -35%.
     sleeper_gap: (
       <td key="sleeper_gap" className={`${cellClass} w-16 font-mono text-right`}>
-        {gapVsNorm == null || Math.abs(gapVsNorm) < 5 ? (
+        {gapPct == null || Math.abs(gapPct) < 0.04 ? (
           <span
             className="text-[#555875]"
-            title={gapVsNorm == null
-              ? 'Sleeper publishes no ranking for him in this format'
-              : `Sleeper and your consensus are within ${Math.abs(gapVsNorm)} places of each `
-                + 'other on him, so there is no edge either way. Only gaps of 5 places or '
-                + 'more get a number.'}
+            title={gapPct == null
+              ? 'No Sleeper price inside the draftable range to compare against'
+              : `Sleeper and the consensus price him within ${Math.abs(Math.round(gapPct * 100))}% of each other`
+                + `${gapPicks != null ? ` (${Math.abs(gapPicks).toFixed(0)} picks)` : ''}`}
           >
-            {gapVsNorm == null ? '–' : '·'}
+            {gapPct == null ? '–' : '·'}
           </span>
         ) : (
           <span
-            className={gapVsNorm > 0 ? 'text-green-400' : 'text-amber-400'}
-            title={(gapVsNorm > 0
-              ? `Sleeper drafts him ${gapVsNorm} places later than the consensus — cheaper there`
-              : `Sleeper drafts him ${Math.abs(gapVsNorm)} places earlier than the consensus — dearer there`)
-              + (gapNorm !== 0
-                ? `. Measured against the ${gapNorm > 0 ? '+' : ''}${gapNorm} that every ${player.position} carries here, because Sleeper publishes no best-ball board and this baseline is its ½PPR redraft ADP`
-                : '')}
+            className={gapPct < 0 ? 'text-green-400' : 'text-amber-400'}
+            title={(gapPct < 0
+              ? `Sleeper drafts him ${Math.abs(Math.round(gapPct * 100))}% later than the consensus prices him — cheaper there`
+              : `Sleeper drafts him ${Math.round(gapPct * 100)}% earlier than the consensus prices him — dearer there`)
+              + (gapPicks != null ? `. That is ${Math.abs(gapPicks).toFixed(0)} picks — check it is a gap you can actually use.` : '')
+              + ` Read against the median every ${player.position} carries on this board, so 0% is normal for his position.`}
           >
-            {gapVsNorm > 0 ? `+${gapVsNorm}` : gapVsNorm}
+            {gapPct > 0 ? '+' : ''}{Math.round(gapPct * 100)}%
           </span>
         )}
       </td>
     ),
 
-    // How far apart the selected sources are on him.
     spread: (
       <td key="spread" className={`${cellClass} w-16 font-mono text-right`}>
         {player.spread == null ? (

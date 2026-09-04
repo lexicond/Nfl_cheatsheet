@@ -109,7 +109,7 @@ function buildColumns(format, view, excluded, narrow, draftConnected) {
 
   const middle = [
     ...(format === 'DYN' ? [] : [{ label: 'Rd', key: 'round' }]),
-    { label: 'Δ SL', key: 'sleeper_gap' },
+    { label: 'SL %', key: 'sleeper_gap' },
     { label: 'Split', key: 'spread' },
     ...modelCols,
     { label: 'Proj', key: 'projected_pts' },
@@ -180,7 +180,7 @@ function HeaderRow({ columns }) {
 export default function DraftBoard({
   players, loading, onUpdate, onOpenModal, onReorder,
   format = 'BB', leagueType = '1QB', view = null, excluded = [], sourceStatus = {},
-  sleeperBaseline = null, filterBarHeight = 53, draftConnected = false, draftUrl = null,
+  filterBarHeight = 53, draftConnected = false, draftUrl = null,
   xfpReplacement = null,
 }) {
   const [activeId, setActiveId] = useState(null);
@@ -293,7 +293,6 @@ export default function DraftBoard({
                   draftUrl={draftUrl}
                   format={format}
                   leagueType={leagueType}
-                  sleeperBaseline={sleeperBaseline}
                   replacement={xfpReplacement}
                 />
               ))}
